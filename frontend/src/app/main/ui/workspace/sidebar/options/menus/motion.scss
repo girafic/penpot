@@ -170,6 +170,22 @@
   color: var(--color-foreground-primary);
 }
 
+// The range switch and the clamp of a link, and the two ends of a range.
+.link-range {
+  @include t.use-typography("body-small");
+
+  display: flex;
+  align-items: center;
+  color: var(--color-foreground-secondary);
+}
+
+.link-ends {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-xs);
+  min-inline-size: 0;
+}
+
 // A chain that cannot reach its goal, and the button that makes one.
 .reach-broken {
   @include t.use-typography("body-small");

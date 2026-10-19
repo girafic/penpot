@@ -18584,6 +18584,9 @@ Timeline:
         source loops; a chain of links plays through, a cycle plays nothing.
         Every export plays it as keyframes made from the source's. Linking a
         property linked already changes that link.
+        With a range (`link.input`, `link.output`) the source going through
+        its input takes the property through its output, along a curve, as
+        an After Effects `linear()` or `ease()` expression does.
 
         Parameters
 
@@ -18594,11 +18597,14 @@ Timeline:
 
           The property, its source and how it plays it.
 
+          The wheel turns 3.6° for each pixel the car moves, and the shadow
+          fades as the ball rises:
+
         Returns void
 
         Example
         ```
-        // the wheel turns 3.6° for each pixel the car movestimeline.link(wheel, { property: 'rotation', source: car, sourceProperty: 'x', factor: 3.6 });// the shadow fades as the ball risestimeline.link(shadow, { property: 'opacity', source: ball, sourceProperty: 'y', factor: 0.004 });
+        timeline.link(wheel, { property: 'rotation', source: car, sourceProperty: 'x', factor: 3.6 });timeline.link(shadow, { property: 'opacity', source: ball, sourceProperty: 'y', factor: 0.004 });
         ```
       unlink: |-
         ```
@@ -19454,6 +19460,10 @@ Link:
         factor: number;
         offset: number;
         delay: number;
+        input?: [number, number];
+        output?: [number, number];
+        clamp?: boolean;
+        easing?: LinkEasing;
     }
     ```
 
@@ -19496,6 +19506,33 @@ Link:
         ```
 
         How many milliseconds after the source it plays.
+      input: |-
+        ```
+        readonly input?: [number, number]
+        ```
+
+        With a range: the values of the source, from and to, that take the
+        property through `output` (factor and offset left aside).
+      output: |-
+        ```
+        readonly output?: [number, number]
+        ```
+
+        With a range: the values of the property, from and to, as the source
+        goes through `input`.
+      clamp: |-
+        ```
+        readonly clamp?: boolean
+        ```
+
+        With a range: whether the property stays within `output` when the
+        source leaves `input`.
+      easing: |-
+        ```
+        readonly easing?: LinkEasing
+        ```
+
+        With a range: the curve it follows from one end to the other.
 LinkProps:
   overview: |-
     Interface LinkProps
@@ -19511,6 +19548,10 @@ LinkProps:
         factor?: number;
         offset?: number;
         delay?: number;
+        input?: [number, number];
+        output?: [number, number];
+        clamp?: boolean;
+        easing?: LinkEasing;
     }
     ```
 
@@ -19554,6 +19595,43 @@ LinkProps:
         ```
 
         Play this many milliseconds after the source. 0 by default.
+      input: |-
+        ```
+        input?: [number, number]
+        ```
+
+        A range of the source, `[from, to]`: going through it, the source
+        takes the property through `output`, as an AE `linear()` or `ease()`
+        expression does. Give both or neither; factor and offset do not apply
+        then.
+
+        A slider from x 0 to 200 turns a needle from 0 to 270 degrees:
+
+        Example
+        ```
+        timeline.link(needle, { property: "rotation", source: slider, sourceProperty: "x",                        input: [0, 200], output: [0, 270], easing: "ease-in-out" });
+        ```
+      output: |-
+        ```
+        output?: [number, number]
+        ```
+
+        The range of the property, `[from, to]`, the source takes it through
+        as it goes through `input`.
+      clamp: |-
+        ```
+        clamp?: boolean
+        ```
+
+        Keep the property within `output` when the source leaves `input`.
+        True by default.
+      easing: |-
+        ```
+        easing?: LinkEasing
+        ```
+
+        The curve from one end of the range to the other. `'linear'` by
+        default.
 Ik:
   overview: |-
     Interface Ik
@@ -29118,6 +29196,19 @@ LinkableProperty:
     one number each.
 
     Referenced by: Link, LinkProps, Timeline
+  members: {}
+LinkEasing:
+  overview: |-
+    Type Alias LinkEasing
+    =====================
+
+    ```
+    LinkEasing: "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
+    ```
+
+    The curve a link with a range follows, see `LinkProps.easing`.
+
+    Referenced by: Link, LinkProps
   members: {}
 IkBend:
   overview: |-

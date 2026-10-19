@@ -1855,13 +1855,20 @@
       (fn [shape]
         (when-let [shape-id (layer :linksOf shape)]
           (apply array
-                 (map (fn [{:keys [property source source-property factor offset delay]}]
-                        #js {:property (get property-names property)
-                             :source (shape-proxy plugin-id file-id page-id source)
-                             :sourceProperty (get property-names source-property)
-                             :factor factor
-                             :offset offset
-                             :delay delay})
+                 (map (fn [{:keys [property source source-property factor offset delay input output clamp easing]}]
+                        (let [link #js {:property (get property-names property)
+                                        :source (shape-proxy plugin-id file-id page-id source)
+                                        :sourceProperty (get property-names source-property)
+                                        :factor factor
+                                        :offset offset
+                                        :delay delay}]
+                          ;; a range, with its clamp and its curve
+                          (when (some? input)
+                            (obj/set! link "input" (clj->js input))
+                            (obj/set! link "output" (clj->js output))
+                            (obj/set! link "clamp" clamp)
+                            (obj/set! link "easing" (name easing)))
+                          link))
                       (cta/links-of (locate) shape-id)))))
 
       :link
@@ -1877,6 +1884,13 @@
                 factor    (prop "factor")
                 offset    (prop "offset")
                 delay     (prop "delay")
+                pair      #(let [v (prop %)]
+                             (when (and (array? v) (= 2 (alength v)) (every? number? v))
+                               [(aget v 0) (aget v 1)]))
+                input     (pair "input")
+                output    (pair "output")
+                clamp     (prop "clamp")
+                easing    (some-> (prop "easing") keyword)
                 objects   (u/locate-objects file-id page-id)
                 timeline  (or (locate) (cta/make-timeline {:board-id board-id}))
                 names     (str/join ", " (map #(dm/str "'" (get property-names %) "'") cta/link-properties))
@@ -1902,6 +1916,17 @@
                             (and (some? delay) (not (valid-time? delay)))
                             "The delay should be a number of milliseconds from 0"
 
+                            (or (and (some? (prop "input")) (nil? input))
+                                (and (some? (prop "output")) (nil? output))
+                                (not= (some? input) (some? output)))
+                            "A range takes an input and an output, each two numbers"
+
+                            (and (some? clamp) (not (boolean? clamp)))
+                            "clamp should be a boolean"
+
+                            (and (some? easing) (not (contains? cta/link-easings easing)))
+                            (dm/str "easing should be one of " (str/join ", " (map #(dm/str "'" (name %) "'") (sort cta/link-easings))))
+
                             (not (cltl/can-link? objects timeline source-id))
                             "The source should be a layer of the board")]
             (if (some? error)
@@ -1910,7 +1935,10 @@
                                            (cond-> {:property property :source source-id :source-property source-p}
                                              (some? factor) (assoc :factor factor)
                                              (some? offset) (assoc :offset offset)
-                                             (some? delay)  (assoc :delay (mth/round delay)))))))))
+                                             (some? delay)  (assoc :delay (mth/round delay))
+                                             (some? input)  (assoc :input input :output output)
+                                             (some? clamp)  (assoc :clamp clamp)
+                                             (some? easing) (assoc :easing easing))))))))
 
       :unlink
       (fn [shape property]

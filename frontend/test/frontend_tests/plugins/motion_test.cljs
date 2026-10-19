@@ -296,6 +296,30 @@
         (.unlink timeline wheel "rotation")
         (t/is (= ["opacity"] (map :property (links wheel))))))))
 
+(t/deftest a-link-maps-a-range-of-its-source
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]                (setup true)
+            [^js board [^js slider ^js needle]] (board-with-rects context 2)
+            ^js timeline                       (.addTimeline board)
+            link                               #(-> (js->clj (first (.linksOf timeline needle)) :keywordize-keys true)
+                                                    (dissoc :source))]
+        (.link timeline needle #js {:property "rotation" :source slider :sourceProperty "x"
+                                    :input #js [0 200] :output #js [0 270] :easing "ease-in-out"})
+        (t/is (= {:property :rotation :source (aget slider "$id") :source-property :x
+                  :input [0 200] :output [0 270] :easing :ease-in-out}
+                 (first (:links (stored-track store context board needle))))
+              "a clamp as absence")
+        (t/is (= {:input [0 200] :output [0 270] :clamp true :easing "ease-in-out"}
+                 (select-keys (link) [:input :output :clamp :easing])))
+        (t/testing "what cannot map is refused"
+          (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider :input #js [0 200]}))
+                "an input without an output")
+          (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider
+                                                              :input #js [0] :output #js [0 1]})))
+          (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider
+                                                              :input #js [0 1] :output #js [0 1] :easing "bounce"}))))))))
+
 (t/deftest the-light-of-a-board-takes-keyframes
   (thw/with-wasm-mocks*
     (fn []

@@ -6911,6 +6911,30 @@ msgstr "Rest"
 msgid "workspace.animation.follows"
 msgstr "Follows %s"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-range"
+msgstr "Range"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-range.hint"
+msgstr "Map a range of its source to a range of this property, along a curve, as a linear() or ease() expression does"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-input"
+msgstr "Input"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-output"
+msgstr "Output"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-clamp"
+msgstr "Clamp"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-clamp.hint"
+msgstr "Keep the property within its output when the source leaves its input"
+
 #: src/app/main/ui/workspace/timeline.cljs
 msgid "workspace.animation.linked"
 msgstr "%s ← %s · %s"

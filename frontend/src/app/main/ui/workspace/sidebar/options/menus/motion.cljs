@@ -1270,8 +1270,9 @@
   the property a draft is for, `on-remove` drops a draft."
   {::mf/private true}
   [{:keys [shape-id link draft? sources picking taken on-draft on-remove]}]
-  (let [{:keys [property source source-property factor offset delay]} link
+  (let [{:keys [property source source-property factor offset delay input output clamp easing]} link
         picking? (= picking [shape-id [:link property]])
+        ranged?  (some? input)
 
         on-property
         (mf/use-fn
@@ -1315,6 +1316,45 @@
          (mf/deps shape-id property)
          (number-handler #(st/emit! (dwa/update-link shape-id property {:delay (max 0 (mth/round %))}))))
 
+        ;; a range starts as the factor maps 100 of its source from where
+        ;; both rest
+        on-range
+        (mf/use-fn
+         (mf/deps shape-id property source source-property factor)
+         (fn [event]
+           (if (-> event dom/get-target dom/checked?)
+             (let [timeline (deref ref:timeline)
+                   objects  (deref refs/workspace-page-objects)
+                   from     (or (cta/link-rest timeline objects source source-property) 0)
+                   to       (or (cta/link-rest timeline objects shape-id property) 0)]
+               (st/emit! (dwa/update-link shape-id property {:input [from (+ from 100)]
+                                                             :output [to (+ to (* 100 factor))]})))
+             (st/emit! (dwa/update-link shape-id property {:input nil :output nil})))))
+
+        on-range-end
+        (mf/use-fn
+         (mf/deps shape-id property input output)
+         (fn [key at value]
+           (when (number? value)
+             (let [ends (assoc (get {:input input :output output} key) at value)]
+               (st/emit! (dwa/update-link shape-id property {key ends}))))))
+
+        on-input-from  (mf/use-fn (mf/deps on-range-end) #(on-range-end :input 0 %))
+        on-input-to    (mf/use-fn (mf/deps on-range-end) #(on-range-end :input 1 %))
+        on-output-from (mf/use-fn (mf/deps on-range-end) #(on-range-end :output 0 %))
+        on-output-to   (mf/use-fn (mf/deps on-range-end) #(on-range-end :output 1 %))
+
+        on-easing
+        (mf/use-fn
+         (mf/deps shape-id property)
+         #(st/emit! (dwa/update-link shape-id property {:easing (keyword %)})))
+
+        on-clamp
+        (mf/use-fn
+         (mf/deps shape-id property)
+         (fn [event]
+           (st/emit! (dwa/update-link shape-id property {:clamp (-> event dom/get-target dom/checked?)}))))
+
         on-unlink
         (mf/use-fn
          (mf/deps shape-id property draft? on-remove)
@@ -1357,18 +1397,62 @@
                       :default-selected (name source-property)
                       :aria-label (tr "workspace.animation.link-source-property")
                       :on-change on-source-property}]]
-        [:> animation-row* {:label (tr "workspace.animation.link-factor")}
-         [:> numeric-input* {:text-icon "×"
-                             :property (tr "workspace.animation.link-factor")
-                             :step 0.1
-                             :value factor
-                             :on-change on-factor}]]
-        [:> animation-row* {:label (tr "workspace.animation.link-offset")}
-         [:> numeric-input* {:text-icon "+"
-                             :property (tr "workspace.animation.link-offset")
-                             :step 1
-                             :value offset
-                             :on-change on-offset}]]
+        [:div {:class (stl/css :link-range)
+               :title (tr "workspace.animation.link-range.hint")}
+         [:> checkbox* {:id (dm/str "link-range-" (name property))
+                        :label (tr "workspace.animation.link-range")
+                        :checked ranged?
+                        :on-change on-range}]]
+        (if ranged?
+          [:*
+           ;; its input, from and to, and the output they map to
+           [:> animation-row* {:label (tr "workspace.animation.link-input")}
+            [:div {:class (stl/css :link-ends)}
+             [:> numeric-input* {:property (tr "workspace.animation.link-input")
+                                 :value (first input)
+                                 :on-change on-input-from}]
+             [:> numeric-input* {:text-icon "→"
+                                 :property (tr "workspace.animation.link-input")
+                                 :value (second input)
+                                 :on-change on-input-to}]]]
+           [:> animation-row* {:label (tr "workspace.animation.link-output")}
+            [:div {:class (stl/css :link-ends)}
+             [:> numeric-input* {:property (tr "workspace.animation.link-output")
+                                 :value (first output)
+                                 :on-change on-output-from}]
+             [:> numeric-input* {:text-icon "→"
+                                 :property (tr "workspace.animation.link-output")
+                                 :value (second output)
+                                 :on-change on-output-to}]]]
+           [:> animation-row* {:label (tr "workspace.options.interaction-easing")}
+            [:> select* {:class (stl/css :follow-leader-select)
+                         :options [{:id "linear" :label (tr "workspace.options.interaction-easing-linear")}
+                                   {:id "ease" :label (tr "workspace.options.interaction-easing-ease")}
+                                   {:id "ease-in" :label (tr "workspace.options.interaction-easing-ease-in")}
+                                   {:id "ease-out" :label (tr "workspace.options.interaction-easing-ease-out")}
+                                   {:id "ease-in-out" :label (tr "workspace.options.interaction-easing-ease-in-out")}]
+                         :default-selected (name easing)
+                         :aria-label (tr "workspace.options.interaction-easing")
+                         :on-change on-easing}]]
+           [:div {:class (stl/css :link-range)
+                  :title (tr "workspace.animation.link-clamp.hint")}
+            [:> checkbox* {:id (dm/str "link-clamp-" (name property))
+                           :label (tr "workspace.animation.link-clamp")
+                           :checked (true? clamp)
+                           :on-change on-clamp}]]]
+          [:*
+           [:> animation-row* {:label (tr "workspace.animation.link-factor")}
+            [:> numeric-input* {:text-icon "×"
+                                :property (tr "workspace.animation.link-factor")
+                                :step 0.1
+                                :value factor
+                                :on-change on-factor}]]
+           [:> animation-row* {:label (tr "workspace.animation.link-offset")}
+            [:> numeric-input* {:text-icon "+"
+                                :property (tr "workspace.animation.link-offset")
+                                :step 1
+                                :value offset
+                                :on-change on-offset}]]])
         [:> animation-row* {:label (tr "workspace.animation.link-delay")}
          [:> numeric-input* {:text-icon "ms"
                              :property (tr "workspace.animation.link-delay")

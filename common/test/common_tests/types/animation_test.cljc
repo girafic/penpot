@@ -6620,12 +6620,44 @@
                (:id car) (assoc car :frame-id bid :parent-id bid)
                (:id wheel) (assoc wheel :frame-id bid :parent-id bid)}}))
 
+(t/deftest a-link-with-a-range-maps-its-source
+  ;; a slider (the car) from x 50 to 150 turns a needle (the wheel) from 0
+  ;; to 270 degrees
+  (let [{:keys [car wheel timeline objects]} (car-and-wheel)
+        tl     (-> timeline
+                   (cta/remove-property car :x nil)
+                   (cta/add-keyframe car {:time 0 :property :x :value 0 :easing :linear})
+                   (cta/add-keyframe car {:time 1000 :property :x :value 200}))
+        ranged (fn [& {:as extra}]
+                 (cta/set-link tl wheel (merge {:property :rotation :source car :source-property :x
+                                                :input [50 150] :output [0 270]}
+                                               extra)))
+        rot    #(get-in (values-at %1 objects %2) [wheel :rotation])
+        near?  (fn [expected actual] (mth/close? (double expected) (double actual) 0.6))]
+    (t/is (cta/valid-timeline? (ranged)))
+    (t/is (= [:property :source :source-property :input :output]
+             (keys (first (get-in (ranged) [:tracks wheel :links]))))
+          "a clamp and a linear curve as absence")
+    (t/testing "from the start of its output to its end through its input, kept within"
+      (t/is (every? true? (map near? [0 0 135 270 270] (map #(rot (ranged) %) [0 250 500 750 1000])))))
+    (t/testing "past its input, on a straight line"
+      (t/is (every? true? (map near? [-135 405] (map #(rot (ranged :clamp false) %) [0 1000])))))
+    (t/testing "along a curve"
+      (t/is (near? (* 270 (cta/easing-progress :ease-in 0.5)) (rot (ranged :easing :ease-in) 500))))
+    (t/testing "a delay plays it later"
+      (t/is (near? (rot (ranged) 400) (rot (ranged :delay 100) 500))))
+    (t/testing "a range takes both ends"
+      (t/is (nil? (:input (cta/link-of (cta/set-link tl wheel {:property :rotation :source car :source-property :x
+                                                               :input [0 1]})
+                                       wheel :rotation)))))))
+
 (t/deftest a-linked-property-plays-its-source
   (let [{:keys [car wheel timeline objects]} (car-and-wheel)
         tl  (cta/set-link timeline wheel {:property :rotation :source car :source-property :x :factor 3.6})
         rot #(get-in (values-at %1 objects %2) [wheel :rotation])
         x   #(get-in (values-at timeline objects %) [car :x])]
-    (t/is (= [{:property :rotation :source car :source-property :x :factor 3.6 :offset 0 :delay 0}]
+    (t/is (= [{:property :rotation :source car :source-property :x :factor 3.6 :offset 0 :delay 0
+               :clamp true :easing :linear}]
              (cta/links-of tl wheel)))
     (t/is (cta/valid-timeline? tl))
     (t/testing "rest + factor × (source − its rest), eased as the source is"

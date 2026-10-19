@@ -4650,14 +4650,18 @@ export interface Timeline {
    * source loops; a chain of links plays through, a cycle plays nothing.
    * Every export plays it as keyframes made from the source's. Linking a
    * property linked already changes that link.
+   * With a range (`link.input`, `link.output`) the source going through
+   * its input takes the property through its output, along a curve, as
+   * an After Effects `linear()` or `ease()` expression does.
    * @param shape A layer inside the board.
    * @param link The property, its source and how it plays it.
    *
+   * The wheel turns 3.6° for each pixel the car moves, and the shadow
+   * fades as the ball rises:
+   *
    * @example
    * ```js
-   * // the wheel turns 3.6° for each pixel the car moves
    * timeline.link(wheel, { property: 'rotation', source: car, sourceProperty: 'x', factor: 3.6 });
-   * // the shadow fades as the ball rises
    * timeline.link(shadow, { property: 'opacity', source: ball, sourceProperty: 'y', factor: 0.004 });
    * ```
    */
@@ -5289,7 +5293,35 @@ export interface Link {
    * How many milliseconds after the source it plays.
    */
   readonly delay: number;
+
+  /**
+   * With a range: the values of the source, from and to, that take the
+   * property through `output` (factor and offset left aside).
+   */
+  readonly input?: [number, number];
+
+  /**
+   * With a range: the values of the property, from and to, as the source
+   * goes through `input`.
+   */
+  readonly output?: [number, number];
+
+  /**
+   * With a range: whether the property stays within `output` when the
+   * source leaves `input`.
+   */
+  readonly clamp?: boolean;
+
+  /**
+   * With a range: the curve it follows from one end to the other.
+   */
+  readonly easing?: LinkEasing;
 }
+
+/**
+ * The curve a link with a range follows, see `LinkProps.easing`.
+ */
+export type LinkEasing = 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
 
 /**
  * A link to set with `Timeline.link`.
@@ -5325,6 +5357,40 @@ export interface LinkProps {
    * Play this many milliseconds after the source. 0 by default.
    */
   delay?: number;
+
+  /**
+   * A range of the source, `[from, to]`: going through it, the source
+   * takes the property through `output`, as an AE `linear()` or `ease()`
+   * expression does. Give both or neither; factor and offset do not apply
+   * then.
+   *
+   * A slider from x 0 to 200 turns a needle from 0 to 270 degrees:
+   *
+   * @example
+   * ```js
+   * timeline.link(needle, { property: "rotation", source: slider, sourceProperty: "x",
+   *                         input: [0, 200], output: [0, 270], easing: "ease-in-out" });
+   * ```
+   */
+  input?: [number, number];
+
+  /**
+   * The range of the property, `[from, to]`, the source takes it through
+   * as it goes through `input`.
+   */
+  output?: [number, number];
+
+  /**
+   * Keep the property within `output` when the source leaves `input`.
+   * True by default.
+   */
+  clamp?: boolean;
+
+  /**
+   * The curve from one end of the range to the other. `'linear'` by
+   * default.
+   */
+  easing?: LinkEasing;
 }
 
 /**

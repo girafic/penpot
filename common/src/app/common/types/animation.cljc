@@ -428,19 +428,32 @@
   of one number each."
   [:x :y :width :height :rotation :scale-x :scale-y :opacity :rotate-x :rotate-y :translate-z :blur])
 
+(def link-easings
+  "The curves a link with a range maps its source along (see
+  `schema:link`)."
+  #{:linear :ease :ease-in :ease-out :ease-in-out})
+
 (def schema:link
   "How a property of a layer plays one of another layer of its board, its
   source (see `links-of`): `rest + factor × (source − source rest) +
   offset`, `:delay` ms after the source, so that linking never moves it
-  at rest (an AE pick whip with a linear expression). A factor of 1, an
-  offset and a delay of 0 are stored as absence."
+  at rest (an AE pick whip with a linear expression). With a range, the
+  source going from the `:input` `[a b]` takes it from the `:output` `[c
+  d]` along the `:easing` curve, kept within them unless `:clamp` is false
+  (an AE `linear()` or `ease()` expression; factor and offset left
+  aside). A factor of 1, an offset and a delay of 0, a clamp and a linear
+  easing are stored as absence."
   [:map {:title "AnimationLink"}
    [:property [::sm/one-of (set link-properties)]]
    [:source ::sm/uuid]
    [:source-property [::sm/one-of (set link-properties)]]
    [:factor {:optional true} ::sm/safe-number]
    [:offset {:optional true} ::sm/safe-number]
-   [:delay {:optional true} ::sm/safe-int]])
+   [:delay {:optional true} ::sm/safe-int]
+   [:input {:optional true} [:tuple ::sm/safe-number ::sm/safe-number]]
+   [:output {:optional true} [:tuple ::sm/safe-number ::sm/safe-number]]
+   [:clamp {:optional true} :boolean]
+   [:easing {:optional true} [::sm/one-of link-easings]]])
 
 (def schema:track
   [:map {:title "AnimationTrack"}
@@ -1134,7 +1147,7 @@
       timeline)))
 
 (def ^:private link-defaults
-  {:factor 1 :offset 0 :delay 0})
+  {:factor 1 :offset 0 :delay 0 :clamp true :easing :linear})
 
 (defn links-of
   "The links of the properties of `shape-id` in `timeline` (see
@@ -1152,9 +1165,14 @@
   `:source-property` of the layer `:source` of `link` (see
   `schema:link`), in place of a link it had; the defaults are left out."
   [timeline shape-id {:keys [property] :as link}]
-  (let [link   (-> (select-keys link [:property :source :source-property :factor :offset :delay])
+  (let [link   (-> (select-keys link [:property :source :source-property :factor :offset :delay
+                                      :input :output :clamp :easing])
                    (d/update-when :delay #(int (mth/round %))))
-        stored (into {} (remove (fn [[k v]] (= v (get link-defaults k ::none)))) link)
+        ;; a range takes both ends of both, or none
+        link   (cond-> link
+                 (not (and (some? (:input link)) (some? (:output link))))
+                 (dissoc :input :output))
+        stored (into {} (remove (fn [[k v]] (or (nil? v) (= v (get link-defaults k ::none))))) link)
         links  (dm/get-in timeline [:tracks shape-id :links] [])
         at     (d/index-of-pred links #(= property (:property %)))]
     (-> (ensure-track timeline shape-id)
@@ -3348,7 +3366,7 @@
     (some :hidden animations)
     (update :animations (partial filterv (complement :hidden)))))
 
-(defn- link-rest
+(defn link-rest
   "The value of `property` that `shape-id` of `objects` rests at in
   `timeline`, as its keyframes count it (see `rest-value`); its size for
   `:width` and `:height`."
@@ -3382,12 +3400,69 @@
       v
       (mapv v (concat [0] (inner 0 (dec (count v))) [(dec (count v))])))))
 
+(def ^:private ranged-link-step
+  "How often, ms, a link with a range takes the value of its source (see
+  `ranged-row`)."
+  (/ 1000 60))
+
+(defn- ranged
+  "The value `value` of the source of a link with a range (see
+  `schema:link`) gives it: from the start of its `output` to its end as
+  it goes through its `input`, along `easing`, within them when `clamp`
+  (outside them on a straight line, else)."
+  [{:keys [input output clamp easing]} value]
+  (let [[a b] input
+        [c d] output
+        t     (if (mth/almost-zero? (- b a))
+                (if (>= value a) 1 0)
+                (/ (- value a) (- b a)))
+        t     (if clamp (mth/clamp t 0 1) t)
+        e     (if (<= 0 t 1) (easing-progress easing t) t)]
+    (+ c (* (- d c) e))))
+
+(defn- ranged-row
+  "The keyframes of a link with a range (see `ranged`): the values of the
+  source `row` (sorted, looping when `loops?`) mapped a `ranged-link-step`
+  apart through `duration` and at its keyframes, thinned to linear ones
+  within a five hundredth of the output, delayed."
+  [row loops? duration {:keys [property output delay] :as link}]
+  (let [value  (fn [t] (property-value-at row (if loops? (loop-time row t) t)))
+        times  (-> (into (sorted-set duration)
+                         (comp (map #(mth/round (* % ranged-link-step))) (take-while #(< % duration)))
+                         (range))
+                   (into (comp (map :time) (filter #(<= 0 % duration))) row)
+                   vec)
+        [c d]  output
+        tol    (max 1e-3 (* 0.002 (mth/abs (- d c))))]
+    (mapv (fn [[t v]]
+            (make-keyframe {:time (+ t delay) :property property :value v :easing :linear}))
+          (thinned (mapv (fn [t] [t (ranged link (value t))]) times) tol))))
+
+(declare linked-row*)
+
 (defn- linked-row
   "The keyframes `link` (with the defaults, see `links-of`) gives the
   property of `shape-id`: those of the source row as it plays in `tracks`,
   each value mapped (see `schema:link`) and its time delayed; one
   keyframe of where it rests and the offset for a source row with none,
-  none when that is where it rests."
+  none when that is where it rests. A link with a range samples the
+  source row (see `ranged-row`)."
+  [timeline objects tracks shape-id {:keys [property source source-property input output] :as link}]
+  (if (and (some? input) (some? output))
+    (let [row (sort-keyframes
+               (filterv #(and (= source-property (:property %)) (nil? (:index %)))
+                        (dm/get-in tracks [source :keyframes])))]
+      (if (seq row)
+        (ranged-row row
+                    (contains? (dm/get-in tracks [source :loops] #{}) source-property)
+                    (max 1 (or (:duration timeline) 0))
+                    link)
+        (let [value (ranged link (link-rest timeline objects source source-property))]
+          (when-not (mth/almost-zero? (- value (link-rest timeline objects shape-id property)))
+            [{:id (uuid/next) :property property :time 0 :value value}]))))
+    (linked-row* timeline objects tracks shape-id link)))
+
+(defn- linked-row*
   [timeline objects tracks shape-id {:keys [property source source-property factor offset delay]}]
   (let [source-rest (link-rest timeline objects source source-property)
         own-rest    (link-rest timeline objects shape-id property)
@@ -3440,8 +3515,10 @@
                 tracks
                 (let [property (:property link)
                       row      (linked-row timeline objects tracks id link)
-                      loops?   (contains? (dm/get-in tracks [(:source link) :loops] #{})
-                                          (:source-property link))]
+                      ;; a range samples the source through the duration
+                      loops?   (and (nil? (:input link))
+                                    (contains? (dm/get-in tracks [(:source link) :loops] #{})
+                                               (:source-property link)))]
                   (update tracks id
                           (fn [track]
                             (-> track
