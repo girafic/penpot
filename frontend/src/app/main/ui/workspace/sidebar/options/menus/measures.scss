@@ -330,7 +330,7 @@
   grid-column: 1/-1;
 }
 
-.preserve-3d {
+.preserve-depth {
   @include deprecated.body-small-typography;
 
   grid-column: 2 / -1;

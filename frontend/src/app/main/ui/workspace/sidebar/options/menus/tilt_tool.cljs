@@ -83,14 +83,14 @@
 
 (mf/defc tilt-tool*
   "The button of the tool and, open, its pad. `rotate-x`, `rotate-y`,
-  `rotation`, `translate-z`, `backface-hidden` and `preserve-3d` are the
+  `rotation`, `translate-z`, `backface-hidden` and `preserve-depth` are the
   values of the selection (`:multiple` when they differ), `space?`
   whether it holds groups or boards; `on-tilt` takes the tilt `[rx ry]` a
   drag gives, `on-drag-start` and `on-drag-end` bracket a drag (one undo
   step), `on-axis-change` an attribute and its value from a field,
   `on-rotation-change` the turn in the plane, `on-backface-change` and
   `on-preserve-change` the switches."
-  [{:keys [rotate-x rotate-y rotation translate-z backface-hidden preserve-3d space?
+  [{:keys [rotate-x rotate-y rotation translate-z backface-hidden preserve-depth space?
            on-tilt on-drag-start on-drag-end on-axis-change on-rotation-change
            on-backface-change on-preserve-change]}]
   (let [place*   (mf/use-state nil)
@@ -273,5 +273,5 @@
             [:> checkbox* {:id "tilt-tool-preserve-3d"
                            :label (tr "workspace.options.preserve-3d")
                            :title (tr "workspace.options.preserve-3d.hint")
-                           :checked (true? preserve-3d)
+                           :checked (true? preserve-depth)
                            :on-change on-preserve}])]]])]))
