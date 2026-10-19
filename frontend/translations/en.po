@@ -9382,6 +9382,62 @@ msgstr "3D rotation Y: drag across, with Shift in steps of 15°"
 msgid "workspace.viewport.vanishing-point"
 msgstr "Vanishing point of the board: drag to move it"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines"
+msgstr "Offset lines"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.add"
+msgstr "Make offset lines of the outline"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.count"
+msgstr "Lines"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.count.hint"
+msgstr "How many lines run along the outline"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.spacing"
+msgstr "Apart"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.spacing.hint"
+msgstr "How far apart the lines are, px"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.width"
+msgstr "Width"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.width.hint"
+msgstr "How wide each line is, px"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.inner"
+msgstr "Inside"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.inner.hint"
+msgstr "The colour and opacity of the line on the inner side"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.outer"
+msgstr "Outside"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.outer.hint"
+msgstr "The colour and opacity of the line on the outer side"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.update"
+msgstr "Update from the outline"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.update.hint"
+msgstr "Make the lines again from the outline, after it changed"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
 msgid "workspace.options.scene.light"
 msgstr "Light"

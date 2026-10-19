@@ -2761,6 +2761,71 @@ export interface Group extends ShapeBase {
    * ```
    */
   maskMode: MaskMode | null;
+
+  /**
+   * How the offset lines this group holds are made from their source, or
+   * `null` when it holds none (see `Path.makeOffsetLines`). Setting any of
+   * the settings makes the lines again from the source as it is now; the
+   * others stay. Setting it on a group without offset lines is not valid.
+   * Requires `content:write` permission to set.
+   *
+   * @example
+   * ```js
+   * const lines = path.makeOffsetLines({ count: 12 });
+   * lines.offsetLines = { spacing: 6, outerColor: '#FFD27A' };
+   * ```
+   */
+  get offsetLines(): OffsetLines | null;
+  set offsetLines(value: OffsetLinesSettings);
+}
+
+/**
+ * How offset lines are made: parallel copies of the outline of a path,
+ * `spacing` px apart across it, their colour and opacity going from the
+ * inner side to the outer one (the side the outline turns away from).
+ * Penpot Motion.
+ */
+export interface OffsetLinesSettings {
+  /**
+   * How many lines there are, 1 to 200. Defaults to 24.
+   */
+  count?: number;
+  /**
+   * How far apart the lines are, px. Defaults to 4.
+   */
+  spacing?: number;
+  /**
+   * How wide the stroke of each line is, px. Defaults to 2.5.
+   */
+  width?: number;
+  /**
+   * The colour of the innermost line, `#RRGGBB`. Defaults to the colour
+   * of the first stroke of the path.
+   */
+  innerColor?: string;
+  /**
+   * The opacity of the innermost line, 0 to 1. Defaults to 0.3.
+   */
+  innerOpacity?: number;
+  /**
+   * The colour of the outermost line, `#RRGGBB`. Defaults to white.
+   */
+  outerColor?: string;
+  /**
+   * The opacity of the outermost line, 0 to 1. Defaults to 1.
+   */
+  outerOpacity?: number;
+}
+
+/**
+ * The offset lines of a group (`Group.offsetLines`): its settings, all of
+ * them given, and the path they are made from. Penpot Motion.
+ */
+export interface OffsetLines extends Required<OffsetLinesSettings> {
+  /**
+   * The path the lines are made from, which the group holds hidden.
+   */
+  readonly source: Path;
 }
 
 /**
@@ -4009,6 +4074,24 @@ export interface Path extends ShapeBase {
    * The fills applied to the shape.
    */
   fills: Fill[];
+
+  /**
+   * Makes offset lines of this path: a group that holds it hidden and
+   * `count` paths parallel to it, centred on it, their colour and opacity
+   * going from the inner side to the outer one (see
+   * `OffsetLinesSettings`). Trim the group to draw them together or in
+   * turn. Requires `content:write` permission.
+   *
+   * @param settings How the lines are made; each one optional.
+   * @return The new group (see `Group.offsetLines`).
+   *
+   * @example
+   * ```js
+   * const lines = path.makeOffsetLines({ count: 24, spacing: 4, outerColor: '#FFFFFF' });
+   * timeline.setTrimMode(lines, 'in-turn');
+   * ```
+   */
+  makeOffsetLines(settings?: OffsetLinesSettings): Group;
 }
 
 /**

@@ -1,0 +1,76 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+// Offset lines (Penpot Motion): two columns of fields under the title.
+.offset-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  margin-block-end: var(--sp-s);
+}
+
+.title {
+  padding-inline-start: var(--sp-xxs);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-xs);
+}
+
+.field {
+  @extend %input-element;
+  @include deprecated.body-small-typography;
+
+  min-inline-size: 0;
+}
+
+.offset-lines .field .field-label {
+  @include deprecated.body-small-typography;
+
+  inline-size: auto;
+  padding-inline-end: var(--sp-xs);
+  color: var(--color-foreground-secondary);
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.offset-lines .field .field-unit {
+  padding-inline-end: var(--sp-s);
+  text-transform: none;
+}
+
+.field-input,
+.field-text {
+  min-inline-size: 0;
+}
+
+.field-text {
+  @extend %input-base;
+}
+
+.offset-lines .field .swatch {
+  flex: none;
+  inline-size: var(--sp-l);
+  block-size: var(--sp-l);
+  margin-inline-start: var(--sp-s);
+  padding: 0;
+  border-radius: var(--sp-xs);
+  border: 1px solid var(--color-background-quaternary);
+}
+
+// leaves the cell beside Width empty, so the colours share their rows
+.spacer {
+  min-inline-size: 0;
+}
+
+.update {
+  grid-column: 1 / -1;
+  display: flex;
+}

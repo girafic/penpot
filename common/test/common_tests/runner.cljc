@@ -40,6 +40,7 @@
    [common-tests.geom-line-test]
    [common-tests.geom-modif-tree-test]
    [common-tests.geom-modifiers-test]
+   [common-tests.geom-offset-lines-test]
    [common-tests.geom-point-test]
    [common-tests.geom-proportions-test]
    [common-tests.geom-rect-test]
@@ -154,6 +155,7 @@
    'common-tests.geom-line-test
    'common-tests.geom-modif-tree-test
    'common-tests.geom-modifiers-test
+   'common-tests.geom-offset-lines-test
    'common-tests.geom-point-test
    'common-tests.geom-proportions-test
    'common-tests.geom-rect-test

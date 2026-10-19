@@ -10030,6 +10030,8 @@ Group:
         makeMask(): void;
         removeMask(): void;
         maskMode: MaskMode | null;
+        get offsetLines(): OffsetLines | null;
+        set offsetLines(value: OffsetLinesSettings): void;
         getPluginData(key: string): string;
         setPluginData(key: string, value: string): void;
         getPluginDataKeys(): string[];
@@ -10181,7 +10183,7 @@ Group:
     * ShapeBase
       + Group
 
-    Referenced by: Context, ContextTypesUtils, Penpot, Shape, Timeline
+    Referenced by: Context, ContextTypesUtils, Path, Penpot, Shape, Timeline
   members:
     Properties:
       type: |-
@@ -10566,6 +10568,32 @@ Group:
         ```
 
         The interactions for the current shape.
+    Accessors:
+      offsetLines: |-
+        * ```
+          get offsetLines(): OffsetLines | null
+          ```
+
+          How the offset lines this group holds are made from their source, or
+          `null` when it holds none (see `Path.makeOffsetLines`). Setting any of
+          the settings makes the lines again from the source as it is now; the
+          others stay. Setting it on a group without offset lines is not valid.
+          Requires `content:write` permission to set.
+
+          Returns OffsetLines | null
+
+          Example
+          ```
+          const lines = path.makeOffsetLines({ count: 12 });lines.offsetLines = { spacing: 6, outerColor: '#FFD27A' };
+          ```
+        * ```
+          set offsetLines(value: OffsetLinesSettings): void
+          ```
+
+          Parameters
+          + value: OffsetLinesSettings
+
+          Returns void
     Methods:
       appendChild: |-
         ```
@@ -11149,6 +11177,152 @@ Group:
 
         The promise to be resolved when the shape's layout is updated. It
         is rejected with an Error, both on timeout and on an invalid timeout value.
+OffsetLinesSettings:
+  overview: |-
+    Interface OffsetLinesSettings
+    =============================
+
+    How offset lines are made: parallel copies of the outline of a path,
+    `spacing` px apart across it, their colour and opacity going from the
+    inner side to the outer one (the side the outline turns away from).
+    Penpot Motion.
+
+    ```
+    interface OffsetLinesSettings {
+        count?: number;
+        spacing?: number;
+        width?: number;
+        innerColor?: string;
+        innerOpacity?: number;
+        outerColor?: string;
+        outerOpacity?: number;
+    }
+    ```
+
+    Referenced by: Group, Path
+  members:
+    Properties:
+      count: |-
+        ```
+        count?: number
+        ```
+
+        How many lines there are, 1 to 200. Defaults to 24.
+      spacing: |-
+        ```
+        spacing?: number
+        ```
+
+        How far apart the lines are, px. Defaults to 4.
+      width: |-
+        ```
+        width?: number
+        ```
+
+        How wide the stroke of each line is, px. Defaults to 2.5.
+      innerColor: |-
+        ```
+        innerColor?: string
+        ```
+
+        The colour of the innermost line, `#RRGGBB`. Defaults to the colour
+        of the first stroke of the path.
+      innerOpacity: |-
+        ```
+        innerOpacity?: number
+        ```
+
+        The opacity of the innermost line, 0 to 1. Defaults to 0.3.
+      outerColor: |-
+        ```
+        outerColor?: string
+        ```
+
+        The colour of the outermost line, `#RRGGBB`. Defaults to white.
+      outerOpacity: |-
+        ```
+        outerOpacity?: number
+        ```
+
+        The opacity of the outermost line, 0 to 1. Defaults to 1.
+OffsetLines:
+  overview: |-
+    Interface OffsetLines
+    =====================
+
+    The offset lines of a group (`Group.offsetLines`): its settings, all of
+    them given, and the path they are made from. Penpot Motion.
+
+    ```
+    interface OffsetLines {
+        count: number;
+        spacing: number;
+        width: number;
+        innerColor: string;
+        innerOpacity: number;
+        outerColor: string;
+        outerOpacity: number;
+        source: Path;
+    }
+    ```
+
+    Hierarchy
+
+    * Required<OffsetLinesSettings>
+      + OffsetLines
+
+    Referenced by: Group
+  members:
+    Properties:
+      count: |-
+        ```
+        count: number
+        ```
+
+        How many lines there are, 1 to 200. Defaults to 24.
+      spacing: |-
+        ```
+        spacing: number
+        ```
+
+        How far apart the lines are, px. Defaults to 4.
+      width: |-
+        ```
+        width: number
+        ```
+
+        How wide the stroke of each line is, px. Defaults to 2.5.
+      innerColor: |-
+        ```
+        innerColor: string
+        ```
+
+        The colour of the innermost line, `#RRGGBB`. Defaults to the colour
+        of the first stroke of the path.
+      innerOpacity: |-
+        ```
+        innerOpacity: number
+        ```
+
+        The opacity of the innermost line, 0 to 1. Defaults to 0.3.
+      outerColor: |-
+        ```
+        outerColor: string
+        ```
+
+        The colour of the outermost line, `#RRGGBB`. Defaults to white.
+      outerOpacity: |-
+        ```
+        outerOpacity: number
+        ```
+
+        The opacity of the outermost line, 0 to 1. Defaults to 1.
+      source: |-
+        ```
+        readonly source: Path
+        ```
+
+        The path the lines are made from, which the group holds hidden.
 GuideColumn:
   overview: |-
     Interface GuideColumn
@@ -15496,6 +15670,7 @@ Path:
         d: string;
         commands: PathCommand[];
         fills: Fill[];
+        makeOffsetLines(settings?: OffsetLinesSettings): Group;
         getPluginData(key: string): string;
         setPluginData(key: string, value: string): void;
         getPluginDataKeys(): string[];
@@ -15645,7 +15820,7 @@ Path:
     * ShapeBase
       + Path
 
-    Referenced by: Context, ContextTypesUtils, Penpot, Shape
+    Referenced by: Context, ContextTypesUtils, OffsetLines, Penpot, Shape
   members:
     Properties:
       type: |-
@@ -16041,6 +16216,31 @@ Path:
         Deprecated
 
         Use the `d` attribute
+      makeOffsetLines: |-
+        ```
+        makeOffsetLines(settings?: OffsetLinesSettings): Group
+        ```
+
+        Makes offset lines of this path: a group that holds it hidden and
+        `count` paths parallel to it, centred on it, their colour and opacity
+        going from the inner side to the outer one (see
+        `OffsetLinesSettings`). Trim the group to draw them together or in
+        turn. Requires `content:write` permission.
+
+        Parameters
+
+        * settings: OffsetLinesSettings
+
+          How the lines are made; each one optional.
+
+        Returns Group
+
+        The new group (see `Group.offsetLines`).
+
+        Example
+        ```
+        const lines = path.makeOffsetLines({ count: 24, spacing: 4, outerColor: '#FFFFFF' });timeline.setTrimMode(lines, 'in-turn');
+        ```
       getPluginData: |-
         ```
         getPluginData(key: string): string

@@ -9,6 +9,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.offset-lines :as gol]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.geom.tilt :as gtl]
@@ -46,6 +47,7 @@
    [app.main.data.workspace.guides :as dwgu]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.offset-lines :as dwol]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shape-layout :as dwsl]
    [app.main.data.workspace.shapes :as dwsh]
@@ -363,6 +365,27 @@
     (if reversed?
       (case loc :top :bottom :bottom :top :up :down :down :up)
       loc)))
+
+(defn- offset-lines-settings
+  "The settings of offset lines a plugin gives (`count`, `spacing`,
+  `width`, `innerColor`, `innerOpacity`, `outerColor`, `outerOpacity`,
+  each optional), as `gol/defaults` names them: nil when one is not
+  valid."
+  [value]
+  (when (or (nil? value) (object? value))
+    (let [color    (fn [k] (let [v (obj/get value k)] (if (string? v) (str/lower v) v)))
+          settings (when (some? value)
+                     (d/without-nils
+                      {:count (obj/get value "count")
+                       :spacing (obj/get value "spacing")
+                       :width (obj/get value "width")
+                       :inner-color (color "innerColor")
+                       :inner-opacity (obj/get value "innerOpacity")
+                       :outer-color (color "outerColor")
+                       :outer-opacity (obj/get value "outerOpacity")}))]
+      (when (and (sm/validate cts/schema:offset-lines (merge gol/defaults settings {:source uuid/zero}))
+                 (every? #(re-matches #"#[0-9a-f]{6}" %) (keep settings [:inner-color :outer-color])))
+        (or settings {})))))
 
 (defn shape-proxy
   ([plugin-id id]
@@ -1487,6 +1510,29 @@
                  :else
                  (.toString (:content shape)))))
 
+           ;; Only for paths: offset lines of it (see `gol/lines`)
+           :makeOffsetLines
+           (fn [value]
+             (let [shape    (u/locate-shape file-id page-id id)
+                   settings (offset-lines-settings value)]
+               (cond
+                 (not (cfh/path-shape? shape))
+                 (u/not-valid plugin-id :makeOffsetLines (:type shape))
+
+                 (nil? settings)
+                 (u/not-valid plugin-id :makeOffsetLines value)
+
+                 (not (r/check-permission plugin-id "content:write"))
+                 (u/not-valid plugin-id :makeOffsetLines "Plugin doesn't have 'content:write' permission")
+
+                 (not (u/page-active? page-id))
+                 (u/not-valid plugin-id :makeOffsetLines "Cannot modify a page that is not currently active")
+
+                 :else
+                 (let [group-id (uuid/next)]
+                   (st/emit! (dwol/make-offset-lines id group-id settings false))
+                   (shape-proxy plugin-id file-id page-id group-id)))))
+
            ;; Text shapes
            :getRange
            (fn [start end]
@@ -2100,7 +2146,42 @@
                    (u/not-valid plugin-id :maskMode "Cannot modify a page that is not currently active")
 
                    :else
-                   (st/emit! (dwg/set-mask-mode (:id shape) mode)))))}))
+                   (st/emit! (dwg/set-mask-mode (:id shape) mode)))))}
+
+            ;; how its offset lines are made from their source (see
+            ;; `gol/lines`); setting them makes them again
+            {:name "offsetLines"
+             :get
+             (fn [self]
+               (when-let [spec (some->> self u/proxy->shape :offset-lines (merge gol/defaults))]
+                 #js {:source (shape-proxy plugin-id file-id page-id (:source spec))
+                      :count (:count spec)
+                      :spacing (:spacing spec)
+                      :width (:width spec)
+                      :innerColor (:inner-color spec)
+                      :innerOpacity (:inner-opacity spec)
+                      :outerColor (:outer-color spec)
+                      :outerOpacity (:outer-opacity spec)}))
+
+             :set
+             (fn [self value]
+               (let [shape    (u/proxy->shape self)
+                     settings (when (some? value) (offset-lines-settings value))]
+                 (cond
+                   (nil? (:offset-lines shape))
+                   (u/not-valid plugin-id :offsetLines "The group holds no offset lines")
+
+                   (nil? settings)
+                   (u/not-valid plugin-id :offsetLines value)
+
+                   (not (r/check-permission plugin-id "content:write"))
+                   (u/not-valid plugin-id :offsetLines "Plugin doesn't have 'content:write' permission")
+
+                   (not (u/page-active? page-id))
+                   (u/not-valid plugin-id :offsetLines "Cannot modify a page that is not currently active")
+
+                   :else
+                   (st/emit! (dwol/set-offset-lines (:id shape) settings)))))}))
 
          (cond-> (cfh/frame-shape? data)
            (-> (crc/add-properties!

@@ -93,6 +93,7 @@
    [frontend-tests.plugins.local-storage-test]
    [frontend-tests.plugins.management-test]
    [frontend-tests.plugins.motion-test]
+   [frontend-tests.plugins.offset-lines-test]
    [frontend-tests.plugins.page-active-validation-test]
    [frontend-tests.plugins.page-test]
    [frontend-tests.plugins.parser-test]
@@ -290,6 +291,7 @@
    'frontend-tests.plugins.library-test
    'frontend-tests.plugins.local-storage-test
    'frontend-tests.plugins.motion-test
+   'frontend-tests.plugins.offset-lines-test
    'frontend-tests.plugins.page-active-validation-test
    'frontend-tests.plugins.page-test
    'frontend-tests.plugins.parser-test

@@ -303,9 +303,24 @@
    [:svg-transform {:optional true} :map]
    [:svg-viewbox {:optional true} :map]])
 
+(def schema:offset-lines
+  "How the lines of a group of offset lines are made from its `:source`
+  (see `app.common.geom.offset-lines`)."
+  [:map {:title "OffsetLines"}
+   [:source ::sm/uuid]
+   [:count [::sm/int {:min 1 :max 200}]]
+   [:spacing [::sm/number {:min 0.1 :max 1000}]]
+   [:width [::sm/number {:min 0.1 :max 1000}]]
+   [:inner-color ::sm/text]
+   [:inner-opacity [::sm/number {:min 0 :max 1}]]
+   [:outer-color ::sm/text]
+   [:outer-opacity [::sm/number {:min 0 :max 1}]]])
+
 (def schema:group-attrs
   [:map {:title "GroupAttrs"}
-   [:shapes [:vector {:gen/max 10 :gen/min 1} ::sm/uuid]]])
+   [:shapes [:vector {:gen/max 10 :gen/min 1} ::sm/uuid]]
+   ;; a group of offset lines (Penpot Motion): how they are made
+   [:offset-lines {:optional true} schema:offset-lines]])
 
 (def schema:light
   "The light of the layers in 3D of a board (see `gtl/shade`)."

@@ -23,6 +23,7 @@
    [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.mask :refer [mask-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.measures :refer [measures-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.offset-lines :refer [offset-lines-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.svg-attrs :refer [svg-attrs-menu*]]
@@ -184,6 +185,10 @@
                          :ids stroke-ids
                          :values stroke-values
                          :applied-tokens stroke-tokens}])
+
+     ;; a group of offset lines: how they are made (Penpot Motion)
+     (when (some? (:offset-lines shape))
+       [:> offset-lines-menu* {:shape shape}])
 
      [:> color-selection-menu*
       {:type type
