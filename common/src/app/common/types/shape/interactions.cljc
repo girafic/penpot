@@ -81,8 +81,8 @@
   #{:dissolve :slide :push :flip :cube})
 
 (def navigate-only-animation-types
-  "The ones that turn one board into the next (Penpot Motion: flip and
-  cube, in 3D): not for overlays."
+  "The ones that take one board to the next, not for overlays: push, and
+  flip and cube, in 3D (Penpot Motion)."
   #{:push :flip :cube})
 
 (def schema:dissolve-animation
@@ -715,7 +715,7 @@
 
 (defn has-duration?
   [interaction]
-  (#{:dissolve :slide :push :flip :cube} (-> interaction :animation :animation-type)))
+  (contains? animation-types (-> interaction :animation :animation-type)))
 
 (defn set-duration
   [interaction duration]
@@ -729,7 +729,7 @@
 
 (defn has-easing?
   [interaction]
-  (#{:dissolve :slide :push :flip :cube} (-> interaction :animation :animation-type)))
+  (contains? animation-types (-> interaction :animation :animation-type)))
 
 (defn set-easing
   [interaction easing]

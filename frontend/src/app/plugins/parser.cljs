@@ -427,6 +427,8 @@
 ;; export type Animation = Dissolve | Slide | Push | Flip | Cube;
 
 (defn parse-animation
+  "The animation of an interaction a plugin gives, its easing linear when
+  it gives none, as the types say."
   [^js animation]
   (when animation
     (let [animation-type (-> (obj/get animation "type") parse-keyword)]
@@ -435,21 +437,21 @@
          :dissolve
          {:animation-type animation-type
           :duration (obj/get animation "duration")
-          :easing (-> (obj/get animation "easing") parse-keyword)}
+          :easing (or (-> (obj/get animation "easing") parse-keyword) :linear)}
 
          :slide
          {:animation-type animation-type
           :way (-> (obj/get animation "way") parse-keyword)
           :direction (-> (obj/get animation "direction") parse-keyword)
           :duration (obj/get animation "duration")
-          :easing (-> (obj/get animation "easing") parse-keyword)
+          :easing (or (-> (obj/get animation "easing") parse-keyword) :linear)
           :offset-effect (boolean (obj/get animation "offsetEffect"))}
 
          (:push :flip :cube)
          {:animation-type animation-type
           :direction (-> (obj/get animation "direction") parse-keyword)
           :duration (obj/get animation "duration")
-          :easing (-> (obj/get animation "easing") parse-keyword)}
+          :easing (or (-> (obj/get animation "easing") parse-keyword) :linear)}
 
          nil)))))
 

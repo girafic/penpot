@@ -175,5 +175,8 @@
                      [(.-type a) (.-direction a) (.-duration a) (.-easing a)]))
             (t/is (throws? #(set! (.-action i) #js {:type "open-overlay" :destination overlay
                                                     :animation #js {:type type :direction "left"
-                                                                    :duration 600}}))
-                  "an overlay can not turn")))))))
+                                                                    :duration 600 :easing "linear"}}))
+                  "an overlay can not turn")
+            (set! (.-action i) #js {:type "navigate-to" :destination board2
+                                    :animation #js {:type type :direction "up" :duration 400}})
+            (t/is (= "linear" (.. i -action -animation -easing)) "linear without an easing")))))))
