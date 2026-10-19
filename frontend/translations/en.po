@@ -9322,6 +9322,18 @@ msgstr "Orthographic"
 msgid "workspace.options.orthographic.hint"
 msgstr "See the tilted layers of the board without perspective, as from afar: for isometric drawings"
 
+#: src/app/main/ui/workspace/viewport/tilt_handles.cljs
+msgid "workspace.viewport.tilt-handle.x"
+msgstr "3D rotation X: drag up and down, with Shift in steps of 15°"
+
+#: src/app/main/ui/workspace/viewport/tilt_handles.cljs
+msgid "workspace.viewport.tilt-handle.y"
+msgstr "3D rotation Y: drag across, with Shift in steps of 15°"
+
+#: src/app/main/ui/workspace/viewport/tilt_handles.cljs
+msgid "workspace.viewport.vanishing-point"
+msgstr "Vanishing point of the board: drag to move it"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
 msgid "workspace.options.scene.light"
 msgstr "Light"

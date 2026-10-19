@@ -739,21 +739,8 @@
         on-tilt-drag
         (mf/use-fn
          (mf/deps ids motion-id)
-         (fn [[rx ry]]
-           (let [timeline  (deref ref:timeline)
-                 animated? (fn [attr]
-                             (and (some? motion-id)
-                                  (seq (cta/property-keyframes timeline motion-id attr))))
-                 tilt      (fn [shape attr value]
-                             (cond
-                               (animated? attr)          shape
-                               (mth/almost-zero? value)  (dissoc shape attr)
-                               :else                     (assoc shape attr value)))]
-             (st/emit! (dwsh/update-shapes ids #(-> % (tilt :rotate-x rx) (tilt :rotate-y ry))))
-             (when (animated? :rotate-x)
-               (st/emit! (dwa/set-value-at-playhead motion-id :rotate-x rx)))
-             (when (animated? :rotate-y)
-               (st/emit! (dwa/set-value-at-playhead motion-id :rotate-y ry))))))
+         (fn [tilt]
+           (st/emit! (dwa/tilt-layers ids motion-id tilt))))
 
         ;; The camera of the boards (see `cta/camera-properties`), shown
         ;; when one has tilted layers or a camera of its own; an animated

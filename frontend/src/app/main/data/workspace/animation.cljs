@@ -38,6 +38,7 @@
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dws]
+   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.data.workspace.viewport :as dwv]
    [app.main.data.workspace.viewport-wasm :as dwvw]
@@ -1190,6 +1191,52 @@
                   #(cta/add-keyframe % shape-id
                                      (merge {:time time :property property :value value}
                                             (cta/split-timing % shape-id property nil time))))))))))
+
+(defn tilt-layers
+  "Tilt the layers `ids` to `[rx ry]` (degrees, see
+  `app.common.geom.tilt`), as a drag of the 3D tool or of the handles on
+  the canvas does: an axis the timeline animates for `motion-id` (the
+  layer the motion mode shows, nil outside it) takes the value at the
+  playhead; flat is no tilt at all."
+  [ids motion-id [rx ry]]
+  (ptk/reify ::tilt-layers
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [timeline  (current-timeline state)
+            animated? (fn [attr]
+                        (and (some? motion-id)
+                             (seq (cta/property-keyframes timeline motion-id attr))))
+            tilt      (fn [shape attr value]
+                        (cond
+                          (animated? attr)         shape
+                          (mth/almost-zero? value) (dissoc shape attr)
+                          :else                    (assoc shape attr value)))]
+        (rx/from
+         (cond-> [(dwsh/update-shapes ids #(-> % (tilt :rotate-x rx) (tilt :rotate-y ry)))]
+           (animated? :rotate-x) (conj (set-value-at-playhead motion-id :rotate-x rx))
+           (animated? :rotate-y) (conj (set-value-at-playhead motion-id :rotate-y ry))))))))
+
+(defn move-vanishing-point
+  "Move the vanishing point of the board `board-id` to the fractions `[fx
+  fy]` of its box (see `app.common.geom.tilt/vanishing-point`): a part of
+  it the timeline animates takes the value at the playhead in motion mode
+  (`motion?`)."
+  [board-id motion? [fx fy]]
+  (ptk/reify ::move-vanishing-point
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [timeline  (current-timeline state)
+            animated? (fn [attr]
+                        (and motion? (seq (cta/property-keyframes timeline board-id attr))))
+            fx        (mth/precision (mth/clamp fx -10 10) 4)
+            fy        (mth/precision (mth/clamp fy -10 10) 4)]
+        (rx/from
+         (cond-> [(dwsh/update-shapes [board-id]
+                                      #(cond-> %
+                                         (not (animated? :perspective-x)) (assoc :perspective-x fx)
+                                         (not (animated? :perspective-y)) (assoc :perspective-y fy)))]
+           (animated? :perspective-x) (conj (set-value-at-playhead board-id :perspective-x fx))
+           (animated? :perspective-y) (conj (set-value-at-playhead board-id :perspective-y fy))))))))
 
 (defn retime-keyframes
   "Commit `base` (the timeline as it was when a drag started) with the

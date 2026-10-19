@@ -55,6 +55,7 @@
    [app.main.ui.workspace.viewport.selection :as selection]
    [app.main.ui.workspace.viewport.snap-distances :as snap-distances]
    [app.main.ui.workspace.viewport.snap-points :as snap-points]
+   [app.main.ui.workspace.viewport.tilt-handles :refer [tilt-handles*]]
    [app.main.ui.workspace.viewport.top-bar :refer [edition-bars*
                                                    view-only-bar*]]
    [app.main.ui.workspace.viewport.utils :as utils]
@@ -1072,6 +1073,19 @@
             [:> motion-path* {:shape-id (first selected)
                               :zoom zoom
                               :editing? (some? transform)}])
+
+          ;; the 3D rotation of the selected layer and the vanishing point
+          ;; it is seen with, but while it is moved or edited
+          (when (and (= 1 (count selected))
+                     (nil? transform)
+                     (nil? edition)
+                     (not drawing-tool)
+                     (not @space?))
+            (when-let [shape (get objects-modified (first selected))]
+              [:> tilt-handles* {:shape shape
+                                 :objects objects-modified
+                                 :zoom zoom
+                                 :motion? (contains? layout :animation-timeline)}]))
 
           (when show-prototypes?
             [:> interactions/interactions*
