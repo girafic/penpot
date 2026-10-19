@@ -577,8 +577,9 @@
 (def ^:private transform-template
   "Penpot turns a layer, then scales it; motion.dev the other way round.
   motion.dev gives the template the values it has, a turn with its unit
-  (`\"90deg\"`), so the units go only to plain numbers (see `with-unit`)."
-  (str "transformTemplate={({ x = 0, y = 0, rotate = 0, scaleX = 1, scaleY = 1 }) =>\n"
+  (`\"90deg\"`), so the units go only to plain numbers (see `with-unit`).
+  A `scale` (`scaleX` and `scaleY` alike, see `merge-scale`) sets both."
+  (str "transformTemplate={({ x = 0, y = 0, rotate = 0, scale = 1, scaleX = scale, scaleY = scale }) =>\n"
        "          `translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
        "rotate(${withUnit(rotate, \"deg\")}) scale(${scaleX}, ${scaleY})`}"))
 
@@ -587,7 +588,7 @@
   the tilt in its own axes, after its turn, before its scale, lifted to
   its pivot by `lift` (`[dx dy dz]`, see `acss/frame-values`)."
   [lift]
-  (str "transformTemplate={({ x = 0, y = 0, z = 0, rotate = 0, rotateX = 0, rotateY = 0, scaleX = 1, scaleY = 1 }) =>\n"
+  (str "transformTemplate={({ x = 0, y = 0, z = 0, rotate = 0, rotateX = 0, rotateY = 0, scale = 1, scaleX = scale, scaleY = scale }) =>\n"
        "          `translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
        "translateZ(${withUnit(z, \"px\")}) "
        "rotate(${withUnit(rotate, \"deg\")}) "
@@ -601,7 +602,7 @@
   `distance` px in front of its middle (none for an orthographic board),
   as render-wasm draws it (see `acss/unit-perspective`)."
   [distance]
-  (str "transformTemplate={({ x = 0, y = 0, rotate = 0, rotateX = 0, rotateY = 0, scaleX = 1, scaleY = 1 }) =>\n"
+  (str "transformTemplate={({ x = 0, y = 0, rotate = 0, rotateX = 0, rotateY = 0, scale = 1, scaleX = scale, scaleY = scale }) =>\n"
        "            `" (when (some? distance) (str "perspective(" (react-number distance) "px) "))
        "translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
        "rotate(${withUnit(rotate, \"deg\")}) "

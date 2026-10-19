@@ -247,7 +247,7 @@
 
 (defn- split-text-page
   "A page whose board plays the words of the text :title one after the
-  other: moving up, or by `animation`."
+  other: moving up, or by `animation` (or a vector of them)."
   ([]
    (split-text-page {:type :move :split :word :spread 1 :start 0 :duration 600
                      :offset-x 0 :offset-y 20}))
@@ -258,8 +258,9 @@
                    (tho/add-frame :board (merge {:x 0 :y 0 :width 400 :height 300} board-attrs))
                    (tho/add-text :title "Hi you there" :text-params {:parent-label :board}))
          board (thi/id :board)
-         tl    (cta/add-animation (cta/make-timeline {:board-id board :duration 1000})
-                                  (thi/id :title) animation)
+         tl    (reduce #(cta/add-animation %1 (thi/id :title) %2)
+                       (cta/make-timeline {:board-id board :duration 1000})
+                       (if (map? animation) [animation] animation))
          file  (thf/apply-changes file (-> (pcb/empty-changes nil)
                                            (pcb/with-page (thf/current-page file))
                                            (pcb/set-timeline board tl)))]
@@ -305,7 +306,13 @@
             react (ctac/motion-react (code page) (:objects page))]
         (t/is (= 3 (count (re-seq #"transformTemplate=\{\(\{ x = 0, y = 0, rotate = 0, rotateX = 0" react))))
         (t/is (cstr/includes? react "`perspective(1000px) translate(${withUnit(x, \"px\")}"))
-        (t/is (cstr/includes? react "const withUnit") "the helper of the template")))))
+        (t/is (cstr/includes? react "const withUnit") "the helper of the template")))
+    (t/testing "React, a unit that scales and turns: the template reads the scale"
+      (let [page  (split-text-page [flip {:type :scale :split :word :spread 1 :start 0 :duration 600
+                                          :amount 0.5}])
+            react (ctac/motion-react (code page) (:objects page))]
+        (t/is (cstr/includes? react "scale: ") "scaleX and scaleY play alike, as one scale")
+        (t/is (cstr/includes? react "scale = 1, scaleX = scale, scaleY = scale"))))))
 
 (t/deftest the-code-can-play-the-units-of-a-text
   (let [page  (split-text-page)
