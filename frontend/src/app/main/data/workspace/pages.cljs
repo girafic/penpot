@@ -23,6 +23,7 @@
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
    [app.main.data.persistence :as-alias dps]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.drawing :as dwd]
    [app.main.data.workspace.fix-deleted-fonts :as fdf]
    [app.main.data.workspace.layout :as layout]
@@ -115,6 +116,8 @@
            (rx/of (dwth/watch-state-changes file-id page-id)))
 
          (rx/of (dwl/watch-component-changes))
+         ;; the shadows a light casts fall from it, added ones too
+         (rx/of (dwa/watch-cast-shadows))
          (rx/of (dwl/watch-token-changes))
 
          (let [profile (:profile state)

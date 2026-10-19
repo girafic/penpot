@@ -1280,6 +1280,77 @@
                                        (let [light (get lights (:frame-id shape))]
                                          (update shape :shadow (fn [shadows] (mapv #(gtl/cast-shadow light %) shadows))))))))))))
 
+(defn- uncast-ids
+  "The ids of the layers of `objects` among `ids` (and in them) whose
+  shadows the light of their board casts (see `cast-shadows`) and do not
+  fall from it."
+  [objects ids]
+  (into #{}
+        (comp (mapcat #(cons % (cfh/get-children-ids objects %)))
+              (keep (fn [id]
+                      (let [shape (get objects id)
+                            light (dm/get-in objects [(:frame-id shape) :light])]
+                        (when (and (true? (:shadows light))
+                                   (not= id (:frame-id shape))
+                                   (some #(not= (select-keys % [:offset-x :offset-y])
+                                                (select-keys (gtl/cast-shadow light %) [:offset-x :offset-y]))
+                                         (:shadow shape)))
+                          id)))))
+        ids))
+
+(defn cast-shadows-of
+  "Turn the shadows of the layers `ids` (and those in them) whose light
+  casts them away from it, in the undo step `undo-group` (see
+  `watch-cast-shadows`)."
+  [ids undo-group]
+  (ptk/reify ::cast-shadows-of
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [objects (dsh/lookup-page-objects state)
+            uncast  (uncast-ids objects ids)]
+        (if (empty? uncast)
+          (rx/empty)
+          (rx/of (dwsh/update-shapes (vec uncast)
+                                     (fn [shape]
+                                       (let [light (dm/get-in objects [(:frame-id shape) :light])]
+                                         (update shape :shadow (fn [shadows] (mapv #(gtl/cast-shadow light %) shadows)))))
+                                     {:undo-group undo-group})))))))
+
+(defn- changed-ids
+  "The ids of the shapes `changes` add, change or move."
+  [changes]
+  (into #{}
+        (mapcat (fn [{:keys [type id shapes]}]
+                  (case type
+                    (:add-obj :mod-obj) [id]
+                    :mov-objects        shapes
+                    nil)))
+        changes))
+
+(defn watch-cast-shadows
+  "Watch the edits of the page for layers whose shadows the light of their
+  board casts and that do not fall from it: a shadow added or changed, a
+  layer pasted or moved into such a board. They are turned away from the
+  light in the undo step of the edit. Undo and redo are left alone."
+  []
+  (ptk/reify ::watch-cast-shadows
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      (let [stopper (->> stream
+                         (rx/map ptk/type)
+                         (rx/filter #(or (= :app.main.data.workspace.pages/finalize-page %)
+                                         (= ::watch-cast-shadows %))))]
+        (->> stream
+             (rx/filter dch/commit?)
+             (rx/map deref)
+             (rx/filter #(and (= :local (:source %)) (:save-undo? %)))
+             (rx/map (fn [{:keys [redo-changes undo-group]}]
+                       (let [ids (changed-ids redo-changes)]
+                         (when (seq ids)
+                           (cast-shadows-of ids undo-group)))))
+             (rx/filter some?)
+             (rx/take-until stopper))))))
+
 (defn retime-keyframes
   "Commit `base` (the timeline as it was when a drag started) with the
   keyframes of `shape-ids` retimed from the span `from` to `to`."
