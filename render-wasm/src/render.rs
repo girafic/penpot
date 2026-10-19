@@ -9,6 +9,7 @@ mod options;
 pub mod pdf;
 pub mod raster;
 mod resources;
+mod scene;
 mod shadows;
 pub mod shape_renderer;
 mod strokes;
@@ -659,7 +660,7 @@ pub(crate) struct RenderState {
     unit_distances: HashMap<Uuid, Option<f32>>,
     /// How the light and the depth cues of their boards show the shapes this
     /// pass (see `Shape::scene_effects`), found with their tilts.
-    scene_effects: HashMap<Uuid, Option<tilt::SceneEffects>>,
+    scene: scene::SceneCache,
     /// The shape a render of one shape renders: the tilts of the layers it is
     /// in are left out.
     tilt_stop: Option<Uuid>,
@@ -877,7 +878,7 @@ impl RenderState {
             drop_shadow_filter_cache: shadows::DropShadowFilterCache::new(),
             tilt_projections: HashMap::default(),
             unit_distances: HashMap::default(),
-            scene_effects: HashMap::default(),
+            scene: scene::SceneCache::default(),
             tilt_stop: None,
             viewport_presented: false,
         })
@@ -926,20 +927,10 @@ impl RenderState {
     }
 
     /// `shape` as the light and the depth cues of its board show it (see
-    /// `Shape::with_scene_effects`), worked out once a pass; itself when
-    /// nothing in its board leaves the plane.
-    fn with_scene<'a>(&mut self, shape: &'a Shape, tree: ShapesPoolRef) -> Cow<'a, Shape> {
-        if !tree.has_tilts() {
-            return Cow::Borrowed(shape);
-        }
-        let effects = *self
-            .scene_effects
-            .entry(shape.id)
-            .or_insert_with(|| shape.scene_effects(tree));
-        match effects {
-            Some(effects) => Cow::Owned(shape.with_scene_effects(&effects)),
-            None => Cow::Borrowed(shape),
-        }
+    /// `scene::SceneCache::scened`): one copy a pass; itself when nothing in
+    /// its board leaves the plane.
+    fn with_scene<'a>(&mut self, shape: &'a Shape, tree: ShapesPoolRef) -> scene::Scened<'a> {
+        self.scene.scened(shape, tree)
     }
 
     /// The tilt the walker found for the shape `id` this pass (see
@@ -2367,25 +2358,16 @@ impl RenderState {
                         .canvas(innershadows_surface_id)
                         .save_layer(&layer_rec);
                 };
-                // Under the perspective of a tilt Skia sizes the layer of an
-                // image filter from the space it is opened in, which a tilt
-                // towards edge-on collapses: the layer drew nothing. A tilted
-                // shape blurs in the space of the page, before its tilt.
-                let blur_before_tilt = matrix.has_perspective();
-                if let Some(filter) = blur_filter_for_layers.as_ref().filter(|_| blur_before_tilt) {
-                    open_blur_layers(&mut self.surfaces, filter);
-                }
-
-                self.surfaces.apply_mut(surface_ids, |s| {
-                    s.canvas().concat(&matrix);
-                });
-
-                if let Some(filter) = blur_filter_for_layers
-                    .as_ref()
-                    .filter(|_| !blur_before_tilt)
-                {
-                    open_blur_layers(&mut self.surfaces, filter);
-                }
+                open_shape_draw(
+                    &matrix,
+                    blur_filter_for_layers.as_ref(),
+                    |step| match step {
+                        DrawStep::BlurLayer(filter) => open_blur_layers(&mut self.surfaces, filter),
+                        DrawStep::Matrix(matrix) => self.surfaces.apply_mut(surface_ids, |s| {
+                            s.canvas().concat(matrix);
+                        }),
+                    },
+                );
 
                 let shape = &shape;
 
@@ -3245,7 +3227,7 @@ impl RenderState {
         self.tilt_stop = saved_tilt_stop;
         self.tilt_projections.clear();
         self.unit_distances.clear();
-        self.scene_effects.clear();
+        self.scene.clear();
 
         // Restore render-surface transforms for the workspace context.
         // If we have a current tile, restore its tile render context; otherwise
@@ -4320,7 +4302,7 @@ impl RenderState {
         // The tilts are those of the shapes as they are now
         self.tilt_projections.clear();
         self.unit_distances.clear();
-        self.scene_effects.clear();
+        self.scene.clear();
 
         // During interactive transforms we compute the union of the current bounds of all
         // modified shapes (doc-space @ 100% zoom, scale=1.0). This is used as a cheap overlap
@@ -4994,7 +4976,8 @@ impl RenderState {
      */
     pub fn get_tiles_for_shape(&mut self, shape: &Shape, tree: ShapesPoolRef) -> TileRect {
         let scale = self.get_scale();
-        let extrect = self.get_cached_extrect(shape, tree, scale);
+        // with the halo of the blur of its depth cues
+        let extrect = scene::indexed_extrect(shape, tree, scale);
         let tile_size = tiles::get_tile_size(scale);
         let shape_tiles = tiles::get_tiles_for_rect(extrect, tile_size);
         let interest_rect = &self.tile_viewbox.interest_rect;
@@ -5473,6 +5456,32 @@ fn masked_group_layer_paint(element: &Shape, filter: Option<skia::ImageFilter>) 
 /// Paint for the layer of a shape that needs one (see `Shape::needs_layer`):
 /// its opacity and blend mode, but for a masked group, whose outer layer
 /// applies them (see `masked_group_layer_paint`).
+/// A step of opening the draw of a shape (see `open_shape_draw`).
+enum DrawStep<'a> {
+    BlurLayer(&'a skia::ImageFilter),
+    Matrix(&'a Matrix),
+}
+
+/// Open the draw of a shape through `matrix`, blurred by `blur`, a step at
+/// a time. Under the perspective of a tilt Skia sizes the layer of an image
+/// filter from the space it is opened in, which a tilt towards edge-on
+/// collapses: the layer drew nothing. A tilted shape blurs in the space of
+/// the page, before its tilt; any other after its matrix.
+fn open_shape_draw(
+    matrix: &Matrix,
+    blur: Option<&skia::ImageFilter>,
+    mut step: impl FnMut(DrawStep),
+) {
+    let blur_before_matrix = matrix.has_perspective();
+    if let Some(filter) = blur.filter(|_| blur_before_matrix) {
+        step(DrawStep::BlurLayer(filter));
+    }
+    step(DrawStep::Matrix(matrix));
+    if let Some(filter) = blur.filter(|_| !blur_before_matrix) {
+        step(DrawStep::BlurLayer(filter));
+    }
+}
+
 fn shape_layer_paint(element: &Shape) -> skia::Paint {
     let mut paint = skia::Paint::default();
     if !element.is_masked_group() {
@@ -5507,9 +5516,9 @@ mod tests {
     use crate::shapes::{Frame, Group, Rect as RectType, Shadow, ShadowStyle};
 
     /// The red a 200×100 rect turned `ry` degrees about Y (seen from 700 px,
-    /// as render_shape draws it) paints at its middle, blurred by a layer
-    /// opened before or after its draw matrix.
-    fn tilted_blur_pixel(ry: f32, before_matrix: bool) -> skia::Color {
+    /// as render_shape draws it) paints at its middle, blurred as
+    /// `open_shape_draw` opens its draw.
+    fn tilted_blur_pixel(ry: f32) -> skia::Color {
         let selrect = Rect::from_xywh(100.0, 150.0, 200.0, 100.0);
         let matrix = tilt::tilt_matrix(
             &selrect,
@@ -5519,23 +5528,21 @@ mod tests {
             Point::new(200.0, 200.0),
         )
         .expect("tilted");
-        assert!(
-            matrix.has_perspective(),
-            "render_shape blurs it before its tilt"
-        );
+        assert!(matrix.has_perspective(), "a tilt has a perspective");
         let mut surface = skia::surfaces::raster_n32_premul((400, 400)).expect("surface");
         let canvas = surface.canvas();
-        let mut layer = skia::Paint::default();
-        layer.set_image_filter(skia::image_filters::blur((1.5, 1.5), None, None, None));
-        let rec = skia::canvas::SaveLayerRec::default().paint(&layer);
+        let blur = skia::image_filters::blur((1.5, 1.5), None, None, None).expect("blur");
         canvas.save();
-        if before_matrix {
-            canvas.save_layer(&rec);
-            canvas.concat(&matrix);
-        } else {
-            canvas.concat(&matrix);
-            canvas.save_layer(&rec);
-        }
+        open_shape_draw(&matrix, Some(&blur), |step| match step {
+            DrawStep::BlurLayer(filter) => {
+                let mut layer = skia::Paint::default();
+                layer.set_image_filter(filter.clone());
+                canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&layer));
+            }
+            DrawStep::Matrix(matrix) => {
+                canvas.concat(matrix);
+            }
+        });
         let mut red = skia::Paint::default();
         red.set_color(skia::Color::RED);
         canvas.draw_rect(selrect, &red);
@@ -5550,12 +5557,18 @@ mod tests {
     #[test]
     fn a_tilted_shape_with_a_blur_draws_up_to_edge_on() {
         for ry in [30.0, 60.0, 80.0] {
-            assert_eq!(
-                tilted_blur_pixel(ry, true).r(),
-                255,
-                "turned {ry}°, blurred before its tilt"
-            );
+            assert_eq!(tilted_blur_pixel(ry).r(), 255, "turned {ry}°, blurred");
         }
+    }
+
+    #[test]
+    fn a_flat_shape_blurs_after_its_matrix() {
+        let mut steps = Vec::new();
+        let blur = skia::image_filters::blur((1.5, 1.5), None, None, None).expect("blur");
+        open_shape_draw(&Matrix::translate((10.0, 0.0)), Some(&blur), |step| {
+            steps.push(matches!(step, DrawStep::Matrix(_)))
+        });
+        assert_eq!(steps, [true, false], "its matrix, then its blur");
     }
 
     #[test]
