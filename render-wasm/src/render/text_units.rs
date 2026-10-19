@@ -118,15 +118,22 @@ fn place(
         .with_offset((layout.x, layout.y));
     let center = bounds.center();
 
-    let matrix = match distance.filter(|_| pose.is_tilted()) {
-        Some(distance) => tilt::unit_matrix(
+    let tilted = distance.filter(|_| pose.is_tilted()).map(|distance| {
+        tilt::unit_matrix(
             center,
             (pose.dx, pose.dy),
             pose.rotation,
             (pose.rotate_x, pose.rotate_y),
             (pose.scale_x, pose.scale_y),
             distance,
-        ),
+        )
+    });
+    // a unit that reaches the viewer shows nothing, as a tilted layer
+    let reaches_viewer = tilted
+        .as_ref()
+        .is_some_and(|h| tilt::project_rect(h, &bounds).is_none());
+    let matrix = match tilted {
+        Some(matrix) => matrix,
         None => {
             let mut matrix = Matrix::translate((center.x + pose.dx, center.y + pose.dy));
             matrix.pre_rotate(pose.rotation, None);
@@ -140,7 +147,7 @@ fn place(
         range,
         bounds,
         matrix,
-        opacity: pose.opacity,
+        opacity: if reaches_viewer { 0.0 } else { pose.opacity },
         blur: pose.blur,
     }
 }
@@ -803,6 +810,12 @@ mod tests {
         // edge on, nothing shows of it
         assert_eq!(
             ink_box(&painted(&shape, Some(&turned(90.0)), fills), split..WIDTH),
+            None
+        );
+        // its near side reaching the viewer, nothing shows of it either
+        shape.text_unit_distance = Some(5.0);
+        assert_eq!(
+            ink_box(&painted(&shape, Some(&turned(60.0)), fills), split..WIDTH),
             None
         );
     }

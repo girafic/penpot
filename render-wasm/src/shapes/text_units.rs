@@ -116,10 +116,28 @@ impl UnitPose {
     }
 }
 
-/// How much nearer the viewer than its box a unit turned in 3D can grow:
-/// its near side comes towards the viewer, seen bigger (twice at half the
-/// distance of the viewer).
+/// How much a unit turned in 3D can grow when the distance it is seen
+/// from is not known: its near side comes towards the viewer, seen bigger
+/// (twice at half the distance of the viewer).
 const TILT_REACH: f32 = 2.0;
+
+/// The most a unit turned in 3D is taken to grow: one whose near side
+/// comes nearer the viewer than an eighth of the distance shows only in
+/// part where it reaches out further (one reaching the viewer draws
+/// nothing, see `render::text_units`).
+const MAX_TILT_REACH: f32 = 8.0;
+
+/// How much a unit turned in 3D, whose points are at most `reach` from its
+/// middle, can grow seen from `distance` (see `math::tilt::unit_matrix`):
+/// its near side, `reach` nearer the viewer at most, shows bigger by
+/// `distance / (distance - reach)`.
+fn tilt_reach(distance: Option<f32>, reach: f32) -> f32 {
+    match distance {
+        Some(d) if d > reach => (d / (d - reach)).min(MAX_TILT_REACH),
+        Some(_) => MAX_TILT_REACH,
+        None => TILT_REACH,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextUnit {
@@ -262,9 +280,9 @@ impl TextUnits {
     /// How far the units can reach out of `text`, the box of the text at
     /// rest: as far as they move and blur and, for a unit that turns or
     /// grows, as far as a box as big as the text could turn or grow around
-    /// its centre, twice that for one turned towards the viewer (see
-    /// `TILT_REACH`).
-    pub fn outset(&self, text: &Rect) -> f32 {
+    /// its centre, more for one turned towards the viewer, seen from
+    /// `distance` (see `tilt_reach`).
+    pub fn outset(&self, text: &Rect, distance: Option<f32>) -> f32 {
         let half_diagonal = text.width().hypot(text.height()) / 2.0;
         self.units
             .iter()
@@ -278,8 +296,13 @@ impl TextUnits {
                 let moved = pose.dx.abs().max(pose.dy.abs()) + blurred;
                 if pose.reaches_out() {
                     let scale = pose.scale_x.abs().max(pose.scale_y.abs()).max(1.0);
-                    let tilt = if pose.is_tilted() { TILT_REACH } else { 1.0 };
-                    moved + scale * tilt * half_diagonal
+                    let reach = scale * half_diagonal;
+                    let tilt = if pose.is_tilted() {
+                        tilt_reach(distance, reach)
+                    } else {
+                        1.0
+                    };
+                    moved + tilt * reach
                 } else {
                     moved
                 }
@@ -751,7 +774,7 @@ mod tests {
                 .collect(),
         };
 
-        assert_eq!(units(vec![]).outset(&text), 0.0);
+        assert_eq!(units(vec![]).outset(&text, None), 0.0);
         let moved = UnitPose {
             dx: -5.0,
             dy: 12.0,
@@ -762,25 +785,49 @@ mod tests {
             scale_y: 0.2,
             ..moved
         };
-        assert_eq!(units(vec![moved, UnitPose::REST]).outset(&text), 12.0);
-        assert_eq!(units(vec![shrunk]).outset(&text), 12.0);
+        assert_eq!(units(vec![moved, UnitPose::REST]).outset(&text, None), 12.0);
+        assert_eq!(units(vec![shrunk]).outset(&text, None), 12.0);
         // a box as big as the text (half diagonal 25) twice as big
         let grown = UnitPose {
             scale_x: 2.0,
             ..moved
         };
-        assert_eq!(units(vec![grown]).outset(&text), 62.0);
+        assert_eq!(units(vec![grown]).outset(&text, None), 62.0);
         let turned = UnitPose {
             rotation: 30.0,
             ..UnitPose::REST
         };
-        assert_eq!(units(vec![turned]).outset(&text), 25.0);
+        assert_eq!(units(vec![turned]).outset(&text, None), 25.0);
         // a blur reaches three sigmas out
         let blurred = UnitPose {
             blur: 6.0,
             ..UnitPose::REST
         };
-        let reach = units(vec![blurred]).outset(&text);
+        let reach = units(vec![blurred]).outset(&text, None);
         assert!((reach - 3.0 * radius_to_sigma(6.0)).abs() < 1e-4, "{reach}");
+        // turned in 3D: the near side grows, seen from the board
+        let flipped = UnitPose {
+            rotate_y: 60.0,
+            ..UnitPose::REST
+        };
+        assert_eq!(
+            units(vec![flipped]).outset(&text, None),
+            50.0,
+            "twice without a distance"
+        );
+        assert!(
+            (units(vec![flipped]).outset(&text, Some(1000.0)) - 25.0 * 1000.0 / 975.0).abs() < 1e-3,
+            "from far, a little"
+        );
+        assert_eq!(
+            units(vec![flipped]).outset(&text, Some(30.0)),
+            150.0,
+            "near, six times: 30 / (30 - 25)"
+        );
+        assert_eq!(
+            units(vec![flipped]).outset(&text, Some(20.0)),
+            200.0,
+            "reaching the viewer, as much as is taken"
+        );
     }
 }

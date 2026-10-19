@@ -729,9 +729,16 @@ pub extern "C" fn set_shape_trim(start: f32, end: f32, offset: f32) -> Result<()
 #[wasm_error]
 pub extern "C" fn set_shape_text_units() -> Result<()> {
     let units = shapes::TextUnits::from_bytes(&mem::bytes())?;
+    // units that turn in 3D are seen from the board, as tilted layers
+    let tilted = units.as_ref().is_some_and(shapes::TextUnits::has_tilts);
     with_current_shape_mut!(state, |shape: &mut Shape| {
         shape.set_text_units(units);
     });
+    if tilted {
+        with_state!(state, {
+            state.shapes.mark_tilts();
+        });
+    }
     Ok(())
 }
 

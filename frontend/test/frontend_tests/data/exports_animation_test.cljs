@@ -1614,6 +1614,17 @@
     (t/is (= #{:lottie :dotlottie} (formats (assoc-in objects [cid :translate-z] 40) tl :lottie/three-d))
           "a layer in depth")))
 
+(t/deftest units-that-turn-in-3d-say-how-the-formats-play-them
+  (let [{:keys [objects bid tid]} (text-board)
+        split   #(cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid
+                                    {:type % :split :word :start 0 :duration 600})
+        formats (fn [tl kind]
+                  (into #{} (keep (fn [[format kinds]] (when (some #{kind} kinds) format)))
+                        (dea/export-issues objects tl)))]
+    (t/is (= #{:svg} (formats (split :flip-x) :svg/three-d)) "an SVG shows them flat")
+    (t/is (= #{:lottie :dotlottie} (formats (split :flip-y) :lottie/three-d)))
+    (t/is (empty? (formats (split :fade) :svg/three-d)) "units that only fade, nothing to say")))
+
 (t/deftest formats-without-sound-say-so
   (let [{:keys [objects bid]} (test-objects)
         tl    (cta/make-timeline {:board-id bid :duration 1000})

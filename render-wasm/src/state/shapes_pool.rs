@@ -140,6 +140,7 @@ impl ShapesPoolImpl {
                     || self.get_raw(child).is_some_and(|s| {
                         s.is_three_d()
                             || s.preserve_3d
+                            || s.text_units.as_ref().is_some_and(|u| u.has_tilts())
                             || s.parent_id
                                 .and_then(|p| self.get_raw(&p))
                                 .is_some_and(|p| p.preserve_3d)

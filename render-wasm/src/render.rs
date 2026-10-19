@@ -344,6 +344,23 @@ fn text_layout_cache_rotation_only(tree: ShapesPoolRef, shape: &Shape) -> bool {
         .is_some_and(|(base, modifier)| !modifier_changes_text_layout(base, &modifier))
 }
 
+/// `shape` with the distance the units of its text that turn in 3D are
+/// seen from, as `distances` (the pass's `unit_distances`) holds it: what
+/// every path that paints a text needs (see `Shape::text_unit_distance`).
+fn with_unit_distance<'a>(
+    distances: &HashMap<Uuid, Option<f32>>,
+    shape: &'a Shape,
+) -> Cow<'a, Shape> {
+    match distances.get(&shape.id).copied().flatten() {
+        Some(distance) if shape.text_unit_distance != Some(distance) => {
+            let mut shape = shape.clone();
+            shape.text_unit_distance = Some(distance);
+            Cow::Owned(shape)
+        }
+        _ => Cow::Borrowed(shape),
+    }
+}
+
 /*
  * Sort by z_index descending (higher z renders on top).
  * The sort is stable so if the values are equal the index for the children
@@ -1078,6 +1095,8 @@ impl RenderState {
             self.clip_target_surface_to_stack(clips, target_surface, scale, antialias);
         }
 
+        // the mask of a text, its units turned as they are drawn
+        let unit_shape = with_unit_distance(&self.unit_distances, shape);
         let canvas = self.surfaces.canvas(target_surface);
 
         // Current/Export have no render context transform (identity canvas).
@@ -1118,7 +1137,7 @@ impl RenderState {
             let mask_layer_rec = skia::canvas::SaveLayerRec::default().paint(&mask_paint);
             canvas.save_layer(&mask_layer_rec);
 
-            text::paint_text_mask(canvas, shape);
+            text::paint_text_mask(canvas, &unit_shape);
 
             // Restore the mask layer, then the blur layer,
             // then the shape transform
@@ -1708,6 +1727,11 @@ impl RenderState {
         #[cfg(feature = "stats")]
         self.stats.count(shape.id);
 
+        // how far the units of a text that turn in 3D are seen from: the
+        // direct path and the layered one paint with it
+        let unit_shape = with_unit_distance(&self.unit_distances, shape);
+        let shape: &Shape = &unit_shape;
+
         let surface_ids = fills_surface_id as u32
             | strokes_surface_id as u32
             | innershadows_surface_id as u32
@@ -1930,12 +1954,6 @@ impl RenderState {
         } else {
             None
         };
-
-        // how far the units of a text that turn in 3D are seen from (see
-        // `unit_distances`)
-        if let Some(distance) = self.unit_distances.get(&shape.id).copied().flatten() {
-            shape.to_mut().text_unit_distance = Some(distance);
-        }
 
         let center = shape.center();
         let mut matrix = shape.transform;
@@ -5505,6 +5523,28 @@ mod tests {
         }
         pool.mark_tilts();
         (pool, scene_id, [platform_id, rim_id, cube_id, lid_id])
+    }
+
+    #[test]
+    fn every_path_that_paints_a_text_sees_its_units_from_the_board() {
+        let shape = Shape::new(Uuid::new_v4());
+        let mut distances = HashMap::new();
+        assert!(matches!(
+            with_unit_distance(&distances, &shape),
+            Cow::Borrowed(_)
+        ));
+        distances.insert(shape.id, None);
+        assert_eq!(
+            with_unit_distance(&distances, &shape).text_unit_distance,
+            None
+        );
+        distances.insert(shape.id, Some(800.0));
+        let seen = with_unit_distance(&distances, &shape);
+        assert_eq!(seen.text_unit_distance, Some(800.0));
+        assert!(matches!(
+            with_unit_distance(&distances, &seen),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]

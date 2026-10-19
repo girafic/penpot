@@ -1424,12 +1424,19 @@ impl Shape {
         extrect
     }
 
-    fn own_extrect_bounds(&self) -> Bounds {
-        self.expand_own_bounds(self.own_base_bounds(), true)
+    fn own_extrect_bounds(&self, unit_distance: Option<f32>) -> Bounds {
+        self.expand_own_bounds(self.own_base_bounds_seen(unit_distance), true)
     }
 
     /// The shape's own geometry bounds, before stroke/shadow/blur margins.
     fn own_base_bounds(&self) -> Bounds {
+        self.own_base_bounds_seen(None)
+    }
+
+    /// `own_base_bounds`, the units of a text that turn in 3D seen from
+    /// `unit_distance` (else from the distance a render gave it, see
+    /// `text_unit_distance`).
+    fn own_base_bounds_seen(&self, unit_distance: Option<f32>) -> Bounds {
         let shape = self;
         let max_stroke = Stroke::max_bounds_width(shape.strokes.iter(), shape.is_open());
 
@@ -1451,7 +1458,8 @@ impl Shape {
                 match &shape.text_units {
                     Some(units) => {
                         let rect = bounds.to_rect();
-                        let outset = units.outset(&rect);
+                        let outset =
+                            units.outset(&rect, unit_distance.or(shape.text_unit_distance));
                         Bounds::from_rect(&rect.with_outset((outset, outset)))
                     }
                     None => bounds,
@@ -1503,7 +1511,7 @@ impl Shape {
     fn calculate_extrect_uncached(&self, shapes_pool: ShapesPoolRef, scale: f32) -> math::Rect {
         // Own outsets (strokes, shadows, blur) are local-space, so they expand before the
         // shape transform. Children extrects are already world-space: join them after it.
-        let mut bounds = self.own_extrect_bounds();
+        let mut bounds = self.own_extrect_bounds(self.unit_distance(shapes_pool));
 
         if !self.transform.is_identity() {
             let mut matrix = self.transform;
