@@ -2354,26 +2354,37 @@ impl RenderState {
                 } // end layout-cache miss fallback
             }
             _ => {
+                // Wrap ALL fill/stroke/shadow rendering so a single GPU blur pass calls
+                let blur_filter_for_layers: Option<skia::ImageFilter> = blur_sigma_for_layers
+                    .and_then(|sigma| skia::image_filters::blur((sigma, sigma), None, None, None));
+                let open_blur_layers = |surfaces: &mut Surfaces, filter: &skia::ImageFilter| {
+                    let mut layer_paint = skia::Paint::default();
+                    layer_paint.set_image_filter(filter.clone());
+                    let layer_rec = skia::canvas::SaveLayerRec::default().paint(&layer_paint);
+                    surfaces.canvas(fills_surface_id).save_layer(&layer_rec);
+                    surfaces.canvas(strokes_surface_id).save_layer(&layer_rec);
+                    surfaces
+                        .canvas(innershadows_surface_id)
+                        .save_layer(&layer_rec);
+                };
+                // Under the perspective of a tilt Skia sizes the layer of an
+                // image filter from the space it is opened in, which a tilt
+                // towards edge-on collapses: the layer drew nothing. A tilted
+                // shape blurs in the space of the page, before its tilt.
+                let blur_before_tilt = matrix.has_perspective();
+                if let Some(filter) = blur_filter_for_layers.as_ref().filter(|_| blur_before_tilt) {
+                    open_blur_layers(&mut self.surfaces, filter);
+                }
+
                 self.surfaces.apply_mut(surface_ids, |s| {
                     s.canvas().concat(&matrix);
                 });
 
-                // Wrap ALL fill/stroke/shadow rendering so a single GPU blur pass calls
-                let blur_filter_for_layers: Option<skia::ImageFilter> = blur_sigma_for_layers
-                    .and_then(|sigma| skia::image_filters::blur((sigma, sigma), None, None, None));
-                if let Some(ref filter) = blur_filter_for_layers {
-                    let mut layer_paint = skia::Paint::default();
-                    layer_paint.set_image_filter(filter.clone());
-                    let layer_rec = skia::canvas::SaveLayerRec::default().paint(&layer_paint);
-                    self.surfaces
-                        .canvas(fills_surface_id)
-                        .save_layer(&layer_rec);
-                    self.surfaces
-                        .canvas(strokes_surface_id)
-                        .save_layer(&layer_rec);
-                    self.surfaces
-                        .canvas(innershadows_surface_id)
-                        .save_layer(&layer_rec);
+                if let Some(filter) = blur_filter_for_layers
+                    .as_ref()
+                    .filter(|_| !blur_before_tilt)
+                {
+                    open_blur_layers(&mut self.surfaces, filter);
                 }
 
                 let shape = &shape;
@@ -5492,7 +5503,60 @@ fn scene_shade_filter(element: &Shape) -> Option<skia::ColorFilter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::Point;
     use crate::shapes::{Frame, Group, Rect as RectType, Shadow, ShadowStyle};
+
+    /// The red a 200×100 rect turned `ry` degrees about Y (seen from 700 px,
+    /// as render_shape draws it) paints at its middle, blurred by a layer
+    /// opened before or after its draw matrix.
+    fn tilted_blur_pixel(ry: f32, before_matrix: bool) -> skia::Color {
+        let selrect = Rect::from_xywh(100.0, 150.0, 200.0, 100.0);
+        let matrix = tilt::tilt_matrix(
+            &selrect,
+            &Matrix::new_identity(),
+            &tilt::Tilt::new(0.0, ry),
+            700.0,
+            Point::new(200.0, 200.0),
+        )
+        .expect("tilted");
+        assert!(
+            matrix.has_perspective(),
+            "render_shape blurs it before its tilt"
+        );
+        let mut surface = skia::surfaces::raster_n32_premul((400, 400)).expect("surface");
+        let canvas = surface.canvas();
+        let mut layer = skia::Paint::default();
+        layer.set_image_filter(skia::image_filters::blur((1.5, 1.5), None, None, None));
+        let rec = skia::canvas::SaveLayerRec::default().paint(&layer);
+        canvas.save();
+        if before_matrix {
+            canvas.save_layer(&rec);
+            canvas.concat(&matrix);
+        } else {
+            canvas.concat(&matrix);
+            canvas.save_layer(&rec);
+        }
+        let mut red = skia::Paint::default();
+        red.set_color(skia::Color::RED);
+        canvas.draw_rect(selrect, &red);
+        canvas.restore();
+        canvas.restore();
+        let middle = tilt::project_point(&matrix, Point::new(200.0, 200.0)).expect("shows");
+        let image = surface.image_snapshot();
+        let pixmap = image.peek_pixels().expect("pixels");
+        pixmap.get_color((middle.x as i32, middle.y as i32))
+    }
+
+    #[test]
+    fn a_tilted_shape_with_a_blur_draws_up_to_edge_on() {
+        for ry in [30.0, 60.0, 80.0] {
+            assert_eq!(
+                tilted_blur_pixel(ry, true).r(),
+                255,
+                "turned {ry}°, blurred before its tilt"
+            );
+        }
+    }
 
     #[test]
     fn a_moved_svg_element_restores_the_canvas() {
