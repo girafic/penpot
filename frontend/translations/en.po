@@ -9379,6 +9379,14 @@ msgid "workspace.options.scene.ambient.hint"
 msgstr "How much of the light comes from all round: faces turned away from the light keep this much"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.shadows"
+msgstr "Cast shadows"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.shadows.hint"
+msgstr "The shadows of the layers of the board fall away from the light and turn with it, each as long as it is"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
 msgid "workspace.options.scene.depth"
 msgstr "Depth cues"
 

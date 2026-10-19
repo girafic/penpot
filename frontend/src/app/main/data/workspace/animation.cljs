@@ -18,6 +18,7 @@
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.tilt :as gtl]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.path-names :as cpn]
@@ -1249,6 +1250,35 @@
                                          (not (animated? :perspective-y)) (assoc :perspective-y fy)))]
            (animated? :perspective-x) (conj (set-value-at-playhead board-id :perspective-x fx))
            (animated? :perspective-y) (conj (set-value-at-playhead board-id :perspective-y fy))))))))
+
+(defn cast-shadows
+  "Turn the drop and inner shadows of the layers of the boards `board-ids`
+  whose light casts them (`:shadows` of their `:light`) away from that
+  light, as it rests (see `gtl/cast-shadow`): the layers whose nearest
+  board it is. The shadows a turning light casts play as it plays (see
+  `cta/resolve-animations`)."
+  [board-ids]
+  (ptk/reify ::cast-shadows
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [objects (dsh/lookup-page-objects state)
+            lights  (into {}
+                          (keep (fn [id]
+                                  (let [light (dm/get-in objects [id :light])]
+                                    (when (true? (:shadows light)) [id light]))))
+                          board-ids)
+            ids     (into []
+                          (comp (filter #(and (contains? lights (:frame-id %))
+                                              (not (contains? lights (:id %)))
+                                              (seq (:shadow %))))
+                                (map :id))
+                          (vals objects))]
+        (if (empty? ids)
+          (rx/empty)
+          (rx/of (dwsh/update-shapes ids
+                                     (fn [shape]
+                                       (let [light (get lights (:frame-id shape))]
+                                         (update shape :shadow (fn [shadows] (mapv #(gtl/cast-shadow light %) shadows))))))))))))
 
 (defn retime-keyframes
   "Commit `base` (the timeline as it was when a drag started) with the

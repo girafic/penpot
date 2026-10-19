@@ -225,6 +225,13 @@ export interface Light {
    * turned away from the light keep this much.
    */
   ambient: number;
+  /**
+   * When true the drop and inner shadows of the layers of the board fall
+   * away from the light, each as long as it is: setting the light turns
+   * them, and they turn with it as its angle plays (the keyframe property
+   * `lightAngle`).
+   */
+  shadows?: boolean;
 }
 
 /**
@@ -286,11 +293,13 @@ export interface Board extends ShapeBase {
    * colours. `null` is no light; a partial object takes the rest from
    * `{ angle: 315, height: 45, ambient: 0.3 }`. Penpot Motion.
    *
-   * A light from the right, and none:
+   * A light from the right, one from the top left whose shadows fall to
+   * the bottom right, and none:
    *
    * @example
    * ```js
    * board.light = { angle: 90, height: 30, ambient: 0.2 };
+   * board.light = { angle: 315, shadows: true };
    * board.light = null;
    * ```
    */

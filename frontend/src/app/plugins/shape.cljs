@@ -41,6 +41,7 @@
    [app.main.data.persistence :as dwp]
    [app.main.data.plugins :as dp]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.groups :as dwg]
    [app.main.data.workspace.guides :as dwgu]
    [app.main.data.workspace.interactions :as dwi]
@@ -2215,9 +2216,11 @@
                  :set
                  (fn [self value]
                    (let [light (when (some? value)
-                                 (merge gtl/default-light
-                                        (-> (js->clj value :keywordize-keys true)
-                                            (select-keys [:angle :height :ambient]))))]
+                                 (as-> (merge gtl/default-light
+                                              (-> (js->clj value :keywordize-keys true)
+                                                  (select-keys [:angle :height :ambient :shadows])))
+                                       light
+                                   (cond-> light (not (true? (:shadows light))) (dissoc :shadows))))]
                      (cond
                        (not (or (nil? value) (and (object? value) (sm/validate cts/schema:light light))))
                        (u/not-valid plugin-id :light value)
@@ -2229,7 +2232,9 @@
                        (u/not-valid plugin-id :light "Cannot modify a page that is not currently active")
 
                        :else
-                       (commit-tilt! self :light light nil))))}
+                       (do (commit-tilt! self :light light nil)
+                           ;; the shadows it casts turn with it
+                           (st/emit! (dwa/cast-shadows [(obj/get self "$id")]))))))}
 
                 {:name "depthFade"
                  :get

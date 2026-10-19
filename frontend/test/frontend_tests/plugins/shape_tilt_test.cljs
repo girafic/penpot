@@ -126,3 +126,24 @@
         (t/is (= 0.4 (.-depthFade board)) "more than all of it: left as it is")
         (set! (.-depthBlur board) 0)
         (t/is (not (contains? (stored store context board) :depth-blur)) "none")))))
+
+(t/deftest a-light-turns-the-shadows-it-casts
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js board   (.createBoard context)
+            ^js card    (.createRectangle context)
+            offsets     #((juxt :offset-x :offset-y) (first (:shadow (stored store context card))))]
+        (.appendChild board card)
+        (set! (.-shadows card) #js [#js {:style "drop-shadow" :offsetX 4 :offsetY 4 :blur 4 :spread 0
+                                         :color #js {:color "#000000" :opacity 0.2}}])
+        (set! (.-light board) #js {:angle 45})
+        (t/is (= [4 4] (offsets)) "a light that casts none leaves them")
+        (set! (.-light board) #js {:angle 45 :shadows true})
+        (t/is (= [-4.0 4.0] (offsets)) "from the top right, to the bottom left")
+        (t/is (true? (.-shadows (.-light board))))
+        (set! (.-light board) #js {:angle 180 :shadows true})
+        (t/is (= [0.0 -5.66] (offsets)) "from below, up, as long")))))
+

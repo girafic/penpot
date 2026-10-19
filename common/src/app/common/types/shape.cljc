@@ -312,7 +312,10 @@
   [:map {:title "Light"}
    [:angle ::sm/safe-number]
    [:height [::sm/number {:min 0 :max 90}]]
-   [:ambient [::sm/number {:min 0 :max 1}]]])
+   [:ambient [::sm/number {:min 0 :max 1}]]
+   ;; whether the shadows of its layers fall away from it (see
+   ;; `gtl/cast-shadow`)
+   [:shadows {:optional true} :boolean]])
 
 (def ^:private schema:frame-attrs
   [:map {:title "FrameAttrs"}

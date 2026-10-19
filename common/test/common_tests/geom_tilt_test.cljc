@@ -381,6 +381,13 @@
                         (:shade (gtl/scene-effects objs (get objs group-id))) 1e-6))
       (t/is (nil? (gtl/scene-effects objs (get objs rect-id))) "in the plane of the group"))))
 
+(t/deftest a-light-casts-shadows-away-from-it
+  (let [cast (fn [angle ox oy] ((juxt :offset-x :offset-y) (gtl/cast-shadow {:angle angle} {:offset-x ox :offset-y oy})))]
+    (t/is (= [4.0 4.0] (cast 315 4 4)) "from the top left, to the bottom right, as it was")
+    (t/is (= [-4.0 4.0] (cast 45 4 4)) "from the top right, to the bottom left")
+    (t/is (= [0.0 -5.66] (cast 180 4 4)) "from below, up, as long")
+    (t/is (= [0.0 0.0] (cast 90 0 0)) "none stays none")))
+
 (t/deftest depth-cues-fade-and-blur-the-layers-in-3d
   (let [cued (fn [cues & attrs]
                (let [objs (objects (apply board 0 0 400 400 (mapcat identity cues))

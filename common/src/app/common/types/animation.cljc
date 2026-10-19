@@ -3359,6 +3359,29 @@
       :height (dm/get-in shape [:selrect :height] 0)
       (or (rest-value shape property (position-origin timeline objects shape-id)) 0))))
 
+(defn- thinned
+  "The fewest of `samples` (`[time value]`, by time) that linear
+  keyframes through them pass within `tol` of all the others: the first
+  and the last, and recursively the one missed most."
+  [samples tol]
+  (let [v     (vec samples)
+        inner (fn inner [i j]
+                (let [[ti vi] (nth v i)
+                      [tj vj] (nth v j)
+                      [k dev] (reduce (fn [[_ most :as acc] k]
+                                        (let [[tk vk] (nth v k)
+                                              f       (if (= ti tj) 0 (/ (- tk ti) (- tj ti)))
+                                              miss    (mth/abs (- vk (+ vi (* f (- vj vi)))))]
+                                          (if (> miss most) [k miss] acc)))
+                                      [nil 0]
+                                      (range (inc i) j))]
+                  (if (and (some? k) (> dev tol))
+                    (concat (inner i k) [k] (inner k j))
+                    [])))]
+    (if (<= (count v) 2)
+      v
+      (mapv v (concat [0] (inner 0 (dec (count v))) [(dec (count v))])))))
+
 (defn- linked-row
   "The keyframes `link` (with the defaults, see `links-of`) gives the
   property of `shape-id`: those of the source row as it plays in `tracks`,
@@ -3430,33 +3453,107 @@
             (:tracks timeline)
             (link-order timeline)))))
 
+(def ^:private cast-shadow-step
+  "How often, ms, the shadows a turning light casts take a value (see
+  `play-cast-shadows`)."
+  (/ 1000 30))
+
+(def ^:private cast-shadow-tolerance
+  "How far, px, the keyframes of a cast shadow may miss it."
+  0.1)
+
+(defn- cast-shadow-rows
+  "The offset rows of the shadow `index` of a layer, `shadow` as it rests,
+  as the light whose angle is `angle` (a function of a time) casts it at
+  `times`: linear keyframes, thinned."
+  [shadow index angle times]
+  (let [poses (mapv (fn [t] [t (gtl/cast-shadow {:angle (angle t)} shadow)]) times)
+        row   (fn [property key]
+                (for [[t v] (thinned (mapv (fn [[t pose]] [t (get pose key)]) poses) cast-shadow-tolerance)]
+                  (make-keyframe {:time t :property property :index index :value v :easing :linear})))]
+    (concat (row :shadow-offset-x :offset-x) (row :shadow-offset-y :offset-y))))
+
+(defn- play-cast-shadows
+  "`timeline` (with its tracks as they play) with the shadows of the
+  layers of each board whose light casts them (`:shadows` of its
+  `:light`, see `gtl/cast-shadow`) turning with the light as its angle
+  plays: in place of their own offset rows, a value each
+  `cast-shadow-step`. The shadows as they rest are cast by the light at
+  rest (the Design tab and the plugin API turn them)."
+  [timeline objects]
+  (let [boards (keep (fn [[id track]]
+                       (let [board (get objects id)
+                             row   (filterv #(= :light-angle (:property %)) (:keyframes track))]
+                         (when (and (= :frame (:type board)) (true? (dm/get-in board [:light :shadows])) (seq row))
+                           [id (sort-keyframes row) (contains? (:loops track #{}) :light-angle)])))
+                     (:tracks timeline))]
+    (if (empty? boards)
+      timeline
+      (let [duration (max 1 (or (:duration timeline) 0))
+            ;; whole ms, as keyframes take them
+            times    (-> (into [] (comp (map #(mth/round (* % cast-shadow-step))) (take-while #(< % duration)))
+                               (range))
+                         (conj duration))]
+        (reduce
+         (fn [timeline [board-id row loops?]]
+           (let [angle (fn [t] (property-value-at row (if loops? (loop-time row t) t)))]
+             (reduce
+              (fn [timeline layer]
+                (let [cast (into []
+                                 (comp (map-indexed vector)
+                                       (remove (fn [[_ shadow]] (:hidden shadow)))
+                                       (map (fn [[index shadow]] [index (cast-shadow-rows shadow index angle times)])))
+                                 (:shadow layer))
+                      cast-at (into #{} (map first) cast)]
+                  (if (empty? cast)
+                    timeline
+                    (update-in timeline [:tracks (:id layer)]
+                               (fn [track]
+                                 (-> (or track {:shape-id (:id layer) :keyframes []})
+                                     (update :keyframes
+                                             (fn [keyframes]
+                                               (sort-keyframes
+                                                (into (filterv #(not (and (contains? #{:shadow-offset-x :shadow-offset-y} (:property %))
+                                                                          (contains? cast-at (:index %))))
+                                                               keyframes)
+                                                      (mapcat second cast)))))))))))
+              timeline
+              (filter #(and (= board-id (:frame-id %)) (not= board-id (:id %)) (seq (:shadow %)))
+                      (vals objects)))))
+         timeline
+         boards)))))
+
 (defn resolve-animations
   "Return `timeline` as it plays: its hidden rows left out and its preset
   animations turned into the keyframes they stand for, but the split
   animations that play the units of a text one by one, which stay the
   `:animations` of its track (see `text-unit-entries`), and the outlines
-  of a path matched to morph into each other (see `match-outlines`).
+  of a path matched to morph into each other (see `match-outlines`); its
+  links played (see `play-links`) and the shadows a turning light casts
+  (see `play-cast-shadows`).
   Everything that reads keyframes uses it: the preview, the playback and
   the exports."
   [timeline objects]
   (match-outlines
-   (play-links
-    (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
-      (update timeline :tracks
-              (fn [tracks]
-                (reduce-kv (fn [tracks shape-id track]
-                             (let [track (resolve-track timeline objects shape-id (visible-track track))]
-                               ;; Nothing left to play once all of it is hidden;
-                               ;; a track that follows, reaches or holds the
-                               ;; pivot others turn around plays still.
-                               (if (and (empty? (:keyframes track)) (empty? (:animations track))
-                                        (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
-                                        (empty? (:links track)))
-                                 (dissoc tracks shape-id)
-                                 (assoc tracks shape-id track))))
-                           tracks
-                           tracks)))
-      timeline)
+   (play-cast-shadows
+    (play-links
+     (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
+       (update timeline :tracks
+               (fn [tracks]
+                 (reduce-kv (fn [tracks shape-id track]
+                              (let [track (resolve-track timeline objects shape-id (visible-track track))]
+                                ;; Nothing left to play once all of it is hidden;
+                                ;; a track that follows, reaches or holds the
+                                ;; pivot others turn around plays still.
+                                (if (and (empty? (:keyframes track)) (empty? (:animations track))
+                                         (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
+                                         (empty? (:links track)))
+                                  (dissoc tracks shape-id)
+                                  (assoc tracks shape-id track))))
+                            tracks
+                            tracks)))
+       timeline)
+     objects)
     objects)))
 
 (def ^:private unit-rest

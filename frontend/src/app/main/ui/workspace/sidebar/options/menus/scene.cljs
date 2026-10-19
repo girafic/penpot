@@ -99,8 +99,19 @@
                (if (and (some? motion-id)
                         (seq (cta/property-keyframes (deref ref:timeline) motion-id property)))
                  (st/emit! (dwa/set-value-at-playhead motion-id property value))
-                 (st/emit! (dwsh/update-shapes ids #(cond-> % (map? (:light %)) (assoc-in [:light attr] value)))))))))
+                 (st/emit! (dwsh/update-shapes ids #(cond-> % (map? (:light %)) (assoc-in [:light attr] value)))
+                           ;; the shadows it casts turn with it
+                           (dwa/cast-shadows ids)))))))
 
+        on-shadows-check
+        (mf/use-fn
+         (mf/deps ids)
+         (fn [event]
+           (let [on? (-> event dom/get-target dom/checked?)]
+             (st/emit! (dwsh/update-shapes ids #(cond-> %
+                                                  (map? (:light %))
+                                                  (update :light (fn [light] (if on? (assoc light :shadows true) (dissoc light :shadows))))))
+                       (dwa/cast-shadows ids)))))
 
         on-cues-check
         (mf/use-fn
@@ -160,7 +171,13 @@
                            :unit "°" :min 0 :max 90
                            :keyframes (when motion-id :light-height)
                            :value (light-of :height)
-                           :on-change on-height}]]])
+                           :on-change on-height}]]
+        [:div {:class (stl/css :scene-check :shadows-check)
+               :title (tr "workspace.options.scene.shadows.hint")}
+         [:> checkbox* {:id "scene-shadows"
+                        :label (tr "workspace.options.scene.shadows")
+                        :checked (true? (:shadows shared))
+                        :on-change on-shadows-check}]]])
 
      [:div {:class (stl/css :scene-check :cues-check)
             :title (tr "workspace.options.scene.depth.hint")}

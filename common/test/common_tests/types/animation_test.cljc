@@ -344,6 +344,32 @@
         (t/is (str/includes? css "brightness(1.667)") "turned to the light at the start")
         (t/is (str/includes? css "brightness(0.333)") "turned away at the end")))))
 
+(t/deftest a-turning-light-turns-the-shadows-it-casts
+  (let [board  (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+                   (assoc :light {:angle 315 :height 45 :ambient 0.3 :shadows true}))
+        bid    (:id board)
+        shadow {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 8 :spread 0 :hidden false
+                :color {:color "#000000" :opacity 0.3}}
+        card   (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 100})
+                   (assoc :parent-id bid :frame-id bid :shadow [shadow]))
+        cid    (:id card)
+        objects {bid (assoc board :shapes [cid]) cid card}
+        tl     (-> (mk-timeline)
+                   (assoc :board-id bid :duration 1000)
+                   (cta/add-keyframe bid {:time 0 :property :light-angle :value 315 :easing :linear})
+                   (cta/add-keyframe bid {:time 1000 :property :light-angle :value 405}))
+        played (cta/resolve-animations tl objects)
+        at     (fn [t] (mapv #(mth/precision (get-in (cta/values-at played t) [cid % 0]) 2)
+                             [:shadow-offset-x :shadow-offset-y]))]
+    (t/is (= [4.0 4.0] (at 0)) "as it rests")
+    (t/is (every? true? (map #(mth/close? %1 %2 0.1) [0 5.66] (at 500)))
+          "the light from the top, the shadow straight down, within the thinning")
+    (t/is (= [-4.0 4.0] (at 1000)) "from the top right, to the bottom left")
+    (t/is (< (count (:keyframes (get-in played [:tracks cid]))) 70) "thinned")
+    (t/is (empty? (get-in (cta/resolve-animations tl (update objects bid update :light dissoc :shadows))
+                          [:tracks cid :keyframes]))
+          "a light that casts none")))
+
 (t/deftest the-light-and-depth-cues-of-a-board-play-in-css
   ;; lit from the right, 30° up, a fifth all round; half gone 1000 px back
   (let [board   (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})

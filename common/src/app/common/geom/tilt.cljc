@@ -437,6 +437,19 @@
         lit     (fn [cos] (+ ambient (* (- 1 ambient) (max 0 cos))))]
     (mth/clamp (/ (lit (dot3 n l)) (max 0.05 (lit (nth l 2)))) 0 max-shade)))
 
+(defn cast-shadow
+  "`shadow` (a drop or an inner one) cast by `light` (see `scene`, with
+  `:shadows`): its offset turned away from where the light comes from,
+  its length kept."
+  [light shadow]
+  (let [ox  (or (:offset-x shadow) 0)
+        oy  (or (:offset-y shadow) 0)
+        len (mth/hypot ox oy)
+        a   (mth/radians (or (:angle light) 0))]
+    (assoc shadow
+           :offset-x (mth/precision (* len (- (mth/sin a))) 2)
+           :offset-y (mth/precision (* len (mth/cos a)) 2))))
+
 (defn fade-share
   "The share of its opacity a layer `z` px off the plane (towards the
   viewer) keeps by the depth cues of its board: `fade` (0 to 1) of it
