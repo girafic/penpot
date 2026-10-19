@@ -45,6 +45,17 @@
                       (shape far :rect g 100 100 200 200 :translate-z -80))]
     (t/is (= [board-id g far near] (vs/hotspot-ids objs board-id)))))
 
+(t/deftest the-layers-of-a-3d-space-group-in-a-3d-space-come-by-their-depth
+  (let [[scene cube platform rim lid] (map #(uuid/custom 9 %) [2 3 4 5 6])
+        objs (objects (shape board-id :frame uuid/zero 0 0 400 400 :frame-id uuid/zero :shapes [scene])
+                      (shape scene :group board-id 0 0 400 400 :shapes [platform rim cube] :preserve-depth true)
+                      (shape cube :group scene 150 150 100 100 :shapes [lid] :preserve-depth true)
+                      (shape platform :rect scene 0 0 400 400)
+                      (shape rim :rect scene 20 20 360 360 :translate-z 10)
+                      (shape lid :rect cube 150 150 100 100 :translate-z 50))]
+    (t/is (= [board-id scene cube platform rim lid] (vs/hotspot-ids objs board-id))
+          "the lid over the rim, the group under what it holds")))
+
 (t/deftest a-hotspot-is-where-its-shape-shows
   (let [r    (uuid/custom 9 2)
         flat (objects (shape board-id :frame uuid/zero 0 0 400 400 :frame-id uuid/zero :shapes [r])

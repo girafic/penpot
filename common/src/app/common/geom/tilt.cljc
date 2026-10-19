@@ -453,6 +453,31 @@
                (mapv :id)))))
     ids))
 
+(defn- opens-into-space?
+  "Whether a walk of a 3D space goes through `shape` to what it holds: a
+  3D space group (see `space-group?`) draws nothing of its own, so what it
+  holds sorts with the other layers of the space it is in, as CSS sorts
+  the elements of one 3D rendering context. Not one that is hidden, nor
+  one whose fills its layers take."
+  [shape]
+  (and (space-group? shape) (not (:hidden shape)) (empty? (:fills shape))))
+
+(defn space-layers
+  "`ids`, layers of a 3D space of `objects`, with each 3D space group
+  among them that opens into it (see `opens-into-space?`) replaced by what
+  it holds, as deep as they go, in their order, for `depth-sorted`: as
+  render-wasm sorts them (`space_layers`). Returns `[layers groups]`, the
+  groups gone through too."
+  [objects ids]
+  (reduce (fn [[layers groups] id]
+            (let [shape (get objects id)]
+              (if (and (some? shape) (opens-into-space? shape))
+                (let [[inner deeper] (space-layers objects (:shapes shape))]
+                  [(into layers inner) (into (conj groups id) deeper)])
+                [(conj layers id) groups])))
+          [[] []]
+          ids))
+
 (defn- shown-projection
   "The homography the box of `shape` shows through (see `projection`); of
   a 3D space group, which draws nothing itself, as if it drew, through

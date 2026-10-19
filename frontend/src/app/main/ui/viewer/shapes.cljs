@@ -312,14 +312,17 @@
 (defn hotspot-ids
   "The board `frame-id` of `objects` and the shapes in it, in the order
   they are drawn, the bottom one first: each shape before what it holds,
-  the layers of a 3D space by their depth (see `gtl/depth-sorted`), so
-  that the hotspot on top is where what shows on top is."
+  the layers of a 3D space by their depth (see `gtl/depth-sorted`), those
+  of the 3D space groups in it among them and those groups under them all
+  (see `gtl/space-layers`), so that the hotspot on top is where what shows
+  on top is."
   [objects frame-id]
   (letfn [(walk [id]
-            (let [shape (get objects id)
-                  ids   (cond->> (:shapes shape)
-                          (gtl/three-d-space? shape) (gtl/depth-sorted objects shape))]
-              (mapcat #(cons % (walk %)) ids)))]
+            (let [shape (get objects id)]
+              (if (gtl/three-d-space? shape)
+                (let [[layers groups] (gtl/space-layers objects (:shapes shape))]
+                  (concat groups (mapcat #(cons % (walk %)) (gtl/depth-sorted objects shape layers))))
+                (mapcat #(cons % (walk %)) (:shapes shape)))))]
     (cons frame-id (walk frame-id))))
 
 (defn- hidden-back?

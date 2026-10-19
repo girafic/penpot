@@ -196,6 +196,31 @@
         (t/is (= [face-id rect-id] (gtl/depth-sorted flat (get flat group-id) [face-id rect-id])))
         (t/is (= [rect-id face-id] (gtl/depth-sorted flat (get flat group-id) [rect-id face-id])))))))
 
+(t/deftest the-layers-of-a-3d-space-group-in-a-3d-space-sort-with-its-layers
+  ;; a platform at depth 0, a rim at 10 and a cube group whose lid is at 50:
+  ;; the cube as one plane lay at 0, under the rim (render-wasm sorts alike)
+  (let [[scene-id cube-id rim-id lid-id] (map #(uuid/custom 1 %) [20 21 22 23])
+        group    (fn [id parent-id shapes & {:as attrs}]
+                   (-> (cts/setup-shape {:type :group :x 0 :y 0 :width 400 :height 400})
+                       (merge {:id id :parent-id parent-id :frame-id board-id :shapes shapes
+                               :preserve-depth true}
+                              attrs)))
+        objs     (fn [& {:as cube-attrs}]
+                   (objects (board 0 0 400 400 :shapes [scene-id])
+                            (group scene-id board-id [rect-id rim-id cube-id])
+                            (group cube-id scene-id [lid-id] cube-attrs)
+                            (rect 0 0 400 400 :parent-id scene-id)
+                            (merge (rect 20 20 360 360 :parent-id scene-id :translate-z 10) {:id rim-id})
+                            (merge (rect 150 150 100 100 :parent-id cube-id :translate-z 50) {:id lid-id})))
+        sorted   (fn [objs]
+                   (let [[layers groups] (gtl/space-layers objs [rect-id rim-id cube-id])]
+                     [(gtl/depth-sorted objs (get objs scene-id) layers) groups]))]
+    (t/is (= [[rect-id rim-id lid-id] [cube-id]] (sorted (objs))) "back to front, the lid in front")
+    (t/is (= [[rect-id cube-id rim-id] []]
+             (sorted (objs :fills [{:fill-color "#ff0000" :fill-opacity 1}])))
+          "a group whose layers take its fills sorts as one")
+    (t/is (= [[rect-id cube-id rim-id] []] (sorted (objs :hidden true))) "nor a hidden one")))
+
 (t/deftest an-orthographic-board-sees-without-perspective
   (let [near? (fn [expected actual]
                 (every? true? (map (fn [[ex ey] [ax ay]]

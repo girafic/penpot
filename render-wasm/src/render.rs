@@ -367,12 +367,44 @@ fn sort_z_index(tree: ShapesPoolRef, element: &Shape, children_ids: Vec<Uuid>) -
         children_ids
     };
 
-    // the layers of a 3D space draw back to front
+    // the layers of a 3D space draw back to front, those of the 3D space
+    // groups in it among them
     if tree.has_tilts() && element.three_d_space() {
-        depth_sorted(tree, ids)
+        depth_sorted(tree, space_layers(tree, ids))
     } else {
         ids
     }
+}
+
+/// Whether the walk of a 3D space goes through `shape` to what it holds:
+/// a 3D space group (see `Shape::is_space_group`) draws nothing of its
+/// own, so what it holds sorts with the other layers of the space it is
+/// in, as CSS sorts the elements of one 3D rendering context. Not one that
+/// is hidden, nor one whose fills its layers take.
+fn opens_into_space(shape: &Shape) -> bool {
+    shape.is_space_group() && !shape.hidden && shape.fills.is_empty()
+}
+
+/// `ids` (front first), the layers of a 3D space, with each 3D space group
+/// among them that opens into it (see `opens_into_space`) replaced by what
+/// it holds, as deep as they go.
+fn space_layers(tree: ShapesPoolRef, ids: Vec<Uuid>) -> Vec<Uuid> {
+    if !ids
+        .iter()
+        .any(|id| tree.get(id).is_some_and(opens_into_space))
+    {
+        return ids;
+    }
+    let mut layers = Vec::with_capacity(ids.len());
+    for id in ids {
+        match tree.get(&id) {
+            Some(group) if opens_into_space(group) => {
+                layers.extend(space_layers(tree, group.children_ids(false)));
+            }
+            _ => layers.push(id),
+        }
+    }
+    layers
 }
 
 /// The most layers a 3D space sorts by their planes; more go by the depth
@@ -5423,6 +5455,72 @@ mod tests {
             !shape_draw_needs_save(&rect, false, false),
             "a moved rect draws in place"
         );
+    }
+
+    /// A board, a 3D space group holding a platform at depth 0, a rim at 10
+    /// and a 3D space group, the cube, whose lid is at 50: front first.
+    fn platform_with_cube(cube_fill: bool) -> (crate::state::ShapesPool, Uuid, [Uuid; 4]) {
+        use crate::state::ShapesPool;
+        let mut pool = ShapesPool::new();
+        pool.initialize(6);
+        let [board_id, scene_id, platform_id, rim_id, cube_id, lid_id] =
+            [(); 6].map(|_| Uuid::new_v4());
+        {
+            let board = pool.add_shape(board_id);
+            board.set_shape_type(Type::Frame(Frame::default()));
+            board.set_selrect(0.0, 0.0, 400.0, 400.0);
+            board.children = vec![scene_id];
+        }
+        {
+            let scene = pool.add_shape(scene_id);
+            scene.set_shape_type(Type::Group(Group::default()));
+            scene.set_selrect(0.0, 0.0, 400.0, 400.0);
+            scene.set_parent(board_id);
+            scene.set_depth(0.0, true);
+            scene.children = vec![cube_id, rim_id, platform_id];
+        }
+        {
+            let cube = pool.add_shape(cube_id);
+            cube.set_shape_type(Type::Group(Group::default()));
+            cube.set_selrect(150.0, 150.0, 250.0, 250.0);
+            cube.set_parent(scene_id);
+            cube.set_depth(0.0, true);
+            if cube_fill {
+                cube.set_fills(vec![crate::shapes::Fill::Solid(crate::shapes::SolidColor(
+                    skia::Color::RED,
+                ))]);
+            }
+            cube.children = vec![lid_id];
+        }
+        for (id, parent, rect, z) in [
+            (platform_id, scene_id, (0.0, 0.0, 400.0, 400.0), 0.0),
+            (rim_id, scene_id, (20.0, 20.0, 380.0, 380.0), 10.0),
+            (lid_id, cube_id, (150.0, 150.0, 250.0, 250.0), 50.0),
+        ] {
+            let shape = pool.add_shape(id);
+            shape.set_shape_type(Type::Rect(RectType::default()));
+            shape.set_selrect(rect.0, rect.1, rect.2, rect.3);
+            shape.set_parent(parent);
+            shape.set_depth(z, false);
+        }
+        pool.mark_tilts();
+        (pool, scene_id, [platform_id, rim_id, cube_id, lid_id])
+    }
+
+    #[test]
+    fn the_layers_of_a_3d_space_group_in_a_3d_space_sort_with_its_layers() {
+        let (pool, scene_id, [platform, rim, _, lid]) = platform_with_cube(false);
+        let scene = pool.get(&scene_id).expect("scene");
+        let ids = sort_z_index(&pool, scene, scene.children_ids(false));
+        assert_eq!(ids, vec![lid, rim, platform], "the lid in front of the rim");
+    }
+
+    #[test]
+    fn a_3d_space_group_whose_layers_take_its_fills_sorts_as_one() {
+        let (pool, scene_id, [_, _, cube, _]) = platform_with_cube(true);
+        let scene = pool.get(&scene_id).expect("scene");
+        let ids = sort_z_index(&pool, scene, scene.children_ids(false));
+        assert!(ids.contains(&cube));
     }
 
     fn shadowed_group(style: ShadowStyle) -> Shape {
