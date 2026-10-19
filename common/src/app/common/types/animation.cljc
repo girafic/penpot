@@ -479,6 +479,9 @@
    [:ik {:optional true} schema:ik]
    ;; its properties that play others (see `schema:link`), one each
    [:links {:optional true} [:vector {:gen/max 2} schema:link]]
+   ;; How the trim of a group draws the layers in it (see
+   ;; `play-group-trims`): all at once, the default, or one after another
+   [:trim-mode {:optional true} [::sm/one-of #{:together :in-turn}]]
    ;; A helper layer the exports leave out, as a goal ring (see `set-guide`).
    [:guide {:optional true} :boolean]
    ;; The size of the box the outlines of the `:content` keyframes were
@@ -1144,6 +1147,23 @@
           (assoc-in [:tracks shape-id :ik] stored)))
     (if-let [track (get-track timeline shape-id)]
       (store-track timeline shape-id (dissoc track :ik))
+      timeline)))
+
+(defn trim-mode-of
+  "How the trim of the group `shape-id` of `timeline` draws the layers in
+  it (see `play-group-trims`): `:together` or `:in-turn`."
+  [timeline shape-id]
+  (or (dm/get-in timeline [:tracks shape-id :trim-mode]) :together))
+
+(defn set-trim-mode
+  "`timeline` with the trim of the group `shape-id` drawing the layers in
+  it `mode` (`:together`, the default, is stored as absence)."
+  [timeline shape-id mode]
+  (if (= :in-turn mode)
+    (-> (ensure-track timeline shape-id)
+        (assoc-in [:tracks shape-id :trim-mode] :in-turn))
+    (if-let [track (get-track timeline shape-id)]
+      (store-track timeline shape-id (dissoc track :trim-mode))
       timeline)))
 
 (def ^:private link-defaults
@@ -3550,6 +3570,101 @@
                   (make-keyframe {:time t :property property :index index :value v :easing :linear})))]
     (concat (row :shadow-offset-x :offset-x) (row :shadow-offset-y :offset-y))))
 
+(def ^:private group-trim-step
+  "How often, ms, the layers of a group whose trim draws them in turn take
+  a value (see `play-group-trims`)."
+  (/ 1000 60))
+
+(defn- trim-layers
+  "The layers of the group `id` of `objects` its trim draws, as deep as
+  they go, the topmost first: those with strokes, but the hidden ones."
+  [objects id]
+  (into []
+        (mapcat (fn [child-id]
+                  (let [child (get objects child-id)]
+                    (cond
+                      (or (nil? child) (:hidden child))  []
+                      (= :group (:type child))           (trim-layers objects child-id)
+                      (d/not-empty? (:strokes child))    [child-id]
+                      :else                              []))))
+        (reverse (:shapes (get objects id)))))
+
+(defn- in-turn-rows
+  "The trim rows of the layers `ids` of `objects` that the trim `rows` (by
+  property, sorted, looping where `loops` says) of their group draws one
+  after another through `duration`: each takes its share of the length of
+  them all, sampled `group-trim-step` apart, thinned."
+  [objects ids rows loops duration]
+  (let [lengths (mapv #(max 1e-6 (gtl/outline-length (get objects %))) ids)
+        total   (reduce + lengths)
+        starts  (vec (reductions + 0 lengths))
+        value   (fn [property t]
+                  (if-let [row (get rows property)]
+                    (property-value-at row (if (contains? loops property) (loop-time row t) t))
+                    (get trim-properties property)))
+        times   (-> (into (sorted-set duration)
+                          (comp (map #(mth/round (* % group-trim-step))) (take-while #(< % duration)))
+                          (range))
+                    (into (comp (mapcat val) (map :time) (filter #(<= 0 % duration))) rows)
+                    vec)
+        samples (mapv (fn [t] [t (value :trim-start t) (value :trim-end t) (value :trim-offset t)]) times)]
+    (into {}
+          (map-indexed
+           (fn [i id]
+             (let [a     (/ (nth starts i) total)
+                   b     (/ (+ (nth starts i) (nth lengths i)) total)
+                   local (fn [v] (mth/clamp (/ (- v a) (- b a)) 0 1))
+                   row   (fn [property pick]
+                           (for [[t v] (thinned (mapv (fn [[t s e o]] [t (local (+ (pick s e) o))]) samples) 0.002)]
+                             (make-keyframe {:time t :property property :value v :easing :linear})))]
+               [id (concat (row :trim-start (fn [s _] s)) (row :trim-end (fn [_ e] e)))])))
+          ids)))
+
+(defn- play-group-trims
+  "`timeline` (with its tracks as they play) with the trim of each group
+  drawing the layers in it (see `trim-layers`): in place of their own
+  trims, its rows all at once (`:together`, see `trim-mode-of`), or
+  one after another along their lengths (`:in-turn`, sampled). A group
+  draws nothing itself: its own trim rows go."
+  [timeline objects]
+  (let [groups (keep (fn [[id track]]
+                       (when (and (= :group (dm/get-in objects [id :type]))
+                                  (some #(contains? trim-properties (:property %)) (:keyframes track)))
+                         id))
+                     (:tracks timeline))]
+    (if (empty? groups)
+      timeline
+      (reduce
+       (fn [timeline group-id]
+         (let [track    (get-in timeline [:tracks group-id])
+               trim?    #(contains? trim-properties (:property %))
+               rows     (into {} (map (fn [[p kfs]] [p (sort-keyframes kfs)]))
+                              (group-by :property (filter trim? (:keyframes track))))
+               loops    (into #{} (filter trim-properties) (:loops track #{}))
+               ids      (trim-layers objects group-id)
+               mode     (or (:trim-mode track) :together)
+               own-rows (if (= :in-turn mode)
+                          (in-turn-rows objects ids rows loops (max 1 (or (:duration timeline) 0)))
+                          (zipmap ids (repeat (into [] (comp (mapcat val) (map #(assoc % :id (uuid/next)))) rows))))
+               timeline (update-in timeline [:tracks group-id]
+                                   (fn [track]
+                                     (-> track
+                                         (update :keyframes #(filterv (complement trim?) %))
+                                         (d/update-when :loops #(into #{} (remove trim-properties) %)))))]
+           (reduce (fn [timeline id]
+                     (update-in timeline [:tracks id]
+                                (fn [track]
+                                  (-> (or track {:shape-id id :keyframes []})
+                                      (update :keyframes #(sort-keyframes (into (filterv (complement trim?) %) (get own-rows id))))
+                                      ;; all at once, they loop as the group does
+                                      (update :loops (fn [l]
+                                                       (let [l (into #{} (remove trim-properties) (or l #{}))]
+                                                         (if (= :in-turn mode) l (into l loops)))))))))
+                   timeline
+                   ids)))
+       timeline
+       groups))))
+
 (defn- play-cast-shadows
   "`timeline` (with its tracks as they play) with the shadows of the
   layers of each board whose light casts them (`:shadows` of its
@@ -3606,30 +3721,33 @@
   animations that play the units of a text one by one, which stay the
   `:animations` of its track (see `text-unit-entries`), and the outlines
   of a path matched to morph into each other (see `match-outlines`); its
-  links played (see `play-links`) and the shadows a turning light casts
-  (see `play-cast-shadows`).
+  links played (see `play-links`), the trims of groups passed to what
+  they hold (see `play-group-trims`) and the shadows a turning light
+  casts (see `play-cast-shadows`).
   Everything that reads keyframes uses it: the preview, the playback and
   the exports."
   [timeline objects]
   (match-outlines
    (play-cast-shadows
-    (play-links
-     (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
-       (update timeline :tracks
-               (fn [tracks]
-                 (reduce-kv (fn [tracks shape-id track]
-                              (let [track (resolve-track timeline objects shape-id (visible-track track))]
-                                ;; Nothing left to play once all of it is hidden;
-                                ;; a track that follows, reaches or holds the
-                                ;; pivot others turn around plays still.
-                                (if (and (empty? (:keyframes track)) (empty? (:animations track))
-                                         (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
-                                         (empty? (:links track)))
-                                  (dissoc tracks shape-id)
-                                  (assoc tracks shape-id track))))
-                            tracks
-                            tracks)))
-       timeline)
+    (play-group-trims
+     (play-links
+      (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
+        (update timeline :tracks
+                (fn [tracks]
+                  (reduce-kv (fn [tracks shape-id track]
+                               (let [track (resolve-track timeline objects shape-id (visible-track track))]
+                                 ;; Nothing left to play once all of it is hidden;
+                                 ;; a track that follows, reaches or holds the
+                                 ;; pivot others turn around plays still.
+                                 (if (and (empty? (:keyframes track)) (empty? (:animations track))
+                                          (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
+                                          (empty? (:links track)))
+                                   (dissoc tracks shape-id)
+                                   (assoc tracks shape-id track))))
+                             tracks
+                             tracks)))
+        timeline)
+      objects)
      objects)
     objects)))
 
@@ -3936,7 +4054,8 @@
     (some? (:background-blur shape))
 
     (:trim-start :trim-end :trim-offset)
-    (d/not-empty? (:strokes shape))
+    ;; a group trims the layers in it (see `play-group-trims`)
+    (or (d/not-empty? (:strokes shape)) (= :group (:type shape)))
 
     (:perspective :perspective-x :perspective-y)
     (= :frame (:type shape))

@@ -499,6 +499,25 @@
           (.clear timeline rect)
           (t/is (nil? (stored-track store context board rect))))))))
 
+(t/deftest a-group-trims-the-layers-in-it
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js other            (.createRectangle context)
+            _                    (.appendChild board other)
+            ^js group            (.group context #js [rect other])
+            ^js timeline         (.addTimeline board)]
+        (t/is (= "together" (.trimModeOf timeline group)) "by default")
+        (.setTrimMode timeline group "in-turn")
+        (t/is (= "in-turn" (.trimModeOf timeline group)))
+        (t/is (= :in-turn (:trim-mode (stored-track store context board group))))
+        (t/is (thrown? js/Error (.setTrimMode timeline group "sideways")))
+        (t/is (thrown? js/Error (.setTrimMode timeline rect "in-turn")) "only a group")
+        (.setTrimMode timeline group "together")
+        (t/is (= "together" (.trimModeOf timeline group)))
+        (t/is (not (contains? (stored-track store context board group) :trim-mode)))))))
+
 (t/deftest preset-animations-play-effects
   (thw/with-wasm-mocks*
     (fn []

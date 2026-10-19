@@ -316,6 +316,7 @@
                               :select-on-focus (not @disable-drag)
                               :ids ids}])])
 
-        ;; In motion mode: how much of the outline the strokes draw
-        (when (and (not= :multiple strokes) (seq strokes))
-          [:> trim-row* {}])])]))
+        ;; In motion mode: how much of the outline the strokes draw; a
+        ;; group draws the layers in it
+        (when (or (= :group type) (and (not= :multiple strokes) (seq strokes)))
+          [:> trim-row* {:group (= :group type)}])])]))

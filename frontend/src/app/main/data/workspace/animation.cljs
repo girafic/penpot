@@ -1330,6 +1330,21 @@
                (rx/of (apply-preview)))))
           (rx/empty))))))
 
+(defn set-trim-mode
+  "Make the trim of the group `shape-id` draw the layers in it `mode`:
+  `:together` or `:in-turn` (see `cta/trim-mode-of`)."
+  [shape-id mode]
+  (ptk/reify ::set-trim-mode
+    ptk/WatchEvent
+    (watch [it state _]
+      (if-let [tl (current-timeline state)]
+        (let [tl' (cta/set-trim-mode tl shape-id mode)]
+          (if (= tl tl')
+            (rx/empty)
+            (rx/of (commit-timeline it state (:board-id tl') tl')
+                   (apply-preview))))
+        (rx/empty)))))
+
 (defn set-track-origin
   "Set the scale/rotation pivot of `shape-id` (normalized 0–1)."
   [shape-id ox oy]

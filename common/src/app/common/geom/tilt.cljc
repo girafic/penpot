@@ -703,6 +703,18 @@
     :path   (path-polylines (:content shape))
     [{:points (vec (:points shape)) :closed? true}]))
 
+(defn outline-length
+  "The length of the outline of `shape` (see `outline-polylines`), px:
+  how much of it a trim draws."
+  [shape]
+  (reduce (fn [total {:keys [points closed?]}]
+            (let [pts   (vec points)
+                  pairs (cond-> (partition 2 1 pts)
+                          (and closed? (> (count pts) 2)) (concat [[(peek pts) (first pts)]]))]
+              (+ total (reduce (fn [l [a b]] (+ l (gpt/distance a b))) 0 pairs))))
+          0
+          (outline-polylines shape)))
+
 (defn projected-outline
   "The outline of `shape` (see `outline-polylines`) as it shows, tilted:
   nil when nothing tilts it or a point reaches the viewer."

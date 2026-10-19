@@ -4599,6 +4599,34 @@ export interface Timeline {
   setOrigin(shape: Shape, origin: { x: number; y: number }): void;
 
   /**
+   * How the trim of the group `shape` (its `trimStart`, `trimEnd` and
+   * `trimOffset` keyframes) draws the layers in it: `'together'`, each
+   * as far along its own outline, or `'in-turn'`, one after another as if
+   * their outlines made one, the topmost first. A group draws nothing
+   * itself; its trim takes the place of those of the layers in it.
+   * Penpot Motion.
+   * @param shape A group inside the board.
+   */
+  trimModeOf(shape: Group): TrimMode;
+
+  /**
+   * Makes the trim of the group `shape` draw the layers in it `mode` (see
+   * `trimModeOf`).
+   * @param shape A group inside the board.
+   * @param mode `'together'` or `'in-turn'`.
+   *
+   * Draw a group of lines as one, the topmost first:
+   *
+   * @example
+   * ```js
+   * timeline.setTrimMode(lines, 'in-turn');
+   * timeline.addKeyframe(lines, { property: 'trimEnd', time: 0, value: 0 });
+   * timeline.addKeyframe(lines, { property: 'trimEnd', time: 1200, value: 1 });
+   * ```
+   */
+  setTrimMode(shape: Group, mode: TrimMode): void;
+
+  /**
    * How `shape` follows another layer of the board, as the Follow section
    * of the Motion tab sets it, or `null` when it follows none.
    * @param shape A layer inside the board.
@@ -5319,6 +5347,12 @@ export interface Link {
 }
 
 /**
+ * How the trim of a group draws the layers in it, see
+ * `Timeline.setTrimMode`.
+ */
+export type TrimMode = 'together' | 'in-turn';
+
+/**
  * The curve a link with a range follows, see `LinkProps.easing`.
  */
 export type LinkEasing = 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
@@ -5835,7 +5869,8 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  * - `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
  *   `#ff6600`.
  * - `trimStart`, `trimEnd`, `trimOffset`: a fraction of the outline (0 to
- *   1) the strokes are drawn along, to draw a line on.
+ *   1) the strokes are drawn along, to draw a line on. On a group they
+ *   trim the layers in it (see `Timeline.setTrimMode`).
  * - `path`: the outline of a path layer, an SVG path like its `d`, in
  *   page coordinates where the path rests. The outline morphs from one
  *   keyframe to the next, points added where two have not as many. Only

@@ -1788,6 +1788,28 @@
               (write! :setOrigin #(cta/set-track-origin % shape-id x y))
               (u/not-valid plugin-id :setOrigin "The origin should be { x, y }, each from 0 to 1")))))
 
+      ;; How the trim of a group draws the layers in it: all at once or
+      ;; one after another along their lengths
+      :trimModeOf
+      (fn [shape]
+        (when-let [shape-id (layer :trimModeOf shape)]
+          (case (cta/trim-mode-of (locate) shape-id)
+            :in-turn "in-turn"
+            "together")))
+
+      :setTrimMode
+      (fn [shape mode]
+        (when-let [shape-id (layer :setTrimMode shape)]
+          (cond
+            (not= :group (:type (get (u/locate-objects file-id page-id) shape-id)))
+            (u/not-valid plugin-id :setTrimMode "Only a group trims the layers in it")
+
+            (not (contains? #{"together" "in-turn"} mode))
+            (u/not-valid plugin-id :setTrimMode "The mode should be 'together' or 'in-turn'")
+
+            :else
+            (write! :setTrimMode #(cta/set-trim-mode % shape-id (keyword mode))))))
+
       ;; Whom a layer follows, as the Follow section of the Motion tab
       ;; sets it: what its leader does from its first frame, a delay later
       :followOf

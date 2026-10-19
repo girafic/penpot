@@ -10181,7 +10181,7 @@ Group:
     * ShapeBase
       + Group
 
-    Referenced by: Context, ContextTypesUtils, Penpot, Shape
+    Referenced by: Context, ContextTypesUtils, Penpot, Shape, Timeline
   members:
     Properties:
       type: |-
@@ -18085,6 +18085,8 @@ Timeline:
         clear(shape: Shape): void;
         originOf(shape: Shape): { x: number; y: number };
         setOrigin(shape: Shape, origin: { x: number; y: number }): void;
+        trimModeOf(shape: Group): TrimMode;
+        setTrimMode(shape: Group, mode: TrimMode): void;
         followOf(shape: Shape): Follow | null;
         setFollow(shape: Shape, follow: FollowProps | null): void;
         linksOf(shape: Shape): Link[];
@@ -18503,6 +18505,50 @@ Timeline:
         Example
         ```
         timeline.setOrigin(door, { x: 0, y: 0.5 });timeline.addKeyframe(door, { property: 'scaleX', time: 0, value: 1 });timeline.addKeyframe(door, { property: 'scaleX', time: 600, value: 0 });
+        ```
+      trimModeOf: |-
+        ```
+        trimModeOf(shape: Group): TrimMode
+        ```
+
+        How the trim of the group `shape` (its `trimStart`, `trimEnd` and
+        `trimOffset` keyframes) draws the layers in it: `'together'`, each
+        as far along its own outline, or `'in-turn'`, one after another as if
+        their outlines made one, the topmost first. A group draws nothing
+        itself; its trim takes the place of those of the layers in it.
+        Penpot Motion.
+
+        Parameters
+
+        * shape: Group
+
+          A group inside the board.
+
+        Returns TrimMode
+      setTrimMode: |-
+        ```
+        setTrimMode(shape: Group, mode: TrimMode): void
+        ```
+
+        Makes the trim of the group `shape` draw the layers in it `mode` (see
+        `trimModeOf`).
+
+        Parameters
+
+        * shape: Group
+
+          A group inside the board.
+        * mode: TrimMode
+
+          `'together'` or `'in-turn'`.
+
+          Draw a group of lines as one, the topmost first:
+
+        Returns void
+
+        Example
+        ```
+        timeline.setTrimMode(lines, 'in-turn');timeline.addKeyframe(lines, { property: 'trimEnd', time: 0, value: 0 });timeline.addKeyframe(lines, { property: 'trimEnd', time: 1200, value: 1 });
         ```
       followOf: |-
         ```
@@ -29197,6 +29243,20 @@ LinkableProperty:
 
     Referenced by: Link, LinkProps, Timeline
   members: {}
+TrimMode:
+  overview: |-
+    Type Alias TrimMode
+    ===================
+
+    ```
+    TrimMode: "together" | "in-turn"
+    ```
+
+    How the trim of a group draws the layers in it, see
+    `Timeline.setTrimMode`.
+
+    Referenced by: Timeline
+  members: {}
 LinkEasing:
   overview: |-
     Type Alias LinkEasing
@@ -29358,7 +29418,8 @@ AnimatableProperty:
     * `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
       `#ff6600`.
     * `trimStart`, `trimEnd`, `trimOffset`: a fraction of the outline (0 to
-      1. the strokes are drawn along, to draw a line on.
+      1. the strokes are drawn along, to draw a line on. On a group they
+         trim the layers in it (see `Timeline.setTrimMode`).
     * `path`: the outline of a path layer, an SVG path like its `d`, in
       page coordinates where the path rests. The outline morphs from one
       keyframe to the next, points added where two have not as many. Only

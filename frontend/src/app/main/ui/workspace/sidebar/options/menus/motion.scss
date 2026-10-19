@@ -361,3 +361,8 @@
   align-items: center;
   gap: var(--sp-xs);
 }
+
+// How the trim of a group draws the layers in it.
+.trim-mode {
+  inline-size: 100%;
+}

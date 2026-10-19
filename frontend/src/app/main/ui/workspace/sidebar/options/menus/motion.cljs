@@ -153,8 +153,10 @@
 (mf/defc trim-row*
   "Path trim of the strokes of the layer: from where to where along its
   outline they are drawn, and how far that part is moved along. Only in
-  motion mode, keyframed: a layer has no trim of its own."
-  []
+  motion mode, keyframed: a layer has no trim of its own. A `group`
+  trims the layers in it, all at once or one after another (see
+  `cta/trim-mode-of`)."
+  [{:keys [group]}]
   (let [shape-id (mf/use-ctx ctx/motion-shape-id)
         playhead (mf/deref ref:playhead)
         timeline (mf/deref ref:timeline)
@@ -178,7 +180,10 @@
 
         on-start  (mf/use-fn (mf/deps change) #(change :trim-start %))
         on-end    (mf/use-fn (mf/deps change) #(change :trim-end %))
-        on-offset (mf/use-fn (mf/deps change) #(change :trim-offset %))]
+        on-offset (mf/use-fn (mf/deps change) #(change :trim-offset %))
+        on-mode   (mf/use-fn
+                   (mf/deps shape-id)
+                   #(st/emit! (dwa/set-trim-mode shape-id (keyword %))))]
 
     (when (some? shape-id)
       [:div {:class (stl/css :trim-row)}
@@ -200,7 +205,14 @@
                             :property (tr "workspace.animation.trim-offset")
                             :value (display :trim-offset)
                             :on-change on-offset}]
-        [:> keyframe-diamond* {:properties [:trim-start :trim-end :trim-offset]}]]])))
+        [:> keyframe-diamond* {:properties [:trim-start :trim-end :trim-offset]}]]
+       (when group
+         [:> select* {:class (stl/css :trim-mode)
+                      :options [{:id "together" :label (tr "workspace.animation.trim-together")}
+                                {:id "in-turn" :label (tr "workspace.animation.trim-in-turn")}]
+                      :default-selected (name (cta/trim-mode-of timeline shape-id))
+                      :aria-label (tr "workspace.animation.trim-mode")
+                      :on-change on-mode}])])))
 
 ;; PRESET ANIMATIONS
 

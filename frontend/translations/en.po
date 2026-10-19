@@ -7130,6 +7130,18 @@ msgstr "Background blur"
 msgid "workspace.animation.path-trim"
 msgstr "Path trim"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.trim-together"
+msgstr "All at once"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.trim-in-turn"
+msgstr "One after another"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.trim-mode"
+msgstr "How the trim of the group draws the layers in it"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs, src/app/main/ui/workspace/timeline.cljs
 msgid "workspace.animation.trim-start"
 msgstr "Trim start"

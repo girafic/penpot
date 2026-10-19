@@ -316,6 +316,41 @@
     (t/is (not (str/includes? (acss/timeline->css tl {bid (assoc board :orthographic true)}) "perspective"))
           "seen without perspective, none plays")))
 
+(t/deftest a-group-trims-the-layers-in-it
+  ;; a group holding two stroked squares, one round of 100 px and one of
+  ;; 300 px (the second on top), its trim end going 0 to 1 in a second
+  (let [stroke  [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2 :stroke-style :solid :stroke-alignment :center}]
+        board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bid     (:id board)
+        small   (assoc (cts/setup-shape {:type :rect :x 10 :y 10 :width 25 :height 25}) :strokes stroke)
+        large   (assoc (cts/setup-shape {:type :rect :x 100 :y 10 :width 75 :height 75}) :strokes stroke)
+        group   (cts/setup-shape {:type :group :x 10 :y 10 :width 165 :height 75})
+        gid     (:id group)
+        in      #(assoc % :parent-id gid :frame-id bid)
+        objects {bid (assoc board :shapes [gid])
+                 gid (assoc group :parent-id bid :frame-id bid :shapes [(:id small) (:id large)])
+                 (:id small) (in small)
+                 (:id large) (in large)}
+        tl      (-> (mk-timeline)
+                    (assoc :board-id bid :duration 1000)
+                    (cta/add-keyframe gid {:time 0 :property :trim-end :value 0 :easing :linear})
+                    (cta/add-keyframe gid {:time 1000 :property :trim-end :value 1}))
+        ends    (fn [tl t] (mapv #(mth/precision (get-in (cta/values-at (cta/resolve-animations tl objects) t) [% :trim-end] 1) 3)
+                                 [(:id small) (:id large)]))]
+    (t/is (true? (cta/fits-keyframe? group {:property :trim-end})))
+    (t/is (= :together (cta/trim-mode-of tl gid)))
+    (t/testing "all at once"
+      (t/is (= [0.5 0.5] (ends tl 500)))
+      (t/is (empty? (get-in (cta/resolve-animations tl objects) [:tracks gid :keyframes]))
+            "the group draws nothing itself"))
+    (t/testing "one after another, the topmost first, by their lengths"
+      (let [turn (cta/set-trim-mode tl gid :in-turn)]
+        (t/is (= :in-turn (get-in turn [:tracks gid :trim-mode])))
+        (t/is (= [0.0 0.667] (ends turn 500)) "200 of 400 px: two thirds of the large one")
+        (t/is (= [1.0 1.0] (ends turn 1000)))
+        (t/is (nil? (get-in (cta/set-trim-mode turn gid :together) [:tracks gid :trim-mode]))
+              "all at once as absence")))))
+
 (t/deftest the-light-of-a-board-plays
   (let [board (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
                   (assoc :light {:angle 90 :height 30 :ambient 0.2}))
