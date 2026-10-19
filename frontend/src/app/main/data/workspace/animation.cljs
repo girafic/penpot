@@ -693,6 +693,49 @@
         (rx/of (set-follow shape-id (merge follow changes)))
         (rx/empty)))))
 
+(defn set-link
+  "Make `property` of the layer `shape-id` play a property of another
+  layer of its board as `link` says (see `cta/set-link`), in one undo
+  step. A source it cannot link (see `cltl/can-link?`) changes nothing."
+  [shape-id link]
+  (ptk/reify ::set-link
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl      (layer-board-timeline state shape-id)
+            objects (dsh/lookup-page-objects state)
+            tl'     (some-> tl (cta/set-link shape-id link))]
+        (if (and (some? tl)
+                 (not= tl tl')
+                 (cltl/can-link? objects tl (:source link)))
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview))
+          (rx/empty))))))
+
+(defn update-link
+  "Change the link of `property` of the layer `shape-id`: `changes` taken
+  into it (see `cta/link-of`), such as a `:factor`."
+  [shape-id property changes]
+  (ptk/reify ::update-link
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if-let [link (some-> (layer-board-timeline state shape-id) (cta/link-of shape-id property))]
+        (rx/of (set-link shape-id (merge link changes)))
+        (rx/empty)))))
+
+(defn remove-link
+  "Make `property` of the layer `shape-id` play its own keyframes again
+  (see `cta/remove-link`), in one undo step."
+  [shape-id property]
+  (ptk/reify ::remove-link
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl  (layer-board-timeline state shape-id)
+            tl' (some-> tl (cta/remove-link shape-id property))]
+        (if (and (some? tl) (not= tl tl'))
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview))
+          (rx/empty))))))
+
 (defn set-ik
   "Make the layer `shape-id`, the end of a chain of two follows, reach
   another layer of its board as `ik` says (see `cta/set-ik`), in one undo
@@ -805,7 +848,9 @@
 
 (defn picking-purpose
   "What the pick of the layer `picking-leader` is for: its leader
-  (`:leader`, see `pick-leader`) or its goal (`:goal`, see `pick-goal`)."
+  (`:leader`, see `pick-leader`), its goal (`:goal`, see `pick-goal`) or
+  the source of the link of a property (`[:link property]`, see
+  `pick-link-source`)."
   [state]
   (dm/get-in state [:workspace-animation :picking-purpose] :leader))
 
@@ -813,7 +858,7 @@
   "End the pick of a leader or goal of `shape-id` (see `pick-leader` and
   `pick-goal`), whose leader is `leader`, or goal `goal`, or none.
   `shape-id` stays selected, while it is on the page."
-  [shape-id {:keys [leader goal]}]
+  [shape-id {:keys [leader goal source property]}]
   (ptk/reify ::end-pick-leader
     ptk/UpdateEvent
     (update [_ state]
@@ -832,6 +877,11 @@
              (and (some? goal) (not= goal shape-id))
              ;; as stored: an elbow never set bends as drawn
              (rx/of (set-ik shape-id (assoc (dm/get-in tl [:tracks shape-id :ik]) :goal goal)))
+
+             (and (some? source) (some? property))
+             (rx/of (set-link shape-id (assoc (or (some-> tl (cta/link-of shape-id property))
+                                                  {:property property :source-property property})
+                                              :source source)))
 
              :else
              (rx/empty))
@@ -858,13 +908,19 @@
       (let [shape-id (picking-leader state)
             tl       (some->> shape-id (layer-board-timeline state))
             objects  (dsh/lookup-page-objects state)
-            goal?    (= :goal (picking-purpose state))]
+            purpose  (picking-purpose state)
+            goal?    (= :goal purpose)
+            link     (when (vector? purpose) (second purpose))]
         (if (and (some? leader-id)
                  (some? tl)
-                 (if goal?
-                   (cltl/can-reach? objects tl shape-id leader-id)
-                   (cltl/can-follow? objects tl shape-id leader-id)))
-          (rx/of (end-pick-leader shape-id (if goal? {:goal leader-id} {:leader leader-id})))
+                 (cond
+                   (some? link) (cltl/can-link? objects tl leader-id)
+                   goal?        (cltl/can-reach? objects tl shape-id leader-id)
+                   :else        (cltl/can-follow? objects tl shape-id leader-id)))
+          (rx/of (end-pick-leader shape-id (cond
+                                             (some? link) {:source leader-id :property link}
+                                             goal?        {:goal leader-id}
+                                             :else        {:leader leader-id})))
           (rx/empty))))))
 
 (def ^:private pick-endings
@@ -883,9 +939,9 @@
     ptk/UpdateEvent
     (update [_ state]
       (update state :workspace-animation
-              #(if (= :goal purpose)
-                 (assoc % :picking-leader shape-id :picking-purpose :goal)
-                 (-> (assoc % :picking-leader shape-id) (dissoc :picking-purpose)))))
+              #(if (= :leader purpose)
+                 (-> (assoc % :picking-leader shape-id) (dissoc :picking-purpose))
+                 (assoc % :picking-leader shape-id :picking-purpose purpose))))
 
     ptk/WatchEvent
     (watch [_ _ stream]
@@ -919,6 +975,13 @@
   a leader."
   [shape-id]
   (pick shape-id :goal))
+
+(defn pick-link-source
+  "Make the next layer clicked on the canvas or in the layers the source
+  `property` of the layer `shape-id` plays (see `set-link`), as
+  `pick-leader` does for a leader."
+  [shape-id property]
+  (pick shape-id [:link property]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TIMELINE CRUD

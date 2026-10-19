@@ -1482,6 +1482,42 @@
   (let [file (delete (following-file) :rect)]
     (t/is (nil? (cta/follow-of (get (timelines file) (thi/id :board-a)) (thi/id :dot))))))
 
+;; PROPERTY LINKS
+
+(defn- linking-file
+  "`animated-file` with a dot in board A whose rotation plays the X of
+  the rect."
+  []
+  (let [file (-> (animated-file)
+                 (ths/add-sample-shape :dot :type :rect :parent-label :board-a
+                                       :x 300 :y 200 :width 10 :height 10))
+        a    (thi/id :board-a)
+        tl   (cta/set-link (get (timelines file) a) (thi/id :dot)
+                           {:property :rotation :source (thi/id :rect) :source-property :x :factor 2})]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline a tl)))))
+
+(t/deftest a-copied-board-links-in-its-copy
+  (let [file     (linking-file)
+        page     (thf/current-page file)
+        a        (thi/id :board-a)
+        changes  (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                 (:objects page) page #{a} (gpt/point 500 0)
+                                                 {(:id file) file} (:data file) (:id file))
+        copy-of  (into {} (keep #(when (= :add-obj (:type %)) [(:old-id %) (-> % :obj :id)])) (:redo-changes changes))
+        file     (thf/apply-changes file changes)
+        tl       (get (timelines file) (copy-of a))]
+    (t/is (= (copy-of (thi/id :rect)) (:source (cta/link-of tl (copy-of (thi/id :dot)) :rotation)))
+          "the copy of its source")
+    (t/is (cta/valid-timeline? tl))))
+
+(t/deftest a-link-whose-source-leaves-the-board-or-goes-links-no-more
+  (t/is (empty? (cta/links-of (get (timelines (relocate (linking-file) :rect :board-b)) (thi/id :board-a))
+                              (thi/id :dot))))
+  (t/is (empty? (cta/links-of (get (timelines (delete (linking-file) :rect)) (thi/id :board-a))
+                              (thi/id :dot)))))
+
 (defn- reaching-board-file
   "`animated-file` with an arm in board A (an upper arm, a forearm
   following it and a hand following that) whose hand reaches a ball."

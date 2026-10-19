@@ -1843,6 +1843,78 @@
                                                       (some? delay) (assoc :delay (mth/round delay))
                                                       (some? from)  (assoc :from (keyword from))))))))))
 
+      ;; The links of the properties of a layer, as the Links section of
+      ;; the Motion tab sets them: each plays a property of a layer of the
+      ;; board, mapped by a factor and an offset, a delay later
+      :linksOf
+      (fn [shape]
+        (when-let [shape-id (layer :linksOf shape)]
+          (apply array
+                 (map (fn [{:keys [property source source-property factor offset delay]}]
+                        #js {:property (get property-names property)
+                             :source (shape-proxy plugin-id file-id page-id source)
+                             :sourceProperty (get property-names source-property)
+                             :factor factor
+                             :offset offset
+                             :delay delay})
+                      (cta/links-of (locate) shape-id)))))
+
+      :link
+      (fn [shape link]
+        (when-let [shape-id (layer :link shape)]
+          (let [prop      #(when (object? link) (obj/get link %))
+                linkable  (set cta/link-properties)
+                property  (get properties (prop "property"))
+                source    (prop "source")
+                source-id (when (shape-proxy? source) (obj/get source "$id"))
+                read      (or (prop "sourceProperty") (prop "property"))
+                source-p  (get properties read)
+                factor    (prop "factor")
+                offset    (prop "offset")
+                delay     (prop "delay")
+                objects   (u/locate-objects file-id page-id)
+                timeline  (or (locate) (cta/make-timeline {:board-id board-id}))
+                names     (str/join ", " (map #(dm/str "'" (get property-names %) "'") cta/link-properties))
+                error     (cond
+                            (not (object? link))
+                            "The link should be an object with a property and a source"
+
+                            (not (contains? linkable property))
+                            (dm/str "property should be one of " names)
+
+                            (nil? source-id)
+                            "The source should be a shape"
+
+                            (not (contains? linkable source-p))
+                            (dm/str "sourceProperty should be one of " names)
+
+                            (and (some? factor) (not (number? factor)))
+                            "factor should be a number"
+
+                            (and (some? offset) (not (number? offset)))
+                            "offset should be a number"
+
+                            (and (some? delay) (not (valid-time? delay)))
+                            "The delay should be a number of milliseconds from 0"
+
+                            (not (cltl/can-link? objects timeline source-id))
+                            "The source should be a layer of the board")]
+            (if (some? error)
+              (u/not-valid plugin-id :link error)
+              (write! :link #(cta/set-link % shape-id
+                                           (cond-> {:property property :source source-id :source-property source-p}
+                                             (some? factor) (assoc :factor factor)
+                                             (some? offset) (assoc :offset offset)
+                                             (some? delay)  (assoc :delay (mth/round delay)))))))))
+
+      :unlink
+      (fn [shape property]
+        (when-let [shape-id (layer :unlink shape)]
+          (let [property (get properties property)]
+            (if (contains? (set cta/link-properties) property)
+              (write! :unlink #(cta/remove-link % shape-id property))
+              (u/not-valid plugin-id :unlink "The property should be one a link can drive")))))
+
       ;; The goal the end of a chain of two follows reaches, as the Reach
       ;; section of the Motion tab sets it
       :ikOf

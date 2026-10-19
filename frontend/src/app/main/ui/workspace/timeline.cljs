@@ -511,7 +511,8 @@
 
 (defn- animated-ids
   "Ids of the layers of `board-id` (itself included) that have keyframes,
-  preset animations, a leader they follow (see `cta/follow-of`) or
+  preset animations, a leader they follow (see `cta/follow-of`), links
+  (see `cta/links-of`) or
   animated children, or that are component copies playing the animation
   of their mains (`copy-spans`, see `timeline-rows`)."
   ([objects board-id timeline]
@@ -522,6 +523,7 @@
                (if (or (seq (dm/get-in timeline [:tracks id :keyframes]))
                        (seq (dm/get-in timeline [:tracks id :animations]))
                        (some? (dm/get-in timeline [:tracks id :follow]))
+                       (seq (dm/get-in timeline [:tracks id :links]))
                        (contains? copy-spans id)
                        (seq child-ids))
                  (cons id child-ids)
@@ -850,7 +852,8 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [row-index shape depth expandable? expanded? selected? hovered? outside?
-           leader-id leader-name goal-id goal-name on-toggle on-select on-context-menu on-hover]}]
+           leader-id leader-name goal-id goal-name link link-name
+           on-toggle on-select on-context-menu on-hover]}]
   (let [shape-id (:id shape)
         ;; in the colour of components, as in the layers panel
         component? (ctk/instance-head? shape)
@@ -905,7 +908,15 @@
          (mf/deps goal-id)
          (fn [event]
            (dom/stop-propagation event)
-           (st/emit! (dws/select-shape goal-id))))]
+           (st/emit! (dws/select-shape goal-id))))
+
+        link-source (:source link)
+        on-link-click
+        (mf/use-fn
+         (mf/deps link-source)
+         (fn [event]
+           (dom/stop-propagation event)
+           (st/emit! (dws/select-shape link-source))))]
 
     [:div {:class (stl/css-case :row true
                                 :layer-row true
@@ -944,7 +955,18 @@
                   :class (stl/css :follow-chip)
                   :title (tr "workspace.animation.follows-hint")
                   :on-click on-leader-click}
-         (tr "workspace.animation.follows" leader-name)])
+         (tr "workspace.animation.follows" leader-name)]
+
+        ;; its first link (see `cta/links-of`), its source selected by a click
+        (some? link)
+        [:button {:type "button"
+                  :class (stl/css :follow-chip)
+                  :title (tr "workspace.animation.links-hint")
+                  :on-click on-link-click}
+         (tr "workspace.animation.linked"
+             (labels/property-label (:property link) nil)
+             link-name
+             (labels/property-label (:source-property link) nil))])
       ;; Out of the board, which still animates it (see `outside-ids`).
       (when outside?
         [:span {:class (stl/css :outside-hint)
@@ -3728,6 +3750,8 @@
                                     :leader-name (dm/get-in objects [(dm/get-in timeline [:tracks id :follow :leader]) :name])
                                     :goal-id (dm/get-in timeline [:tracks id :ik :goal])
                                     :goal-name (dm/get-in objects [(dm/get-in timeline [:tracks id :ik :goal]) :name])
+                                    :link (first (dm/get-in timeline [:tracks id :links]))
+                                    :link-name (dm/get-in objects [(dm/get-in timeline [:tracks id :links 0 :source]) :name])
                                     :selected? (contains? selected id)
                                     :hovered? hovered?
                                     :on-toggle on-toggle-layer

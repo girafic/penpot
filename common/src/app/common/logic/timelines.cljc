@@ -153,12 +153,34 @@
        (or (nil? (dm/get-in objects [leader :shape-ref]))
            (contains? (:tracks timeline) leader))))
 
+(defn- placed-to-link?
+  "Whether a property of a layer of the board `board-id` of `objects` can
+  play one of the layer `source` (see `cta/schema:link`): a layer of that
+  board, itself too, but not the board."
+  [objects board-id source]
+  (and (contains? objects source)
+       (not= board-id source)
+       (= board-id (cfh/get-shape-id-root-frame objects source))))
+
+(defn- remapped-links
+  "`track` with the source of each of its links (see `cta/schema:link`)
+  as `source` gives it, the links it gives none for dropped."
+  [track source]
+  (if-let [links (seq (:links track))]
+    (let [links (into [] (keep (fn [link]
+                                 (when-let [other (source (:source link))]
+                                   (assoc link :source other))))
+                      links)]
+      (if (seq links) (assoc track :links links) (dissoc track :links)))
+    track))
+
 (defn- copied-follow
   "`track` of a copy in `new-board` of `objects`, following (see
   `cta/follow-of`) and reaching (see `cta/ik-of`) the copies of its
   leader and goal when they were copied too (in `ids-map`), else its
   leader and goal still, each as long as it is placed for it (see
-  `placed-to-follow?`), else nothing."
+  `placed-to-follow?`), else nothing; its links the copies of their
+  sources so (see `placed-to-link?`)."
   [track ids-map objects new-board]
   (let [placed #(when (some? %)
                   (let [other (get ids-map % %)]
@@ -166,7 +188,8 @@
                       other)))
         leader (dm/get-in track [:follow :leader])
         goal   (dm/get-in track [:ik :goal])]
-    (cond-> track
+    (cond-> (remapped-links track #(let [other (get ids-map % %)]
+                                     (when (placed-to-link? objects new-board other) other)))
       (some? leader)
       (as-> track (if-let [leader (placed leader)]
                     (assoc-in track [:follow :leader] leader)
@@ -181,17 +204,21 @@
   "`timelines` (of the shapes `objects`) without the follows of layers
   whose leaders are gone, out of the board of their timeline, or now in
   them or holding them (see `placed-to-follow?`), nor the goals (see
-  `cta/ik-of`) so placed."
+  `cta/ik-of`) so placed, nor the links whose sources left the board
+  (see `placed-to-link?`)."
   [timelines objects]
   (reduce-kv
    (fn [timelines board-id timeline]
      (reduce-kv (fn [timelines id track]
                   (let [leader  (dm/get-in track [:follow :leader])
                         goal    (dm/get-in track [:ik :goal])
-                        strayed #(and (some? %) (not (placed-to-follow? objects board-id id %)))]
+                        strayed #(and (some? %) (not (placed-to-follow? objects board-id id %)))
+                        unlinked (remove #(placed-to-link? objects board-id (:source %)) (:links track))]
                     (cond-> timelines
                       (strayed leader) (update board-id cta/set-follow id nil)
-                      (strayed goal)   (update board-id cta/set-ik id nil))))
+                      (strayed goal)   (update board-id cta/set-ik id nil)
+                      (seq unlinked)   (update board-id #(reduce (fn [tl link] (cta/remove-link tl id (:property link)))
+                                                                 % unlinked)))))
                 timelines
                 (:tracks timeline)))
    timelines
@@ -586,7 +613,8 @@
   and reaching the copies of their goals, by `refs` (a delay of each
   main shape a copy shape plays, to that copy shape, see `ref-ids`),
   with a track or not: a still goal, or an upper arm turning on its
-  centre, drives a chain. A follow or goal with no copy is dropped."
+  centre, drives a chain. A follow or goal with no copy is dropped, as is
+  a link (see `cta/schema:link`) whose source has none."
   [result head-id refs]
   (reduce-kv
    (fn [result k entry]
@@ -599,9 +627,9 @@
                            (let [leader (dm/get-in track [:follow :leader])
                                  goal   (dm/get-in track [:ik :goal])
                                  copy   #(get @refs %)]
-                             (if (or (some? leader) (some? goal))
+                             (if (or (some? leader) (some? goal) (seq (:links track)))
                                (assoc tracks id
-                                      (cond-> track
+                                      (cond-> (remapped-links track copy)
                                         (some? leader)
                                         (as-> track (if-let [leader (copy leader)]
                                                       (assoc-in track [:follow :leader] leader)
@@ -869,6 +897,21 @@
   can follow (see `can-follow?`), in the order of the layers panel."
   [objects timeline shape-id]
   (filterv #(can-follow? objects timeline shape-id %)
+           (rest (layer-ids objects (:board-id timeline)))))
+
+(defn can-link?
+  "Whether a property of a layer of the board of `timeline` (of `objects`)
+  can play one of the layer `source` (see `cta/schema:link`): a layer of
+  that board, itself too."
+  [objects timeline source]
+  (placed-to-link? objects (:board-id timeline) source))
+
+(defn link-sources
+  "The layers of the board of `timeline` (of `objects`) whose properties
+  a layer of it can play (see `can-link?`), in the order of the layers
+  panel."
+  [objects timeline]
+  (filterv #(can-link? objects timeline %)
            (rest (layer-ids objects (:board-id timeline)))))
 
 (defn reach-problem

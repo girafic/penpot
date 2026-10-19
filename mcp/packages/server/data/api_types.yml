@@ -17944,6 +17944,9 @@ Timeline:
         setOrigin(shape: Shape, origin: { x: number; y: number }): void;
         followOf(shape: Shape): Follow | null;
         setFollow(shape: Shape, follow: FollowProps | null): void;
+        linksOf(shape: Shape): Link[];
+        link(shape: Shape, link: LinkProps): void;
+        unlink(shape: Shape, property: LinkableProperty): void;
         ikOf(shape: Shape): Ik | null;
         setIk(shape: Shape, ik: IkProps | null): void;
         toCSS(): string;
@@ -18409,6 +18412,68 @@ Timeline:
         ```
         timeline.setFollow(badge, { leader: card, delay: 100 });timeline.setFollow(shadow, { leader: button, rotation: false });timeline.setFollow(label, { leader: popIn, from: 'rest' });
         ```
+      linksOf: |-
+        ```
+        linksOf(shape: Shape): Link[]
+        ```
+
+        The links of the properties of `shape`, as the Links section of the
+        Motion tab sets them (see `link`).
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board.
+
+        Returns Link[]
+      link: |-
+        ```
+        link(shape: Shape, link: LinkProps): void
+        ```
+
+        Makes `link.property` of `shape` play `link.sourceProperty` of
+        another layer of the board, `link.source` (the shape itself too), as
+        the pick whip of After Effects with a linear expression: it plays
+        `rest + factor × (source − source at rest) + offset`, `delay`
+        milliseconds after the source, so linking never moves it at rest. It
+        takes the place of the property's own keyframes and loops where the
+        source loops; a chain of links plays through, a cycle plays nothing.
+        Every export plays it as keyframes made from the source's. Linking a
+        property linked already changes that link.
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board.
+        * link: LinkProps
+
+          The property, its source and how it plays it.
+
+        Returns void
+
+        Example
+        ```
+        // the wheel turns 3.6° for each pixel the car movestimeline.link(wheel, { property: 'rotation', source: car, sourceProperty: 'x', factor: 3.6 });// the shadow fades as the ball risestimeline.link(shadow, { property: 'opacity', source: ball, sourceProperty: 'y', factor: 0.004 });
+        ```
+      unlink: |-
+        ```
+        unlink(shape: Shape, property: LinkableProperty): void
+        ```
+
+        Makes `property` of `shape` play its own keyframes again (see `link`).
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board.
+        * property: LinkableProperty
+
+          The property linked.
+
+        Returns void
       ikOf: |-
         ```
         ikOf(shape: Shape): Ik | null
@@ -19229,6 +19294,123 @@ FollowProps:
         ```
 
         Do what the leader does this many milliseconds later. 0 by default.
+Link:
+  overview: |-
+    Interface Link
+    ==============
+
+    How a property of a layer plays a property of another layer of the
+    board, its source, as the Links section of the Motion tab sets it (see
+    `Timeline.link`).
+
+    ```
+    interface Link {
+        property: LinkableProperty;
+        source: Shape;
+        sourceProperty: LinkableProperty;
+        factor: number;
+        offset: number;
+        delay: number;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      property: |-
+        ```
+        readonly property: LinkableProperty
+        ```
+
+        The property it drives.
+      source: |-
+        ```
+        readonly source: Shape
+        ```
+
+        The layer whose property it plays.
+      sourceProperty: |-
+        ```
+        readonly sourceProperty: LinkableProperty
+        ```
+
+        The property of the source it plays.
+      factor: |-
+        ```
+        readonly factor: number
+        ```
+
+        How much it changes for each unit the source changes by.
+      offset: |-
+        ```
+        readonly offset: number
+        ```
+
+        Added to it, in its own unit.
+      delay: |-
+        ```
+        readonly delay: number
+        ```
+
+        How many milliseconds after the source it plays.
+LinkProps:
+  overview: |-
+    Interface LinkProps
+    ===================
+
+    A link to set with `Timeline.link`.
+
+    ```
+    interface LinkProps {
+        property: LinkableProperty;
+        source: Shape;
+        sourceProperty?: LinkableProperty;
+        factor?: number;
+        offset?: number;
+        delay?: number;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      property: |-
+        ```
+        property: LinkableProperty
+        ```
+
+        The property to drive.
+      source: |-
+        ```
+        source: Shape
+        ```
+
+        The layer to read: a layer of the board, the shape itself too.
+      sourceProperty: |-
+        ```
+        sourceProperty?: LinkableProperty
+        ```
+
+        The property of the source to read; `property` by default.
+      factor: |-
+        ```
+        factor?: number
+        ```
+
+        How much it changes for each unit the source changes by. 1 by
+        default.
+      offset: |-
+        ```
+        offset?: number
+        ```
+
+        Added to it, in its own unit. 0 by default.
+      delay: |-
+        ```
+        delay?: number
+        ```
+
+        Play this many milliseconds after the source. 0 by default.
 Ik:
   overview: |-
     Interface Ik
@@ -28768,6 +28950,32 @@ FollowFrom:
 
     Referenced by: Follow, FollowProps
   members: {}
+LinkableProperty:
+  overview: |-
+    Type Alias LinkableProperty
+    ===========================
+
+    ```
+    LinkableProperty:
+        | "x"
+        | "y"
+        | "width"
+        | "height"
+        | "rotation"
+        | "scaleX"
+        | "scaleY"
+        | "opacity"
+        | "rotateX"
+        | "rotateY"
+        | "translateZ"
+        | "blur"
+    ```
+
+    The properties a link drives and reads (see `Timeline.link`): those of
+    one number each.
+
+    Referenced by: Link, LinkProps, Timeline
+  members: {}
 IkBend:
   overview: |-
     Type Alias IkBend
@@ -29129,7 +29337,7 @@ Shape:
     let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, Follow, FollowProps, GridLayout, Group, Ik, IkProps, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
+    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, Follow, FollowProps, GridLayout, Group, Ik, IkProps, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, Link, LinkProps, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-

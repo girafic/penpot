@@ -4565,6 +4565,43 @@ export interface Timeline {
   setFollow(shape: Shape, follow: FollowProps | null): void;
 
   /**
+   * The links of the properties of `shape`, as the Links section of the
+   * Motion tab sets them (see `link`).
+   * @param shape A layer inside the board.
+   */
+  linksOf(shape: Shape): Link[];
+
+  /**
+   * Makes `link.property` of `shape` play `link.sourceProperty` of
+   * another layer of the board, `link.source` (the shape itself too), as
+   * the pick whip of After Effects with a linear expression: it plays
+   * `rest + factor × (source − source at rest) + offset`, `delay`
+   * milliseconds after the source, so linking never moves it at rest. It
+   * takes the place of the property's own keyframes and loops where the
+   * source loops; a chain of links plays through, a cycle plays nothing.
+   * Every export plays it as keyframes made from the source's. Linking a
+   * property linked already changes that link.
+   * @param shape A layer inside the board.
+   * @param link The property, its source and how it plays it.
+   *
+   * @example
+   * ```js
+   * // the wheel turns 3.6° for each pixel the car moves
+   * timeline.link(wheel, { property: 'rotation', source: car, sourceProperty: 'x', factor: 3.6 });
+   * // the shadow fades as the ball rises
+   * timeline.link(shadow, { property: 'opacity', source: ball, sourceProperty: 'y', factor: 0.004 });
+   * ```
+   */
+  link(shape: Shape, link: LinkProps): void;
+
+  /**
+   * Makes `property` of `shape` play its own keyframes again (see `link`).
+   * @param shape A layer inside the board.
+   * @param property The property linked.
+   */
+  unlink(shape: Shape, property: LinkableProperty): void;
+
+  /**
    * The goal `shape` reaches, as the Reach section of the Motion tab sets
    * it, or `null` when it reaches none.
    * @param shape A layer inside the board.
@@ -5126,6 +5163,97 @@ export interface FollowProps {
 
   /**
    * Do what the leader does this many milliseconds later. 0 by default.
+   */
+  delay?: number;
+}
+
+/**
+ * The properties a link drives and reads (see `Timeline.link`): those of
+ * one number each.
+ */
+export type LinkableProperty =
+  | 'x'
+  | 'y'
+  | 'width'
+  | 'height'
+  | 'rotation'
+  | 'scaleX'
+  | 'scaleY'
+  | 'opacity'
+  | 'rotateX'
+  | 'rotateY'
+  | 'translateZ'
+  | 'blur';
+
+/**
+ * How a property of a layer plays a property of another layer of the
+ * board, its source, as the Links section of the Motion tab sets it (see
+ * `Timeline.link`).
+ */
+export interface Link {
+  /**
+   * The property it drives.
+   */
+  readonly property: LinkableProperty;
+
+  /**
+   * The layer whose property it plays.
+   */
+  readonly source: Shape;
+
+  /**
+   * The property of the source it plays.
+   */
+  readonly sourceProperty: LinkableProperty;
+
+  /**
+   * How much it changes for each unit the source changes by.
+   */
+  readonly factor: number;
+
+  /**
+   * Added to it, in its own unit.
+   */
+  readonly offset: number;
+
+  /**
+   * How many milliseconds after the source it plays.
+   */
+  readonly delay: number;
+}
+
+/**
+ * A link to set with `Timeline.link`.
+ */
+export interface LinkProps {
+  /**
+   * The property to drive.
+   */
+  property: LinkableProperty;
+
+  /**
+   * The layer to read: a layer of the board, the shape itself too.
+   */
+  source: Shape;
+
+  /**
+   * The property of the source to read; `property` by default.
+   */
+  sourceProperty?: LinkableProperty;
+
+  /**
+   * How much it changes for each unit the source changes by. 1 by
+   * default.
+   */
+  factor?: number;
+
+  /**
+   * Added to it, in its own unit. 0 by default.
+   */
+  offset?: number;
+
+  /**
+   * Play this many milliseconds after the source. 0 by default.
    */
   delay?: number;
 }

@@ -149,6 +149,27 @@
   color: var(--color-accent-primary);
 }
 
+// A link of a property: its head (the property and its remove button),
+// then its rows.
+.link-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.link-head {
+  display: flex;
+  gap: var(--sp-xs);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.link-property {
+  @include t.use-typography("body-small");
+
+  color: var(--color-foreground-primary);
+}
+
 // A chain that cannot reach its goal, and the button that makes one.
 .reach-broken {
   @include t.use-typography("body-small");

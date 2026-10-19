@@ -397,6 +397,25 @@
    [:bend {:optional true} [:enum :cw :ccw]]
    [:turn {:optional true} [:enum :chain :keep :goal]]])
 
+(def link-properties
+  "The rows a property link drives and reads (see `schema:link`): those
+  of one number each."
+  [:x :y :width :height :rotation :scale-x :scale-y :opacity :rotate-x :rotate-y :translate-z :blur])
+
+(def schema:link
+  "How a property of a layer plays one of another layer of its board, its
+  source (see `links-of`): `rest + factor × (source − source rest) +
+  offset`, `:delay` ms after the source, so that linking never moves it
+  at rest (an AE pick whip with a linear expression). A factor of 1, an
+  offset and a delay of 0 are stored as absence."
+  [:map {:title "AnimationLink"}
+   [:property [::sm/one-of (set link-properties)]]
+   [:source ::sm/uuid]
+   [:source-property [::sm/one-of (set link-properties)]]
+   [:factor {:optional true} ::sm/safe-number]
+   [:offset {:optional true} ::sm/safe-number]
+   [:delay {:optional true} ::sm/safe-int]])
+
 (def schema:track
   [:map {:title "AnimationTrack"}
    [:shape-id ::sm/uuid]
@@ -419,6 +438,8 @@
      [:y ::sm/safe-number]]]
    [:follow {:optional true} schema:follow]
    [:ik {:optional true} schema:ik]
+   ;; its properties that play others (see `schema:link`), one each
+   [:links {:optional true} [:vector {:gen/max 2} schema:link]]
    ;; A helper layer the exports leave out, as a goal ring (see `set-guide`).
    [:guide {:optional true} :boolean]
    ;; The size of the box the outlines of the `:content` keyframes were
@@ -1005,13 +1026,14 @@
 
 (defn empty-track?
   "A track with nothing left: no keyframes, animations, origin, follow,
-  goal to reach nor guide flag."
+  goal to reach, links nor guide flag."
   [track]
   (and (empty? (:keyframes track))
        (empty? (:animations track))
        (nil? (:origin track))
        (nil? (:follow track))
        (nil? (:ik track))
+       (empty? (:links track))
        (not (:guide track))))
 
 (defn set-track-origin
@@ -1084,6 +1106,42 @@
     (if-let [track (get-track timeline shape-id)]
       (store-track timeline shape-id (dissoc track :ik))
       timeline)))
+
+(def ^:private link-defaults
+  {:factor 1 :offset 0 :delay 0})
+
+(defn links-of
+  "The links of the properties of `shape-id` in `timeline` (see
+  `schema:link`), with the defaults, in their order."
+  [timeline shape-id]
+  (mapv #(merge link-defaults %) (dm/get-in timeline [:tracks shape-id :links])))
+
+(defn link-of
+  "The link of `property` of `shape-id` (see `links-of`), or nil."
+  [timeline shape-id property]
+  (d/seek #(= property (:property %)) (links-of timeline shape-id)))
+
+(defn set-link
+  "`timeline` with `property` of `shape-id` playing the property
+  `:source-property` of the layer `:source` of `link` (see
+  `schema:link`), in place of a link it had; the defaults are left out."
+  [timeline shape-id {:keys [property] :as link}]
+  (let [link   (-> (select-keys link [:property :source :source-property :factor :offset :delay])
+                   (d/update-when :delay #(int (mth/round %))))
+        stored (into {} (remove (fn [[k v]] (= v (get link-defaults k ::none)))) link)
+        links  (dm/get-in timeline [:tracks shape-id :links] [])
+        at     (d/index-of-pred links #(= property (:property %)))]
+    (-> (ensure-track timeline shape-id)
+        (assoc-in [:tracks shape-id :links] (if (some? at) (assoc links at stored) (conj links stored))))))
+
+(defn remove-link
+  "`timeline` without the link of `property` of `shape-id` (see
+  `set-link`)."
+  [timeline shape-id property]
+  (if-let [track (get-track timeline shape-id)]
+    (let [links (filterv #(not= property (:property %)) (:links track))]
+      (store-track timeline shape-id (if (seq links) (assoc track :links links) (dissoc track :links))))
+    timeline))
 
 (defn drop-guides
   "`timeline` without the tracks of its helper layers (see `guide?`), for
@@ -3258,6 +3316,88 @@
     (some :hidden animations)
     (update :animations (partial filterv (complement :hidden)))))
 
+(defn- link-rest
+  "The value of `property` that `shape-id` of `objects` rests at in
+  `timeline`, as its keyframes count it (see `rest-value`); its size for
+  `:width` and `:height`."
+  [timeline objects shape-id property]
+  (let [shape (get objects shape-id)]
+    (case property
+      :width  (dm/get-in shape [:selrect :width] 0)
+      :height (dm/get-in shape [:selrect :height] 0)
+      (or (rest-value shape property (position-origin timeline objects shape-id)) 0))))
+
+(defn- linked-row
+  "The keyframes `link` (with the defaults, see `links-of`) gives the
+  property of `shape-id`: those of the source row as it plays in `tracks`,
+  each value mapped (see `schema:link`) and its time delayed; one
+  keyframe of where it rests and the offset for a source row with none,
+  none when that is where it rests."
+  [timeline objects tracks shape-id {:keys [property source source-property factor offset delay]}]
+  (let [source-rest (link-rest timeline objects source source-property)
+        own-rest    (link-rest timeline objects shape-id property)
+        mapped      #(+ own-rest (* factor (- % source-rest)) offset)
+        row         (filterv #(and (= source-property (:property %)) (nil? (:index %)))
+                             (dm/get-in tracks [source :keyframes]))]
+    (if (seq row)
+      (mapv (fn [keyframe]
+              (-> keyframe
+                  (dissoc :index :path-in :path-out :applied-tokens)
+                  (assoc :property property
+                         :value (mapped (:value keyframe))
+                         :time (+ (:time keyframe) delay))))
+            row)
+      (when-not (mth/almost-zero? offset)
+        [{:id (uuid/next) :property property :time 0 :value (mapped source-rest)}]))))
+
+(defn- link-order
+  "The links of `timeline` as `[shape-id link]` (with the defaults, see
+  `links-of`), those whose source rows are linked themselves after them,
+  but those linked in a cycle (through the rows of their sources), which
+  link nothing."
+  [timeline]
+  (let [links  (into [] (mapcat (fn [id] (map #(vector id %) (links-of timeline id))))
+                     (keys (:tracks timeline)))
+        linked (into #{} (map (fn [[id link]] [id (:property link)])) links)
+        after  (fn [[_ link]] [(:source link) (:source-property link)])]
+    (loop [order [] done #{} left links]
+      (let [ready (filter #(let [source (after %)]
+                             (or (not (contains? linked source)) (contains? done source)))
+                          left)]
+        (if (empty? ready)
+          order
+          (recur (into order ready)
+                 (into done (map (fn [[id link]] [id (:property link)])) ready)
+                 (remove (set ready) left)))))))
+
+(defn- play-links
+  "`timeline` (with its tracks as they play) with each linked property
+  playing its source (see `schema:link`, `linked-row`): in place of its
+  own keyframes, looping where its source loops. A link to a layer that is
+  gone links nothing."
+  [timeline objects]
+  (if-not (some (comp seq :links) (vals (:tracks timeline)))
+    timeline
+    (assoc timeline :tracks
+           (reduce
+            (fn [tracks [id link]]
+              (if-not (contains? objects (:source link))
+                tracks
+                (let [property (:property link)
+                      row      (linked-row timeline objects tracks id link)
+                      loops?   (contains? (dm/get-in tracks [(:source link) :loops] #{})
+                                          (:source-property link))]
+                  (update tracks id
+                          (fn [track]
+                            (-> track
+                                (update :keyframes
+                                        #(sort-keyframes
+                                          (into (filterv (fn [k] (not= property (:property k))) %)
+                                                row)))
+                                (update :loops (fnil (if loops? conj disj) #{}) property)))))))
+            (:tracks timeline)
+            (link-order timeline)))))
+
 (defn resolve-animations
   "Return `timeline` as it plays: its hidden rows left out and its preset
   animations turned into the keyframes they stand for, but the split
@@ -3268,21 +3408,24 @@
   the exports."
   [timeline objects]
   (match-outlines
-   (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
-     (update timeline :tracks
-             (fn [tracks]
-               (reduce-kv (fn [tracks shape-id track]
-                            (let [track (resolve-track timeline objects shape-id (visible-track track))]
-                              ;; Nothing left to play once all of it is hidden;
-                              ;; a track that follows, reaches or holds the
-                              ;; pivot others turn around plays still.
-                              (if (and (empty? (:keyframes track)) (empty? (:animations track))
-                                       (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track)))
-                                (dissoc tracks shape-id)
-                                (assoc tracks shape-id track))))
-                          tracks
-                          tracks)))
-     timeline)))
+   (play-links
+    (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
+      (update timeline :tracks
+              (fn [tracks]
+                (reduce-kv (fn [tracks shape-id track]
+                             (let [track (resolve-track timeline objects shape-id (visible-track track))]
+                               ;; Nothing left to play once all of it is hidden;
+                               ;; a track that follows, reaches or holds the
+                               ;; pivot others turn around plays still.
+                               (if (and (empty? (:keyframes track)) (empty? (:animations track))
+                                        (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
+                                        (empty? (:links track)))
+                                 (dissoc tracks shape-id)
+                                 (assoc tracks shape-id track))))
+                           tracks
+                           tracks)))
+      timeline)
+    objects)))
 
 (def ^:private unit-rest
   "The values of a unit of a text at rest, where the text lays it out,
@@ -4097,9 +4240,13 @@
   (let [removed  (set shape-ids)
         timeline (update timeline :tracks #(apply dissoc % shape-ids))
         timeline (reduce-kv (fn [timeline id track]
-                              (cond-> timeline
-                                (contains? removed (dm/get-in track [:follow :leader])) (set-follow id nil)
-                                (contains? removed (dm/get-in track [:ik :goal]))       (set-ik id nil)))
+                              (as-> timeline timeline
+                                (cond-> timeline
+                                  (contains? removed (dm/get-in track [:follow :leader])) (set-follow id nil)
+                                  (contains? removed (dm/get-in track [:ik :goal]))       (set-ik id nil))
+                                (reduce #(remove-link %1 id (:property %2))
+                                        timeline
+                                        (filter #(contains? removed (:source %)) (:links track)))))
                             timeline
                             (:tracks timeline))]
     (if (contains? timeline :copies)

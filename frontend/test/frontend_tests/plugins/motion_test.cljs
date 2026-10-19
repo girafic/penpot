@@ -263,6 +263,39 @@
         (.setOrigin timeline rect #js {:x 0.5 :y 0.5})
         (t/is (nil? (:origin (stored-track store context board rect))) "its center again, as unset")))))
 
+(t/deftest a-property-plays-one-of-another-layer
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]           (setup true)
+            [^js board [^js car ^js wheel ^js third]] (board-with-rects context 3)
+            ^js timeline                  (.addTimeline board)
+            links                         #(mapv (fn [^js link]
+                                                   (-> (js->clj link :keywordize-keys true)
+                                                       (update :source (fn [^js s] (aget s "$id")))))
+                                                 (.linksOf timeline %))]
+        (t/is (= [] (links wheel)) "none at first")
+        (.link timeline wheel #js {:property "rotation" :source car :sourceProperty "x" :factor 3.6})
+        (t/is (= [{:property :rotation :source (aget car "$id") :source-property :x :factor 3.6}]
+                 (:links (stored-track store context board wheel)))
+              "the defaults left out")
+        (t/is (= [{:property "rotation" :source (aget car "$id") :sourceProperty "x" :factor 3.6
+                   :offset 0 :delay 0}]
+                 (links wheel)))
+        (.link timeline wheel #js {:property "rotation" :source car :sourceProperty "y" :delay 100})
+        (t/is (= ["y" 1 100] ((juxt :sourceProperty :factor :delay) (first (links wheel))))
+              "linking it again changes that link")
+        (.link timeline wheel #js {:property "opacity" :source wheel})
+        (t/is (= "opacity" (:sourceProperty (second (links wheel)))) "its own property, by default")
+        (t/testing "what cannot link is refused"
+          (t/is (thrown? js/Error (.link timeline third #js {:property "fillColor" :source car})))
+          (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source "car"})))
+          (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source car :factor "2"})))
+          (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source car :delay -5})))
+          (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source board}))
+                "the board is no layer of itself"))
+        (.unlink timeline wheel "rotation")
+        (t/is (= ["opacity"] (map :property (links wheel))))))))
+
 (t/deftest a-layer-follows-another-of-its-board
   (thw/with-wasm-mocks*
     (fn []

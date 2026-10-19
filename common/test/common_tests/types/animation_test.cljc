@@ -6500,3 +6500,57 @@
     (t/is (apply = (map #(count (:v (first (:s %)))) frames)) "as many vertices at every keyframe")
     (t/is (= [20.0 30.0] (mapv double (first (:v (first (:s (first frames))))))) "from the triangle")
     (t/is (some #(= [60.0 50.0] (mapv double %)) (:v (first (:s (last frames))))) "to the flat box")))
+
+;; PROPERTY LINKS (Penpot Motion)
+
+(defn- car-and-wheel
+  "A board at 100,100 with a car at 50,100 and a wheel inside it, the
+  car moving 100 to the right over a second."
+  []
+  (let [board (cts/setup-shape {:type :frame :x 100 :y 100 :width 800 :height 600})
+        car   (cts/setup-shape {:type :rect :x 150 :y 200 :width 100 :height 50})
+        wheel (cts/setup-shape {:type :circle :x 160 :y 240 :width 20 :height 20 :rotation 10})
+        bid   (:id board)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe (:id car) {:time 0 :property :x :value 50 :easing :ease-in})
+                  (cta/add-keyframe (:id car) {:time 1000 :property :x :value 150}))]
+    {:car (:id car)
+     :wheel (:id wheel)
+     :timeline tl
+     :objects {bid (assoc board :shapes [(:id car) (:id wheel)])
+               (:id car) (assoc car :frame-id bid :parent-id bid)
+               (:id wheel) (assoc wheel :frame-id bid :parent-id bid)}}))
+
+(t/deftest a-linked-property-plays-its-source
+  (let [{:keys [car wheel timeline objects]} (car-and-wheel)
+        tl  (cta/set-link timeline wheel {:property :rotation :source car :source-property :x :factor 3.6})
+        rot #(get-in (values-at %1 objects %2) [wheel :rotation])
+        x   #(get-in (values-at timeline objects %) [car :x])]
+    (t/is (= [{:property :rotation :source car :source-property :x :factor 3.6 :offset 0 :delay 0}]
+             (cta/links-of tl wheel)))
+    (t/is (cta/valid-timeline? tl))
+    (t/testing "rest + factor × (source − its rest), eased as the source is"
+      (t/is (close-all? [10 370] [(rot tl 0) (rot tl 1000)]))
+      (t/is (close? (+ 10 (* 3.6 (- (x 400) 50))) (rot tl 400))))
+    (t/testing "a delay plays it later"
+      (let [late (cta/set-link tl wheel (assoc (cta/link-of tl wheel :rotation) :delay 200))]
+        (t/is (close? (rot tl 400) (rot late 600)))
+        (t/is (= [:property :source :source-property :factor :delay]
+                 (keys (first (get-in late [:tracks wheel :links]))))
+              "only what differs from the defaults is stored")))
+    (t/testing "an offset, also from a source that stands still"
+      (let [still (cta/set-link timeline wheel {:property :opacity :source car :source-property :rotation :offset -0.5})]
+        (t/is (close? 0.5 (get-in (values-at still objects 300) [wheel :opacity])))))
+    (t/testing "it loops where its source loops"
+      (let [looped (cta/toggle-slot-flag tl car :loops :x nil)]
+        (t/is (contains? (get-in (cta/resolve-animations looped objects) [:tracks wheel :loops]) :rotation))))
+    (t/testing "a chain links through, a cycle links nothing"
+      (let [chain (cta/set-link tl car {:property :y :source wheel :source-property :rotation :factor 0.5})]
+        (t/is (close? (+ 100 (* 0.5 (- (rot tl 1000) 10))) (get-in (values-at chain objects 1000) [car :y]))))
+      (let [cycle (-> timeline
+                      (cta/set-link wheel {:property :rotation :source car :source-property :y})
+                      (cta/set-link car {:property :y :source wheel :source-property :rotation}))]
+        (t/is (close? 10 (get-in (values-at cycle objects 1000) [wheel :rotation] 10)))))
+    (t/testing "removing the link, or its source, unlinks"
+      (t/is (nil? (get-in (cta/remove-link tl wheel :rotation) [:tracks wheel])) "nothing left of the track")
+      (t/is (empty? (cta/links-of (cta/remove-shapes tl [car]) wheel))))))

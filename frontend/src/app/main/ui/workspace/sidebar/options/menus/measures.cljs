@@ -40,7 +40,7 @@
    [app.main.ui.workspace.sidebar.options.menus.audio :refer [audio-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.border-radius :refer  [border-radius-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* follow-menu* keyframe-diamond* outline-row* reach-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* follow-menu* keyframe-diamond* links-menu* outline-row* reach-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.tilt-tool :refer [tilt-tool*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
@@ -1359,5 +1359,7 @@
        [:> follow-menu* {:ids ids}])
      (when ^boolean motion-mode?
        [:> reach-menu* {:ids ids}])
+     (when ^boolean motion-mode?
+       [:> links-menu* {:ids ids}])
      (when ^boolean motion-mode?
        [:> audio-menu* {:ids ids}])]))

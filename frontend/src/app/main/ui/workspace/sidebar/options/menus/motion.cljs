@@ -1251,6 +1251,208 @@
                                   :value (:delay follow)
                                   :on-change on-delay}]]])])])))
 
+(defn- link-property-options
+  "The properties a link drives or reads (see `cta/link-properties`), as
+  the options of a select, `except` those."
+  ([] (link-property-options #{}))
+  ([except]
+   (into []
+         (comp (remove except)
+               (map (fn [property] {:id (name property) :label (labels/property-label property nil)})))
+         cta/link-properties)))
+
+(mf/defc link-item*
+  "A link of the layer `shape-id`, `link` (see `cta/links-of`), or a
+  draft of one (`draft?`, no source yet): the layer and property it plays
+  and how (factor, offset, delay). `sources` are the options of its
+  layer, `picking` the pick under way (see `ref:picking`), `taken` the
+  properties linked already, which a draft cannot take; `on-draft` takes
+  the property a draft is for, `on-remove` drops a draft."
+  {::mf/private true}
+  [{:keys [shape-id link draft? sources picking taken on-draft on-remove]}]
+  (let [{:keys [property source source-property factor offset delay]} link
+        picking? (= picking [shape-id [:link property]])
+
+        on-property
+        (mf/use-fn
+         (mf/deps on-draft)
+         #(on-draft (keyword %)))
+
+        on-source
+        (mf/use-fn
+         (mf/deps shape-id link draft?)
+         (fn [id]
+           (when-let [source (uuid/parse* id)]
+             (st/emit! (if draft?
+                         (dwa/set-link shape-id {:property property :source source :source-property property})
+                         (dwa/update-link shape-id property {:source source}))))))
+
+        on-pick
+        (mf/use-fn
+         (mf/deps shape-id property picking?)
+         (fn []
+           (st/emit! (if picking?
+                       (dwa/cancel-pick-leader)
+                       (dwa/pick-link-source shape-id property)))))
+
+        on-source-property
+        (mf/use-fn
+         (mf/deps shape-id property)
+         #(st/emit! (dwa/update-link shape-id property {:source-property (keyword %)})))
+
+        on-factor
+        (mf/use-fn
+         (mf/deps shape-id property)
+         (number-handler #(st/emit! (dwa/update-link shape-id property {:factor %}))))
+
+        on-offset
+        (mf/use-fn
+         (mf/deps shape-id property)
+         (number-handler #(st/emit! (dwa/update-link shape-id property {:offset %}))))
+
+        on-delay
+        (mf/use-fn
+         (mf/deps shape-id property)
+         (number-handler #(st/emit! (dwa/update-link shape-id property {:delay (max 0 (mth/round %))}))))
+
+        on-unlink
+        (mf/use-fn
+         (mf/deps shape-id property draft? on-remove)
+         (fn []
+           (if draft?
+             (on-remove)
+             (st/emit! (dwa/remove-link shape-id property)))))]
+
+    [:div {:class (stl/css :link-item)}
+     [:div {:class (stl/css :link-head)}
+      (if draft?
+        [:> select* {:class (stl/css :follow-leader-select)
+                     :options (link-property-options taken)
+                     :default-selected (name property)
+                     :aria-label (tr "workspace.animation.link-property")
+                     :on-change on-property}]
+        [:span {:class (stl/css :link-property)} (labels/property-label property nil)])
+      [:> icon-button* {:variant "ghost"
+                        :aria-label (tr "workspace.animation.remove-link")
+                        :icon i/remove
+                        :on-click on-unlink}]]
+     [:> animation-row* {:label (tr "workspace.animation.link-source")}
+      [:div {:class (stl/css :follow-leader)}
+       [:> select* {:class (stl/css :follow-leader-select)
+                    :options sources
+                    :default-selected (if (some? source) (dm/str source) "")
+                    :aria-label (tr "workspace.animation.link-source")
+                    :on-change on-source}]
+       [:> icon-button* {:variant "ghost"
+                         :aria-label (tr "workspace.animation.link-pick")
+                         :aria-pressed picking?
+                         :class (stl/css-case :follow-picking picking?)
+                         :icon i/picker
+                         :on-click on-pick}]]]
+     (when-not draft?
+       [:*
+        [:> animation-row* {:label (tr "workspace.animation.link-source-property")}
+         [:> select* {:class (stl/css :follow-leader-select)
+                      :options (link-property-options)
+                      :default-selected (name source-property)
+                      :aria-label (tr "workspace.animation.link-source-property")
+                      :on-change on-source-property}]]
+        [:> animation-row* {:label (tr "workspace.animation.link-factor")}
+         [:> numeric-input* {:text-icon "×"
+                             :property (tr "workspace.animation.link-factor")
+                             :step 0.1
+                             :value factor
+                             :on-change on-factor}]]
+        [:> animation-row* {:label (tr "workspace.animation.link-offset")}
+         [:> numeric-input* {:text-icon "+"
+                             :property (tr "workspace.animation.link-offset")
+                             :step 1
+                             :value offset
+                             :on-change on-offset}]]
+        [:> animation-row* {:label (tr "workspace.animation.link-delay")}
+         [:> numeric-input* {:text-icon "ms"
+                             :property (tr "workspace.animation.link-delay")
+                             :min 0
+                             :step 10
+                             :value delay
+                             :on-change on-delay}]]])]))
+
+(mf/defc links-menu*
+  "The links of the properties of the selected layer, a single one in a
+  board (see `cta/links-of`): each plays a property of a layer of its
+  board, chosen in a list or picked on the canvas, mapped by a factor and
+  an offset, after a delay (an AE pick whip with a linear expression).
+  The + of the title drafts one for a property not linked yet, kept once
+  its layer is chosen."
+  [{:keys [ids]}]
+  (let [shape-id  (when (= 1 (count ids)) (first ids))
+        objects   (mf/deref refs/workspace-page-objects)
+        timelines (mf/deref ref:timelines)
+        picking   (mf/deref ref:picking)
+        board-id  (when (some? shape-id) (cfh/get-shape-id-root-frame objects shape-id))
+        layer?    (and (some? board-id) (not= uuid/zero board-id) (not= board-id shape-id))
+        timeline  (mf/with-memo [timelines board-id]
+                    (or (get timelines board-id) (cta/make-timeline {:board-id board-id})))
+        links     (when layer? (cta/links-of timeline shape-id))
+        taken     (into #{} (map :property) links)
+        sources   (mf/with-memo [objects timeline layer?]
+                    (when layer?
+                      (into [{:id "" :label (tr "workspace.animation.link-choose")}]
+                            (map (fn [id] {:id (dm/str id) :label (dm/get-in objects [id :name])}))
+                            (cltl/link-sources objects timeline))))
+        ;; the property a draft is for, of the layer its + was pressed on
+        draft*    (mf/use-state nil)
+        draft     (let [[id property] (deref draft*)]
+                    (when (and (= id shape-id) (not (contains? taken property)))
+                      property))
+        free      (first (remove taken cta/link-properties))
+
+        on-add
+        (mf/use-fn
+         (mf/deps shape-id free)
+         #(when (some? free) (reset! draft* [shape-id free])))
+
+        on-draft
+        (mf/use-fn
+         (mf/deps shape-id)
+         #(reset! draft* [shape-id %]))
+
+        on-remove-draft
+        (mf/use-fn #(reset! draft* nil))]
+
+    ;; leaving the layer drops its draft
+    (mf/with-effect [shape-id]
+      #(reset! draft* nil))
+
+    (when layer?
+      [:div {:class (stl/css :follow-menu)}
+       [:div {:class (stl/css :animations-title)}
+        [:> title-bar* {:collapsable false
+                        :title (tr "workspace.animation.links")}
+         [:> icon-button* {:variant "ghost"
+                           :aria-label (tr "workspace.animation.add-link")
+                           :icon i/add
+                           :disabled (or (nil? free) (some? draft))
+                           :on-click on-add}]]]
+       (when (or (seq links) (some? draft))
+         [:div {:class (stl/css :follow-rows)}
+          (for [link links]
+            [:> link-item* {:key (name (:property link))
+                            :shape-id shape-id
+                            :link link
+                            :sources sources
+                            :picking picking}])
+          (when (some? draft)
+            [:> link-item* {:key "draft"
+                            :shape-id shape-id
+                            :link {:property draft}
+                            :draft? true
+                            :sources sources
+                            :picking picking
+                            :taken taken
+                            :on-draft on-draft
+                            :on-remove on-remove-draft}])])])))
+
 (mf/defc reach-menu*
   "The goal the selected layer reaches (see `cta/ik-of`), when it ends a
   chain of two follows (an arm: the hand follows the forearm, which

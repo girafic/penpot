@@ -6844,6 +6844,50 @@ msgid "workspace.animation.follow-pick"
 msgstr "Pick the leader on the canvas or in the layers"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.links"
+msgstr "Links"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.add-link"
+msgstr "Link a property"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.remove-link"
+msgstr "Remove the link"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-property"
+msgstr "Property"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-source"
+msgstr "From"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-source-property"
+msgstr "Its"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-factor"
+msgstr "Factor"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-offset"
+msgstr "Offset"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-delay"
+msgstr "Delay"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-choose"
+msgstr "Choose a layer"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.link-pick"
+msgstr "Pick the layer on the canvas or in the layers"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.follow-tilt"
 msgstr "3D rotation"
@@ -6866,6 +6910,14 @@ msgstr "Rest"
 #: src/app/main/ui/workspace/timeline.cljs
 msgid "workspace.animation.follows"
 msgstr "Follows %s"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.linked"
+msgstr "%s ← %s · %s"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.links-hint"
+msgstr "The property plays one of another layer (see Links in the Design tab). Click to select that layer."
 
 #: src/app/main/ui/workspace/timeline.cljs
 msgid "workspace.animation.follows-hint"
