@@ -173,12 +173,14 @@
    (+ (- (mth/clamp y header-height height) header-height) scroll-y)])
 
 (defn- property-lane
-  "The keyframes of the property of `row`, and whether they are locked or
-  hidden."
+  "The keyframes of the property of `row`, and whether they are locked,
+  hidden, or kept from playing by a link that plays the property (see
+  `cta/links-of`)."
   [timeline {:keys [id property index]}]
   {:keyframes (cta/property-keyframes timeline id property index)
    :locked?   (cta/slot-flag? timeline id :locked property index)
-   :hidden?   (cta/slot-flag? timeline id :hidden property index)})
+   :hidden?   (cta/slot-flag? timeline id :hidden property index)
+   :linked?   (and (nil? index) (some? (cta/link-of timeline id property)))})
 
 (defn- segment-ends
   "`[x0 x1]` of the line from keyframe `from` to `to`, clear of both."
@@ -653,7 +655,7 @@
   lines; the easing of the one under the pointer (`hover`, see `hit`) or
   open in the editor shows on it."
   [^js ctx geo {:keys [timeline selected-kfs easing]} palette row y color hover]
-  (let [{:keys [keyframes locked? hidden?]} (property-lane timeline row)
+  (let [{:keys [keyframes locked? hidden? linked?]} (property-lane timeline row)
         shape-id (:id row)
         cy       (+ y (/ (row-height geo) 2))
         width    (:width geo)
@@ -666,7 +668,7 @@
               (and (= shape-id (:shape-id easing))
                    (= (:id from) (:keyframe-id easing)))))]
 
-    (faded! ctx (if hidden? 0.5 1)
+    (faded! ctx (* (if hidden? 0.5 1) (if linked? 0.4 1))
             (fn []
               (doseq [[from to] segments
                       :let [[x0 x1] (segment-ends geo from to)]

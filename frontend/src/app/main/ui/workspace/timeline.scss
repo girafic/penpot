@@ -897,6 +897,14 @@ $header-height: $ruler-height + $row-height;
   color: var(--color-accent-primary);
 }
 
+// played by a link, from the layer it names
+.linked-mark {
+  @include t.use-typography("body-small");
+
+  margin-inline-start: var(--sp-xs);
+  color: var(--color-foreground-secondary);
+}
+
 .row-controls {
   display: flex;
   align-items: center;

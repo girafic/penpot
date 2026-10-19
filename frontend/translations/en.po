@@ -6940,6 +6940,14 @@ msgid "workspace.animation.linked"
 msgstr "%s ← %s · %s"
 
 #: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.linked-row"
+msgstr "← %s"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.linked-row-hint"
+msgstr "Played by its link to %s: the keyframes of this row do not play"
+
+#: src/app/main/ui/workspace/timeline.cljs
 msgid "workspace.animation.links-hint"
 msgstr "The property plays one of another layer (see Links in the Design tab). Click to select that layer."
 

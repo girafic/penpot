@@ -1151,7 +1151,7 @@
   playback and exports; a locked one is kept from edits."
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [row-index timeline shape-id property index depth looping? hidden? locked?
+  [{:keys [row-index timeline shape-id property index depth looping? hidden? locked? link-name
            value offset playhead hovered? on-context-menu on-select-layer on-hover]}]
   (let [[on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
 
@@ -1195,7 +1195,12 @@
        (when looping?
          [:> i/icon* {:icon-id i/loop
                       :size "s"
-                      :class (stl/css :loop-icon)}])]
+                      :class (stl/css :loop-icon)}])
+       ;; a link plays it (see `cta/links-of`): its own keyframes do not
+       (when (some? link-name)
+         [:span {:class (stl/css :linked-mark)
+                 :title (tr "workspace.animation.linked-row-hint" link-name)}
+          (tr "workspace.animation.linked-row" link-name)])]
       [:> row-controls* {:timeline timeline
                          :shape-id shape-id
                          :property property
@@ -3803,6 +3808,11 @@
                                          :index index
                                          :depth depth
                                          :looping? (cta/looping? timeline id property index)
+                                         :link-name (when (nil? index)
+                                                      (some->> (cta/link-of timeline id property)
+                                                               :source
+                                                               (get objects)
+                                                               :name))
                                          :hidden? (cta/slot-flag? timeline id :hidden property index)
                                          :locked? (cta/slot-flag? timeline id :locked property index)
                                          :value (cta/value-of (get values id) property index)
