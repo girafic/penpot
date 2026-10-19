@@ -305,6 +305,17 @@
         (t/is (str/includes? css "perspective-origin: 0% 50%;"))
         (t/is (str/includes? css "perspective-origin: 100% 50%;"))))))
 
+(t/deftest an-orthographic-board-plays-no-camera-in-css
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bid   (:id board)
+        tl    (-> (mk-timeline)
+                  (assoc :board-id bid)
+                  (cta/add-keyframe bid {:time 0 :property :perspective :value 400})
+                  (cta/add-keyframe bid {:time 1000 :property :perspective :value 1200}))]
+    (t/is (str/includes? (acss/timeline->css tl {bid board}) "perspective: 400px;"))
+    (t/is (not (str/includes? (acss/timeline->css tl {bid (assoc board :orthographic true)}) "perspective"))
+          "seen without perspective, none plays")))
+
 (t/deftest a-flip-turns-the-layer-over-in-3d
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
         sid   (:id shape)

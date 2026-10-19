@@ -188,8 +188,10 @@
       (assoc :backdrop-blur (:background-blur values))
 
       ;; the camera of a board: CSS sees the tilted layers in it with its
-      ;; perspective (see `app.common.geom.tilt`)
-      (and (cta/has? values :perspective :perspective-x :perspective-y) (= :frame (:type shape)))
+      ;; perspective (see `app.common.geom.tilt`); an orthographic one has
+      ;; none to play
+      (and (cta/has? values :perspective :perspective-x :perspective-y) (= :frame (:type shape))
+           (not (true? (:orthographic shape))))
       (assoc :perspective (get values :perspective (cta/camera-rest shape :perspective))
              :perspective-origin (str (fmt (* 100 (get values :perspective-x (cta/camera-rest shape :perspective-x)))) "% "
                                       (fmt (* 100 (get values :perspective-y (cta/camera-rest shape :perspective-y)))) "%")))))

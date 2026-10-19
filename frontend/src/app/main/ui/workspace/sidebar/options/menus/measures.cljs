@@ -759,6 +759,14 @@
         (and (some? motion-id)
              (some #(seq (cta/property-keyframes timeline motion-id %)) cta/camera-properties))
 
+        ;; an orthographic board sees without perspective: its camera rests
+        orthographic?
+        (true? (:orthographic values))
+
+        ;; the diamonds of the camera, but on an orthographic board
+        camera-keys?
+        (and (some? motion-id) (not orthographic?))
+
         holds-tilt?
         (mf/with-memo [board-ids]
           (let [objects (deref refs/workspace-page-objects)]
@@ -1227,7 +1235,7 @@
      (when (and (options :perspective)
                 (or holds-tilt?
                     camera-animated?
-                    (true? (:orthographic values))
+                    orthographic?
                     (some #(number? (get values %)) cta/camera-properties)))
        [:div {:class (stl/css :perspective)}
         (if token-numeric-inputs
@@ -1243,6 +1251,7 @@
               :min gtl/min-perspective
               :max gtl/max-perspective
               :attr :perspective
+              :disabled orthographic?
               :property (tr "workspace.options.perspective")
               :applied-token (get applied-tokens :perspective)
               :placeholder (if (= :multiple (:perspective values))
@@ -1250,7 +1259,7 @@
                              (str gtl/default-perspective))
               ;; the distance it sees from, the default without one of its own
               :value (let [v (:perspective values)] (cond (number? v) v (not= :multiple v) gtl/default-perspective))}]
-            (when motion-id
+            (when camera-keys?
               [:> keyframe-diamond* {:properties [:perspective]}])]]
           [:div {:class (stl/css-case :perspective-input true
                                       :with-keyframe (some? motion-id))
@@ -1264,9 +1273,10 @@
                             (tr "settings.multiple")
                             (str gtl/default-perspective))
              :on-change on-perspective-change
+             :is-disabled orthographic?
              :class (stl/css :numeric-input)
              :value (when (number? (:perspective values)) (:perspective values))}]
-           (when motion-id
+           (when camera-keys?
              [:> keyframe-diamond* {:properties [:perspective]}])])
 
         ;; the vanishing point, in percent of the board
@@ -1286,10 +1296,11 @@
                :aria-label label
                :placeholder (if (= :multiple value) (tr "settings.multiple") "50")
                :on-change on-change
+               :is-disabled orthographic?
                :class (stl/css :numeric-input)
                :value (when (number? value) (mth/precision (* 100 value) 2))}]
              [:span {:class (stl/css :origin-unit)} "%"]
-             (when motion-id
+             (when camera-keys?
                [:> keyframe-diamond* {:properties [attr]}])]))
 
         ;; seen without perspective, as from afar: isometric drawings
@@ -1297,7 +1308,7 @@
                :title (tr "workspace.options.orthographic.hint")}
          [:> checkbox* {:id "orthographic"
                         :label (tr "workspace.options.orthographic")
-                        :checked (true? (:orthographic values))
+                        :checked orthographic?
                         :on-change on-orthographic-change}]]])
 
      (when (or (options :clip-content) (options :show-in-viewer))

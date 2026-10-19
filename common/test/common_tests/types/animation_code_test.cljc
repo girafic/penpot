@@ -265,6 +265,23 @@
                                            (pcb/set-timeline board tl)))]
      (thf/current-page file))))
 
+(t/deftest an-orthographic-board-plays-no-camera-in-react
+  (let [react (fn [attrs]
+                (let [file  (-> (thf/sample-file :file1)
+                                (tho/add-frame :board (merge {:x 0 :y 0 :width 400 :height 300} attrs)))
+                      board (thi/id :board)
+                      tl    (-> (cta/make-timeline {:board-id board :duration 1000})
+                                (cta/add-keyframe board {:time 0 :property :perspective :value 400})
+                                (cta/add-keyframe board {:time 1000 :property :perspective :value 1200}))
+                      file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                                        (pcb/with-page (thf/current-page file))
+                                                        (pcb/set-timeline board tl)))
+                      page  (thf/current-page file)]
+                  (str (ctac/motion-react (cltl/code-timelines page {} board) (:objects page)))))]
+    (t/is (cstr/includes? (react {}) "perspective: "))
+    (t/is (not (cstr/includes? (react {:orthographic true}) "perspective: "))
+          "seen without perspective, none plays")))
+
 (t/deftest the-units-that-turn-in-3d-are-seen-from-the-board
   ;; Penpot Motion: each unit with the perspective of its board in front of
   ;; its middle, as render-wasm draws it

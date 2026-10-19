@@ -222,6 +222,21 @@
                                              :perspective-origin))
           "its vanishing point"))))
 
+(deftest an-orthographic-board-writes-no-perspective
+  (testing "its tilted layers seen without perspective, as CSS without one"
+    (let [pid  (uuid/next)
+          cid  (uuid/next)
+          c    (child cid pid
+                      :frame-id pid
+                      :selrect (grc/make-rect 50 50 100 100)
+                      :points (pts 50 50 100 100)
+                      :rotate-y 45)
+          b    (frame pid :shapes [cid] :perspective 800 :orthographic true)
+          objs (objects b c)]
+      (is (nil? (css/get-css-value objs b :perspective)))
+      (is (nil? (css/get-css-value objs b :perspective-origin)))
+      (is (= "rotateX(0deg) rotateY(45deg)" (css/get-css-value objs c :transform)) "the tilt stays"))))
+
 (deftest a-3d-space-keeps-the-depth-of-its-layers
   (testing "a group that is a 3D space preserves 3D, its board sees it"
     (let [pid   (uuid/next)

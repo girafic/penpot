@@ -233,12 +233,12 @@
   "The vanishing point of the tilted layers of `shape` (the middle of
   their board) in its box."
   [shape objects]
-  (when-let [child (first (remove #(:orthographic? (gtl/perspective-of objects %))
-                                  (tilted-children shape objects)))]
-    (let [{:keys [vp]} (gtl/perspective-of objects child)
-          box          (:selrect shape)]
-      (dm/str (fmt/format-pixels (- (:x vp) (:x box))) " "
-              (fmt/format-pixels (- (:y vp) (:y box)))))))
+  (when-let [child (first (tilted-children shape objects))]
+    (let [{:keys [vp orthographic?]} (gtl/perspective-of objects child)
+          box                        (:selrect shape)]
+      (when-not orthographic?
+        (dm/str (fmt/format-pixels (- (:x vp) (:x box))) " "
+                (fmt/format-pixels (- (:y vp) (:y box))))))))
 
 (defn- planar-turn?
   "Whether a tilt of `shape` keeps it in the plane of its parent, front or

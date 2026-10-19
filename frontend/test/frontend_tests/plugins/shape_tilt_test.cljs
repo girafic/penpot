@@ -85,3 +85,19 @@
         (t/is (= 1.5 (.-perspectiveY board)) "not a number: left as it is")
         (set! (.-perspectiveX board) nil)
         (t/is (not (contains? (stored store context board) :perspective-x)) "back to its middle")))))
+
+(t/deftest a-board-can-see-without-perspective
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js board   (.createBoard context)]
+        (t/is (false? (.-orthographic board)) "with perspective by default")
+        (set! (.-orthographic board) true)
+        (t/is (true? (.-orthographic board)))
+        (t/is (true? (:orthographic (stored store context board))))
+        (set! (.-orthographic board) "yes")
+        (t/is (true? (.-orthographic board)) "not a boolean: left as it is")
+        (set! (.-orthographic board) false)
+        (t/is (not (contains? (stored store context board) :orthographic)) "back to perspective")))))

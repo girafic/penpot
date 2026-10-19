@@ -20,6 +20,7 @@
    [app.common.types.audio-clip :as ctau]
    [app.common.types.path :as path]
    [app.common.types.text-units :as tu]
+   [clojure.set :as set]
    [cuerdas.core :as str]))
 
 (def property-names
@@ -494,7 +495,11 @@
   (let [clock    (:clock layer)
         duration (max 1 (:duration clock))
         repeats  (repeat-of clock)
-        animated (into #{} (map :property) (:keyframes (get-in played [:tracks (:id layer)])))]
+        animated (into #{} (map :property) (:keyframes (get-in played [:tracks (:id layer)])))
+        ;; an orthographic board has no camera to play
+        animated (cond-> animated
+                   (true? (get-in layer [:shape :orthographic]))
+                   (set/difference #{:perspective :perspective-x :perspective-y}))]
     (into []
           (keep
            (fn [[value-name properties frame-key]]
