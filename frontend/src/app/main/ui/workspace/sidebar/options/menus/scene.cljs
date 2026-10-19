@@ -99,9 +99,9 @@
                (if (and (some? motion-id)
                         (seq (cta/property-keyframes (deref ref:timeline) motion-id property)))
                  (st/emit! (dwa/set-value-at-playhead motion-id property value))
-                 (st/emit! (dwsh/update-shapes ids #(cond-> % (map? (:light %)) (assoc-in [:light attr] value)))
-                           ;; the shadows it casts turn with it
-                           (dwa/cast-shadows ids)))))))
+                 ;; the shadows it casts turn with it, in the same undo
+                 ;; step (see `dwa/watch-cast-shadows`)
+                 (st/emit! (dwsh/update-shapes ids #(cond-> % (map? (:light %)) (assoc-in [:light attr] value)))))))))
 
         on-shadows-check
         (mf/use-fn
@@ -110,8 +110,7 @@
            (let [on? (-> event dom/get-target dom/checked?)]
              (st/emit! (dwsh/update-shapes ids #(cond-> %
                                                   (map? (:light %))
-                                                  (update :light (fn [light] (if on? (assoc light :shadows true) (dissoc light :shadows))))))
-                       (dwa/cast-shadows ids)))))
+                                                  (update :light (fn [light] (if on? (assoc light :shadows true) (dissoc light :shadows))))))))))
 
         on-cues-check
         (mf/use-fn

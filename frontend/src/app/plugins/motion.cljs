@@ -1907,7 +1907,7 @@
                 offset    (prop "offset")
                 delay     (prop "delay")
                 pair      #(let [v (prop %)]
-                             (when (and (array? v) (= 2 (alength v)) (every? number? v))
+                             (when (and (array? v) (= 2 (alength v)) (every? sm/valid-safe-number? v))
                                [(aget v 0) (aget v 1)]))
                 input     (pair "input")
                 output    (pair "output")
@@ -1929,10 +1929,10 @@
                             (not (contains? linkable source-p))
                             (dm/str "sourceProperty should be one of " names)
 
-                            (and (some? factor) (not (number? factor)))
+                            (and (some? factor) (not (sm/valid-safe-number? factor)))
                             "factor should be a number"
 
-                            (and (some? offset) (not (number? offset)))
+                            (and (some? offset) (not (sm/valid-safe-number? offset)))
                             "offset should be a number"
 
                             (and (some? delay) (not (valid-time? delay)))

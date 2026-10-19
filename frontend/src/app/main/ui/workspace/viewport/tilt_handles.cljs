@@ -51,6 +51,15 @@
     (when-not (true? (:orthographic board))
       board)))
 
+(defn shown-handles
+  "The handles that show for the selected `shape` and the board it is seen
+  with, `board` (see `seen-board`): `:tilt` unless the layer is locked,
+  `:vanishing-point` when there is such a board and it is not locked."
+  [shape board]
+  (cond-> #{}
+    (not (:blocked shape))                     (conj :tilt)
+    (and (some? board) (not (:blocked board))) (conj :vanishing-point)))
+
 (defn- use-drag
   "Pointer handlers of a handle: `on-start` when it is grabbed, then
   `on-move` with the client px it has moved by and whether Shift is down,
@@ -162,21 +171,22 @@
 
 (mf/defc tilt-handles*
   "The handles of the 3D rotation of the selected `shape` of `objects`
-  (the shapes as they show) and the vanishing point it is seen with; in
-  motion mode (`motion?`) an animated value takes the one at the
-  playhead."
+  (the shapes as they show) and the vanishing point it is seen with, but
+  of a locked layer or board (see `shown-handles`); in motion mode
+  (`motion?`) an animated value takes the one at the playhead."
   [{:keys [shape objects zoom motion?]}]
   (let [points (mf/with-memo [objects shape]
                  (when (gtl/three-d? shape)
                    (gtl/projected-points objects shape)))
         board  (mf/with-memo [objects shape]
                  (seen-board objects shape))
+        shown  (shown-handles shape board)
         tilt   [(or (:rotate-x shape) 0) (or (:rotate-y shape) 0)]
         motion-id (when motion? (:id shape))]
     [:g {:class "tilt-handles"}
-     (when (some? board)
+     (when (contains? shown :vanishing-point)
        [:> vanishing-point* {:board board :zoom zoom :motion? motion?}])
-     (when-let [[p0 p1 p2] points]
+     (when-let [[p0 p1 p2] (when (contains? shown :tilt) points)]
        [:*
         [:> tilt-handle* {:point (midpoint p0 p1) :axis :x :zoom zoom :tilt tilt
                           :shape-id (:id shape) :motion-id motion-id}]

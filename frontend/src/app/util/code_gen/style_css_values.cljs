@@ -378,12 +378,13 @@
     (:shadow shape)))
 
 (defn- get-filter
-  "The blur of `shape`, px, or, when the light or the depth cues of its
-  board show it (see `gtl/scene-effects`), `{:blur :brightness}`, its
-  blur and theirs (their variances add)."
+  "The blur of `shape`, px (none when hidden), or, when the light or the
+  depth cues of its board show it (see `gtl/scene-effects`), `{:blur
+  :brightness}`, its blur and theirs (their variances add)."
   [shape objects]
   (when-not (cgc/svg-markup? shape)
-    (let [own                     (get-in shape [:blur :value])
+    (let [own                     (when-not (get-in shape [:blur :hidden])
+                                    (get-in shape [:blur :value]))
           {:keys [shade] :as fx}  (gtl/scene-effects objects shape)
           blur                    (if-let [cued (:blur fx)]
                                     (mth/sqrt (+ (* (or own 0) (or own 0)) (* cued cued)))

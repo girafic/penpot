@@ -4,6 +4,9 @@
 //
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
+@use "ds/typography.scss" as t;
+
+// the input placeholder of the fields
 @use "refactor/common-refactor.scss" as deprecated;
 
 // Offset lines (Penpot Motion): two columns of fields under the title.
@@ -26,13 +29,13 @@
 
 .field {
   @extend %input-element;
-  @include deprecated.body-small-typography;
+  @include t.use-typography("body-small");
 
   min-inline-size: 0;
 }
 
 .offset-lines .field .field-label {
-  @include deprecated.body-small-typography;
+  @include t.use-typography("body-small");
 
   inline-size: auto;
   padding-inline-end: var(--sp-xs);

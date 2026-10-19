@@ -42,7 +42,6 @@
    [app.main.data.persistence :as dwp]
    [app.main.data.plugins :as dp]
    [app.main.data.workspace :as dw]
-   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.groups :as dwg]
    [app.main.data.workspace.guides :as dwgu]
    [app.main.data.workspace.interactions :as dwi]
@@ -2312,10 +2311,10 @@
                        (not (u/page-active? page-id))
                        (u/not-valid plugin-id :light "Cannot modify a page that is not currently active")
 
+                       ;; the shadows it casts turn with it, in the same
+                       ;; undo step (see `dwa/watch-cast-shadows`)
                        :else
-                       (do (commit-tilt! self :light light nil)
-                           ;; the shadows it casts turn with it
-                           (st/emit! (dwa/cast-shadows [(obj/get self "$id")]))))))}
+                       (commit-tilt! self :light light nil))))}
 
                 {:name "depthFade"
                  :get

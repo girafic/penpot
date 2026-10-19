@@ -298,3 +298,23 @@
       (is (= "preserve-3d" (css/get-css-value objs group :transform-style)))
       (is (nil? (css/get-css-value (assoc-in objs [gid :opacity] 0.5) (assoc group :opacity 0.5) :transform-style))
           "an opacity would flatten it"))))
+
+;; --- Blur ------------------------------------------------------------------
+
+(deftest a-hidden-blur-blurs-nothing
+  (let [pid    (uuid/next)
+        blur   #(hash-map :id (uuid/next) :type :layer-blur :value 3 :hidden %)
+        shown  (child (uuid/next) pid :frame-id pid :blur (blur false))
+        hidden (child (uuid/next) pid :frame-id pid :blur (blur true))
+        objs   (objects (frame pid) shown hidden)]
+    (is (= "blur(3px)" (css/get-css-value objs shown :filter)))
+    (is (nil? (css/get-css-value objs hidden :filter))))
+  (testing "nor beside the blur of the depth cues of its board"
+    (let [pid    (uuid/next)
+          in-3d  {:frame-id pid :rotate-y 30 :translate-z -500}
+          plain  (apply child (uuid/next) pid (mapcat identity in-3d))
+          hidden (apply child (uuid/next) pid (mapcat identity (assoc in-3d :blur {:id (uuid/next) :type :layer-blur
+                                                                                   :value 30 :hidden true})))
+          objs   (objects (frame pid :depth-blur 4) plain hidden)]
+      (is (some? (css/get-css-value objs plain :filter)) "the depth blur")
+      (is (= (css/get-css-value objs plain :filter) (css/get-css-value objs hidden :filter))))))

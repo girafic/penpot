@@ -1075,8 +1075,10 @@
                               :editing? (some? transform)}])
 
           ;; the 3D rotation of the selected layer and the vanishing point
-          ;; it is seen with, but while it is moved or edited
+          ;; it is seen with, but while it is moved or edited, or in a file
+          ;; that can only be read
           (when (and (= 1 (count selected))
+                     (not read-only?)
                      (nil? transform)
                      (nil? edition)
                      (not drawing-tool)

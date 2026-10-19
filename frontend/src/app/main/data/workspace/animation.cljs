@@ -1251,39 +1251,11 @@
            (animated? :perspective-x) (conj (set-value-at-playhead board-id :perspective-x fx))
            (animated? :perspective-y) (conj (set-value-at-playhead board-id :perspective-y fy))))))))
 
-(defn cast-shadows
-  "Turn the drop and inner shadows of the layers of the boards `board-ids`
-  whose light casts them (`:shadows` of their `:light`) away from that
-  light, as it rests (see `gtl/cast-shadow`): the layers whose nearest
-  board it is. The shadows a turning light casts play as it plays (see
-  `cta/resolve-animations`)."
-  [board-ids]
-  (ptk/reify ::cast-shadows
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [objects (dsh/lookup-page-objects state)
-            lights  (into {}
-                          (keep (fn [id]
-                                  (let [light (dm/get-in objects [id :light])]
-                                    (when (true? (:shadows light)) [id light]))))
-                          board-ids)
-            ids     (into []
-                          (comp (filter #(and (contains? lights (:frame-id %))
-                                              (not (contains? lights (:id %)))
-                                              (seq (:shadow %))))
-                                (map :id))
-                          (vals objects))]
-        (if (empty? ids)
-          (rx/empty)
-          (rx/of (dwsh/update-shapes ids
-                                     (fn [shape]
-                                       (let [light (get lights (:frame-id shape))]
-                                         (update shape :shadow (fn [shadows] (mapv #(gtl/cast-shadow light %) shadows))))))))))))
-
 (defn- uncast-ids
   "The ids of the layers of `objects` among `ids` (and in them) whose
-  shadows the light of their board casts (see `cast-shadows`) and do not
-  fall from it."
+  shadows the light of their board casts (`:shadows` of its `:light`)
+  and do not fall from it (see `gtl/cast-shadow`): the layers whose
+  nearest board it is."
   [objects ids]
   (into #{}
         (comp (mapcat #(cons % (cfh/get-children-ids objects %)))
@@ -1330,8 +1302,11 @@
 (defn watch-cast-shadows
   "Watch the edits of the page for layers whose shadows the light of their
   board casts and that do not fall from it: a shadow added or changed, a
-  layer pasted or moved into such a board. They are turned away from the
-  light in the undo step of the edit. Undo and redo are left alone."
+  layer pasted or moved into such a board, the light of a board turned or
+  set to cast them. They are turned away from the light as it rests, each
+  as long as it is, in the undo step of the edit; as the light turns, they
+  play turning with it (see `cta/resolve-animations`). Undo and redo are
+  left alone."
   []
   (ptk/reify ::watch-cast-shadows
     ptk/WatchEvent

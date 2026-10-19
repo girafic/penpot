@@ -290,6 +290,8 @@
           (t/is (thrown? js/Error (.link timeline third #js {:property "fillColor" :source car})))
           (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source "car"})))
           (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source car :factor "2"})))
+          (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source car :factor js/NaN})))
+          (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source car :offset js/Infinity})))
           (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source car :delay -5})))
           (t/is (thrown? js/Error (.link timeline third #js {:property "x" :source board}))
                 "the board is no layer of itself"))
@@ -317,6 +319,9 @@
                 "an input without an output")
           (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider
                                                               :input #js [0] :output #js [0 1]})))
+          (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider
+                                                              :input #js [0 js/NaN] :output #js [0 1]}))
+                "a number that is none")
           (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider
                                                               :input #js [0 1] :output #js [0 1] :easing "bounce"}))))))))
 

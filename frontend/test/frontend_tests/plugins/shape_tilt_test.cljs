@@ -9,11 +9,15 @@
   `app.common.geom.tilt`)."
   (:require
    [app.common.test-helpers.files :as cthf]
+   [app.main.data.changes :as dch]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.store :as st]
    [app.plugins.api :as api]
+   [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.state :as ths]
-   [frontend-tests.helpers.wasm :as thw]))
+   [frontend-tests.helpers.wasm :as thw]
+   [potok.v2.core :as ptk]))
 
 (def ^:private plugin-id "00000000-0000-0000-0000-000000000000")
 
@@ -133,6 +137,11 @@
       (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
             ^js context (api/create-context plugin-id)
             _           (set! st/state store)
+            ;; as the workspace does (see `initialize-page`)
+            _           (ptk/emit! store (dwa/watch-cast-shadows))
+            commits     (atom [])
+            _           (rx/sub! (->> (ptk/input-stream store) (rx/filter dch/commit?) (rx/map deref))
+                                 #(swap! commits conj %))
             ^js board   (.createBoard context)
             ^js card    (.createRectangle context)
             offsets     #((juxt :offset-x :offset-y) (first (:shadow (stored store context card))))]
@@ -141,9 +150,15 @@
                                          :color #js {:color "#000000" :opacity 0.2}}])
         (set! (.-light board) #js {:angle 45})
         (t/is (= [4 4] (offsets)) "a light that casts none leaves them")
+        (reset! commits [])
         (set! (.-light board) #js {:angle 45 :shadows true})
         (t/is (= [-4.0 4.0] (offsets)) "from the top right, to the bottom left")
+        (t/is (= 2 (count @commits)) "the light, then its shadows")
+        (t/is (apply = (map :undo-group @commits)) "in one undo step")
         (t/is (true? (.-shadows (.-light board))))
         (set! (.-light board) #js {:angle 180 :shadows true})
-        (t/is (= [0.0 -5.66] (offsets)) "from below, up, as long")))))
+        (t/is (= [0.0 -5.66] (offsets)) "from below, up, as long")
+        (set! (.-shadows card) #js [#js {:style "drop-shadow" :offsetX 0 :offsetY 10 :blur 4 :spread 0
+                                         :color #js {:color "#000000" :opacity 0.2}}])
+        (t/is (= [0.0 -10.0] (offsets)) "a shadow it gets later falls from it too")))))
 
