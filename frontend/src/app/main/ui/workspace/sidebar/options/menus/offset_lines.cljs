@@ -19,34 +19,15 @@
    [app.main.data.workspace.offset-lines :as dwol]
    [app.main.refs :as refs]
    [app.main.store :as st]
-   [app.main.ui.components.numeric-input :as deprecated-input]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.workspace.sidebar.options.menus.motion-field :refer [labelled-number*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
-
-(mf/defc ^:private number-field*
-  [{:keys [label hint unit value min max scale disabled on-change]}]
-  (let [scale     (or scale 1)
-        on-change (mf/use-fn
-                   (mf/deps on-change scale)
-                   (fn [v] (when (number? v) (on-change (/ v scale)))))]
-    [:div {:class (stl/css :field) :title hint}
-     [:span {:class (stl/css :field-label)} label]
-     [:> deprecated-input/numeric-input*
-      {:no-validate true
-       :disabled disabled
-       :min min
-       :max max
-       :aria-label hint
-       :on-change on-change
-       :class (stl/css :field-input)
-       :value (mth/precision (* scale value) 2)}]
-     [:span {:class (stl/css :field-unit)} unit]]))
 
 (mf/defc ^:private color-field*
   "A colour as hex, `#` and six digits, shown as the colour rows show it:
@@ -64,10 +45,10 @@
                  (fn [event]
                    (when (= "Enter" (.-key event))
                      (dom/blur! (dom/get-target event)))))]
-    [:div {:class (stl/css :field) :title hint}
+    [:div {:class (stl/css :color-field) :title hint}
      [:span {:class (stl/css :swatch) :style {:background-color value}}]
-     [:span {:class (stl/css :field-label)} label]
-     [:input {:class (stl/css :field-text)
+     [:span {:class (stl/css :color-label)} label]
+     [:input {:class (stl/css :color-text)
               :key value
               :default-value (subs value 1)
               :disabled disabled
@@ -107,33 +88,33 @@
 
        :else
        [:div {:class (stl/css :fields)}
-        [:> number-field* {:label (tr "workspace.options.offset-lines.count")
-                           :hint (tr "workspace.options.offset-lines.count.hint")
-                           :unit "" :min 1 :max 200 :value (:count spec) :disabled copy?
-                           :on-change #(change :count (mth/round %))}]
-        [:> number-field* {:label (tr "workspace.options.offset-lines.spacing")
-                           :hint (tr "workspace.options.offset-lines.spacing.hint")
-                           :unit "px" :min 0.1 :max 1000 :value (:spacing spec) :disabled copy?
-                           :on-change #(change :spacing %)}]
-        [:> number-field* {:label (tr "workspace.options.offset-lines.width")
-                           :hint (tr "workspace.options.offset-lines.width.hint")
-                           :unit "px" :min 0.1 :max 1000 :value (:width spec) :disabled copy?
-                           :on-change #(change :width %)}]
+        [:> labelled-number* {:label (tr "workspace.options.offset-lines.count")
+                              :hint (tr "workspace.options.offset-lines.count.hint")
+                              :unit "" :min 1 :max 200 :value (:count spec) :disabled copy?
+                              :on-change #(change :count (mth/round %))}]
+        [:> labelled-number* {:label (tr "workspace.options.offset-lines.spacing")
+                              :hint (tr "workspace.options.offset-lines.spacing.hint")
+                              :unit "px" :min 0.1 :max 1000 :value (:spacing spec) :disabled copy?
+                              :on-change #(change :spacing %)}]
+        [:> labelled-number* {:label (tr "workspace.options.offset-lines.width")
+                              :hint (tr "workspace.options.offset-lines.width.hint")
+                              :unit "px" :min 0.1 :max 1000 :value (:width spec) :disabled copy?
+                              :on-change #(change :width %)}]
         [:div {:class (stl/css :spacer)}]
         [:> color-field* {:label (tr "workspace.options.offset-lines.inner")
                           :hint (tr "workspace.options.offset-lines.inner.hint")
                           :value (:inner-color spec) :disabled copy?
                           :on-change #(change :inner-color %)}]
-        [:> number-field* {:label "" :hint (tr "workspace.options.offset-lines.inner.hint")
-                           :unit "%" :min 0 :max 100 :scale 100 :value (:inner-opacity spec) :disabled copy?
-                           :on-change #(change :inner-opacity (mth/clamp % 0 1))}]
+        [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.inner.hint")
+                              :unit "%" :min 0 :max 100 :scale 100 :value (:inner-opacity spec) :disabled copy?
+                              :on-change #(change :inner-opacity (mth/clamp % 0 1))}]
         [:> color-field* {:label (tr "workspace.options.offset-lines.outer")
                           :hint (tr "workspace.options.offset-lines.outer.hint")
                           :value (:outer-color spec) :disabled copy?
                           :on-change #(change :outer-color %)}]
-        [:> number-field* {:label "" :hint (tr "workspace.options.offset-lines.outer.hint")
-                           :unit "%" :min 0 :max 100 :scale 100 :value (:outer-opacity spec) :disabled copy?
-                           :on-change #(change :outer-opacity (mth/clamp % 0 1))}]
+        [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.outer.hint")
+                              :unit "%" :min 0 :max 100 :scale 100 :value (:outer-opacity spec) :disabled copy?
+                              :on-change #(change :outer-opacity (mth/clamp % 0 1))}]
         (if copy?
           [:p {:class (stl/css :hint :wide)} (tr "workspace.options.offset-lines.copy")]
           [:div {:class (stl/css :update)}

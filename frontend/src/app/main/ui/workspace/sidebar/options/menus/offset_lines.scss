@@ -27,14 +27,15 @@
   gap: var(--sp-xs);
 }
 
-.field {
+// a colour as six hex digits after its swatch and its word
+.color-field {
   @extend %input-element;
   @include t.use-typography("body-small");
 
   min-inline-size: 0;
 }
 
-.offset-lines .field .field-label {
+.offset-lines .color-field .color-label {
   @include t.use-typography("body-small");
 
   inline-size: auto;
@@ -44,21 +45,13 @@
   white-space: nowrap;
 }
 
-.offset-lines .field .field-unit {
-  padding-inline-end: var(--sp-s);
-  text-transform: none;
-}
+.color-text {
+  @extend %input-base;
 
-.field-input,
-.field-text {
   min-inline-size: 0;
 }
 
-.field-text {
-  @extend %input-base;
-}
-
-.offset-lines .field .swatch {
+.offset-lines .color-field .swatch {
   flex: none;
   inline-size: var(--sp-l);
   block-size: var(--sp-l);

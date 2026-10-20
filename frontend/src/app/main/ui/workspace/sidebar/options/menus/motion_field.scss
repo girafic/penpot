@@ -1,0 +1,39 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+@use "ds/typography.scss" as t;
+
+// the input placeholder of the field
+@use "refactor/common-refactor.scss" as deprecated;
+
+// A number of the Penpot Motion menus: a word, the number, its unit.
+.field {
+  @extend %input-element;
+  @include t.use-typography("body-small");
+
+  min-inline-size: 0;
+}
+
+// a word, not the icon a field of the measures shows
+.field .label {
+  @include t.use-typography("body-small");
+
+  inline-size: auto;
+  padding-inline-end: var(--sp-xs);
+  color: var(--color-foreground-secondary);
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.field .unit {
+  padding-inline-end: var(--sp-s);
+  color: var(--input-foreground-color);
+  text-transform: none;
+}
+
+.input {
+  min-inline-size: 0;
+}

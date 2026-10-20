@@ -16,10 +16,9 @@
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.store :as st]
-   [app.main.ui.components.numeric-input :as deprecated-input]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion-field :refer [labelled-number*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [okulary.core :as l]
@@ -27,32 +26,6 @@
 
 (def ^:private ref:timeline
   (l/derived dwa/current-timeline st/state))
-
-(mf/defc scene-field*
-  "A number of the scene shown with its `label` and `unit`: `value`
-  (`:multiple` mixed), `scale` times what it keeps (percent of a share);
-  `on-change` gets what it keeps."
-  [{:keys [label hint unit value scale min max on-change keyframes]}]
-  (let [scale     (or scale 1)
-        on-change (mf/use-fn
-                   (mf/deps on-change scale)
-                   (fn [value]
-                     (on-change (when (number? value) (/ value scale)))))]
-    [:div {:class (stl/css :scene-field) :title hint}
-     [:span {:class (stl/css :scene-label)} label]
-     [:> deprecated-input/numeric-input*
-      {:no-validate true
-       :min min
-       :max max
-       :aria-label hint
-       :placeholder (if (= :multiple value) (tr "settings.multiple") "0")
-       :on-change on-change
-       :class (stl/css :numeric-input)
-       :value (when (number? value) (mth/precision (* scale value) 2))}]
-     [:span {:class (stl/css :scene-unit)} unit]
-     ;; its diamond, in motion mode, as the camera has
-     (when (some? keyframes)
-       [:> keyframe-diamond* {:properties [keyframes]}])]))
 
 (def ^:private cue-attrs
   [:depth-fade :depth-blur :depth-focus])
@@ -151,26 +124,26 @@
      (when lit?
        [:*
         [:div {:class (stl/css :scene-row :light-ambient)}
-         [:> scene-field* {:label (tr "workspace.options.scene.ambient")
-                           :hint (tr "workspace.options.scene.ambient.hint")
-                           :unit "%" :scale 100 :min 0 :max 100
-                           :keyframes (when motion-id :light-ambient)
-                           :value (light-of :ambient)
-                           :on-change on-ambient}]]
+         [:> labelled-number* {:label (tr "workspace.options.scene.ambient")
+                               :hint (tr "workspace.options.scene.ambient.hint")
+                               :unit "%" :scale 100 :min 0 :max 100
+                               :keyframes (when motion-id :light-ambient)
+                               :value (light-of :ambient)
+                               :on-change on-ambient}]]
         [:div {:class (stl/css :scene-row :light-angle)}
-         [:> scene-field* {:label (tr "workspace.options.scene.angle")
-                           :hint (tr "workspace.options.scene.angle.hint")
-                           :unit "°" :min -360 :max 720
-                           :keyframes (when motion-id :light-angle)
-                           :value (light-of :angle)
-                           :on-change on-angle}]]
+         [:> labelled-number* {:label (tr "workspace.options.scene.angle")
+                               :hint (tr "workspace.options.scene.angle.hint")
+                               :unit "°" :min -360 :max 720
+                               :keyframes (when motion-id :light-angle)
+                               :value (light-of :angle)
+                               :on-change on-angle}]]
         [:div {:class (stl/css :scene-row :light-height)}
-         [:> scene-field* {:label (tr "workspace.options.scene.height")
-                           :hint (tr "workspace.options.scene.height.hint")
-                           :unit "°" :min 0 :max 90
-                           :keyframes (when motion-id :light-height)
-                           :value (light-of :height)
-                           :on-change on-height}]]
+         [:> labelled-number* {:label (tr "workspace.options.scene.height")
+                               :hint (tr "workspace.options.scene.height.hint")
+                               :unit "°" :min 0 :max 90
+                               :keyframes (when motion-id :light-height)
+                               :value (light-of :height)
+                               :on-change on-height}]]
         [:div {:class (stl/css :scene-check :shadows-check)
                :title (tr "workspace.options.scene.shadows.hint")}
          [:> checkbox* {:id "scene-shadows"
@@ -187,20 +160,20 @@
      (when cued?
        [:*
         [:div {:class (stl/css :scene-row :depth-focus)}
-         [:> scene-field* {:label (tr "workspace.options.scene.focus")
-                           :hint (tr "workspace.options.scene.focus.hint")
-                           :unit "px" :min -10000 :max 10000
-                           :value (or (:depth-focus values) 0)
-                           :on-change on-focus}]]
+         [:> labelled-number* {:label (tr "workspace.options.scene.focus")
+                               :hint (tr "workspace.options.scene.focus.hint")
+                               :unit "px" :min -10000 :max 10000
+                               :value (or (:depth-focus values) 0)
+                               :on-change on-focus}]]
         [:div {:class (stl/css :scene-row :depth-fade)}
-         [:> scene-field* {:label (tr "workspace.options.scene.fade")
-                           :hint (tr "workspace.options.scene.fade.hint")
-                           :unit "%" :scale 100 :min 0 :max 100
-                           :value (or (:depth-fade values) 0)
-                           :on-change on-fade}]]
+         [:> labelled-number* {:label (tr "workspace.options.scene.fade")
+                               :hint (tr "workspace.options.scene.fade.hint")
+                               :unit "%" :scale 100 :min 0 :max 100
+                               :value (or (:depth-fade values) 0)
+                               :on-change on-fade}]]
         [:div {:class (stl/css :scene-row :depth-blur)}
-         [:> scene-field* {:label (tr "workspace.options.scene.blur")
-                           :hint (tr "workspace.options.scene.blur.hint")
-                           :unit "px" :min 0 :max 100
-                           :value (or (:depth-blur values) 0)
-                           :on-change on-blur}]]])]))
+         [:> labelled-number* {:label (tr "workspace.options.scene.blur")
+                               :hint (tr "workspace.options.scene.blur.hint")
+                               :unit "px" :min 0 :max 100
+                               :value (or (:depth-blur values) 0)
+                               :on-change on-blur}]]])]))
