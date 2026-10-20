@@ -78,14 +78,29 @@
         (into (mapcat up) masked)
         (into (mapcat up) tilted))))
 
+(defn hidden-in?
+  "Whether the shape `id` of `objects` is hidden, or a shape it is in, up
+  to the board `board-id`."
+  [objects board-id id]
+  (loop [id id]
+    (cond
+      (or (nil? id) (= id board-id) (= id uuid/zero) (not (contains? objects id))) false
+      (true? (dm/get-in objects [id :hidden])) true
+      :else (recur (dm/get-in objects [id :parent-id])))))
+
 (defn export-layer-ids
   "The layers of an SVG or Lottie export of `timeline` (with its
   keyframes, see `cta/resolve-animations`): its tracked shapes and their
   siblings (see `cta/export-layer-ids`), and the layers in the shapes of
-  `export-holders`."
+  `export-holders`; but the hidden ones and those in a hidden one, which
+  the canvas does not draw (the source of offset lines, see
+  `app.common.geom.offset-lines`)."
   [objects timeline]
-  (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline)
-                        (export-holders objects timeline)))
+  (let [board-id (:board-id timeline)]
+    (into []
+          (remove #(hidden-in? objects board-id %))
+          (cta/export-layer-ids objects board-id (:tracks timeline)
+                                (export-holders objects timeline)))))
 
 (def blur-sigma-scale
   "How render-wasm turns the value of a layer blur into the standard

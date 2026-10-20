@@ -2375,6 +2375,38 @@
   [items ty]
   (d/seek #(= ty (:ty %)) items))
 
+(defn- lottie-layer-names
+  "The names of the layers of the Lottie document `L`, those of its
+  precomps too."
+  [L]
+  (into (mapv :nm (:layers L)) (mapcat #(map :nm (:layers %))) (:assets L)))
+
+(t/deftest exports-leave-hidden-layers-out
+  ;; as the source of offset lines beside its lines: the canvas draws it not
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bid    (:id board)
+        line   #(cts/setup-shape {:type :path :name %1 :content (path/from-string %2)
+                                  :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2}]})
+        shown  (line "shown" "M 0 10 L 100 10")
+        hidden (assoc (line "hidden" "M 0 20 L 100 20") :hidden true)
+        inside (line "inside" "M 0 30 L 100 30")
+        group  (assoc (cts/setup-shape {:type :group :name "hidden group" :x 0 :y 30 :width 100 :height 1}) :hidden true)
+        gid    (:id group)
+        objects {bid (assoc board :shapes [(:id shown) (:id hidden) gid])
+                 (:id shown) (assoc shown :parent-id bid :frame-id bid)
+                 (:id hidden) (assoc hidden :parent-id bid :frame-id bid)
+                 gid (assoc group :parent-id bid :frame-id bid :shapes [(:id inside)])
+                 (:id inside) (assoc inside :parent-id gid :frame-id bid)}
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe (:id shown) {:time 0 :property :trim-end :value 0})
+                   (cta/add-keyframe (:id shown) {:time 1000 :property :trim-end :value 1})
+                   (cta/add-keyframe (:id inside) {:time 0 :property :opacity :value 1}))]
+    (t/is (= [(:id shown)] (aexp/export-layer-ids objects tl)))
+    (doseq [assets [nil {}]]
+      (t/is (= ["shown"] (filterv #{"shown" "hidden" "inside" "hidden group"}
+                                  (lottie-layer-names (alottie/timeline->lottie tl objects assets))))
+            (if (nil? assets) "its animated shapes as layers" "the layers of an export")))))
+
 (t/deftest lottie-draws-a-rect-as-vectors
   (let [board (cts/setup-shape {:type :frame :x 100 :y 100 :width 400 :height 300})
         shape (cts/setup-shape {:type :rect :x 150 :y 200 :width 100 :height 50

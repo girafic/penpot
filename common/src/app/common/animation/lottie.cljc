@@ -2243,9 +2243,11 @@
         holders    (aexp/svg-holder-ids objects (aexp/svg-sized-ids objects timeline))
         layer-ids  (if (some? assets)
                      (set (aexp/export-layer-ids objects timeline))
-                     (-> (set (keys (:tracks timeline)))
-                         (disj board-id)
-                         (into (mapcat #(dm/get-in objects [% :shapes])) (aexp/export-holders objects timeline))))
+                     (into #{}
+                           (remove #(aexp/hidden-in? objects board-id %))
+                           (-> (set (keys (:tracks timeline)))
+                               (disj board-id)
+                               (into (mapcat #(dm/get-in objects [% :shapes])) (aexp/export-holders objects timeline)))))
         bsr        (dm/get-in objects [board-id :selrect])
         follow     (when (and (some? propagate) (seq holders))
                      (into {} (aexp/board-follow timeline objects holders layer-ids propagate
