@@ -83,21 +83,23 @@
 
 (defn- clean-points
   "The points of the polyline `points` (closed when `closed?`) its offsets
-  move, point for point (see `offset-polyline`): without repeats, a closed
+  move, point for point (see `offset-pairs`): without repeats, a closed
   one without its last point back on its first."
   [points closed?]
   (cond-> (dedupe-points points)
     (and closed? (> (count points) 2) (< (gpt/distance (first points) (peek (vec points))) 1e-6))
     pop))
 
-(defn offset-pairs
+(defn- offset-pairs
   "`[[point source-point]...]`: the points of the polyline `points`
   (closed when `closed?`) moved `d` px along their normals, the normals of
   their two segments averaged, a corner lengthening it as far as the two
-  segments are apart; a corner sharper than `max-miter` allows rounded
-  instead, `d` px from it all along, so that the lines along its segments
-  keep their distance. Each with the point of `points` it comes from (see
-  `clean-points`)."
+  segments are apart. On the side a corner turns to, where the lines of
+  its two segments meet, that is where they meet while it lies along
+  both segments, else no further than `max-miter`. On the other side, a
+  corner sharper than `max-miter` allows goes round, `d` px from it all
+  along, so that the lines along its segments keep their distance. Each
+  with the point of `points` it comes from (see `clean-points`)."
   [points closed? d]
   (let [pts (clean-points points closed?)
         n   (count pts)
@@ -114,13 +116,25 @@
                      n2   (some->> next (normal p))]
                  (cond
                    (and n1 n2)
-                   (let [nx  (+ (:x n1) (:x n2))
-                         ny  (+ (:y n1) (:y n2))
-                         len (mth/hypot nx ny)]
-                     (if (and (> len 1e-9) (<= (/ 2 len) max-miter))
-                       ;; along the bisector, as far as the two segments are apart
-                       [[(at p [nx ny] (/ (* d 2) (* len len))) p]]
-                       ;; round it, `d` px all along
+                   (let [nx    (+ (:x n1) (:x n2))
+                         ny    (+ (:y n1) (:y n2))
+                         len   (mth/hypot nx ny)
+                         ;; the side the corner turns to: the lines of its
+                         ;; two segments meet there
+                         meet? (pos? (* d (+ (* (:x n1) (- (:x next) (:x p)))
+                                             (* (:y n1) (- (:y next) (:y p))))))]
+                     (if (and (> len 1e-9) (or (<= (/ 2 len) max-miter) meet?))
+                       ;; along the bisector, as far as the two segments are
+                       ;; apart; where they meet, only while that point lies
+                       ;; along both of them (how far along them it is, `reach`)
+                       (let [miter (/ 2 len)
+                             reach (* (mth/abs d) (mth/sqrt (max 0 (- (* miter miter) 1))))
+                             miter (if (or (<= miter max-miter)
+                                           (<= reach (min (gpt/distance prev p) (gpt/distance p next))))
+                                     miter
+                                     max-miter)]
+                         [[(at p [nx ny] (/ (* d miter) len)) p]])
+                       ;; round it, `d` px all along (only where the lines part)
                        (let [sd    (if (neg? d) -1 1)
                              a1    (mth/atan2 (* sd (:y n1)) (* sd (:x n1)))
                              a2    (mth/atan2 (* sd (:y n2)) (* sd (:x n2)))
@@ -136,12 +150,6 @@
                    n2 [[(at p [(:x n2) (:y n2)] d) p]]
                    :else [[p p]]))))
             (range n)))))
-
-(defn offset-polyline
-  "The points of the polyline `points` (closed when `closed?`) moved `d`
-  px off it (see `offset-pairs`)."
-  [points closed? d]
-  (mapv first (offset-pairs points closed? d)))
 
 (defn- signed-area
   "Twice the area of the polygon `pts`, its sign the way it goes round."

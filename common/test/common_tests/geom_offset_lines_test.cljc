@@ -159,6 +159,23 @@
           outer (filter #(pos? (:offset %)) (gol/lines bolt {:count 16 :spacing 4}))]
       (t/is (every? #(= 1 (count (gtl/outline-polylines {:type :path :content (:content %)}))) outer))
       (t/is (every? #(> % 0.85) (map #(closest bolt %) outer)))))
+  (t/testing "a narrow spike: the lines inside it meet in its tip, no piece of them outside it"
+    (let [spike   (cts/setup-shape {:type :path :content (path/from-string "M0 0 L20 200 L-20 200 Z")})
+          outline (:points (first (gtl/outline-polylines spike)))
+          inner   (filter #(neg? (:offset %)) (gol/lines spike {:count 6 :spacing 4}))
+          rings   #(gtl/outline-polylines {:type :path :content (:content %)})]
+      (t/is (= 3 (count inner)))
+      (t/is (every? #(= 1 (count (rings %))) inner) (str "subpaths by line: " (mapv (comp count rings) inner)))
+      (t/is (every? #(#'gol/inside? % outline) (mapcat #(mapcat :points (rings %)) inner)))
+      (t/is (mth/close? 100.5 (apply min (map :y (:points (first (rings (first inner)))))) 1)
+            "the innermost reaches where its two sides meet")))
+  (t/testing "a narrow notch: the lines outside it meet in it, no piece of them inside the shape"
+    (let [notched (cts/setup-shape {:type :path :content (path/from-string "M0 0 L95 0 L100 80 L105 0 L200 0 L200 100 L0 100 Z")})
+          outline (:points (first (gtl/outline-polylines notched)))
+          outer   (filter #(pos? (:offset %)) (gol/lines notched {:count 6 :spacing 4}))
+          rings   #(gtl/outline-polylines {:type :path :content (:content %)})]
+      (t/is (every? #(= 1 (count (rings %))) outer) (str "subpaths by line: " (mapv (comp count rings) outer)))
+      (t/is (not-any? #(#'gol/inside? % outline) (mapcat #(mapcat :points (rings %)) outer)))))
   (t/testing "a cut ring goes round from where the outline starts, so a trim goes along all lines alike"
     (let [heart (cts/setup-shape {:type :path :content (path/from-string "M540 860 C300 690 190 520 250 370 C310 230 470 220 540 360 C610 220 770 230 830 370 C890 520 780 690 540 860 Z")})
           firsts (map #(first (:points (first (gtl/outline-polylines {:type :path :content (:content %)}))))
