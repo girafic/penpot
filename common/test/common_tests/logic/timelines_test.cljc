@@ -290,7 +290,11 @@
        (t/is (not (identical? once (cltl/copy-timelines objects (assoc timelines board {}) files board)))
              "other timelines make them anew")
        (t/is (not (identical? once (cltl/copy-timelines (assoc objects :x 1) timelines files board)))
-             "and so do other objects"))))
+             "and so do other objects")
+       (let [page-id (:id (thf/current-page file))
+             slower  (assoc-in files [(:id file) :data :pages-index page-id :timelines (thi/id :main) :duration] 2000)]
+         (t/is (= [2000] (mapv :duration (vals (cltl/copy-timelines objects timelines slower board))))
+               "and files where their main plays otherwise, as it plays now")))))
 
 (t/deftest a-copy-plays-on-the-clock-its-board-gives-it
   ;; as a precomposition: from 500 ms on, at twice its pace

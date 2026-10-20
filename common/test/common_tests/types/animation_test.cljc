@@ -461,6 +461,65 @@
                  [t id u])]
     (t/is (empty? wrong) (str (count wrong) " points drawn wrong, first " (first wrong)))))
 
+(defn- lines-in-turn
+  "A board with a group drawing in turn the lines of `lengths` (px, the
+  topmost first), its trim from 0 to `end` with the offset `offset`, each
+  `[at-start at-end]` of 2 s, linear: `[played ids]`, the timeline as it
+  plays and the ids of the lines."
+  [lengths [end0 end1] [offset0 offset1]]
+  (let [stroke [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2 :stroke-style :solid :stroke-alignment :center}]
+        board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bid    (:id board)
+        lines  (map-indexed (fn [i len]
+                              (assoc (cts/setup-shape {:type :path :content (path/from-string (str "M 0 " (* 10 i) " L " len " " (* 10 i)))})
+                                     :strokes stroke :parent-id bid :frame-id bid))
+                            lengths)
+        group  (cts/setup-shape {:type :group :x 0 :y 0 :width 100 :height 100})
+        gid    (:id group)
+        ids    (mapv :id lines)
+        objects (into {bid (assoc board :shapes [gid])
+                       gid (assoc group :parent-id bid :frame-id bid :shapes (vec (reverse ids)))}
+                      (map (fn [l] [(:id l) (assoc l :parent-id gid)]))
+                      lines)
+        tl     (-> (mk-timeline)
+                   (assoc :board-id bid :duration 2000)
+                   (cta/set-trim-mode gid :in-turn)
+                   (cta/add-keyframe gid {:time 0 :property :trim-end :value end0 :easing :linear})
+                   (cta/add-keyframe gid {:time 2000 :property :trim-end :value end1})
+                   (cta/add-keyframe gid {:time 0 :property :trim-offset :value offset0 :easing :linear})
+                   (cta/add-keyframe gid {:time 2000 :property :trim-offset :value offset1}))]
+    [(cta/resolve-animations tl objects) ids]))
+
+(t/deftest a-trim-in-turn-has-a-value-at-every-time
+  (t/testing "a layer it never reaches: zero, not nothing"
+    (let [[played [_ bottom]] (lines-in-turn [100 100] [0.3 0.3] [0 0.1])]
+      (t/is (seq (get-in played [:tracks bottom :keyframes])))
+      (t/is (every? (comp number? :value) (get-in played [:tracks bottom :keyframes])))
+      (t/is (every? zero? (map #(get-in (cta/values-at played %) [bottom :trim-end]) [0 1000 2000])))))
+  (t/testing "a layer it reaches later: the offset it is first reached at, from the start"
+    ;; a part growing from nothing at 70 %: the bottom one from 40 % of it
+    (let [[played [_ bottom]] (lines-in-turn [100 100] [0 0.3] [0.7 0.7])
+          offset              #(get-in (cta/values-at played %) [bottom :trim-offset])]
+      (t/is (mth/close? (offset 17) (offset 0) 0.05)
+            (str "from " (offset 0) " to " (offset 17))))))
+
+(t/deftest a-short-layer-in-turn-is-drawn-as-the-others
+  ;; 4 px of 204: its part comes and goes within a few samples
+  (let [[played [top short bottom]] (lines-in-turn [100 4 100] [0.3 0.3] [0 1])
+        shares {top [0 (/ 100 204)] short [(/ 100 204) (/ 4 204)] bottom [(/ 104 204) (/ 100 204)]}
+        wrong  (for [t      (range 3 2000 7)
+                     :let   [values (cta/values-at played t)
+                             from   (mod (/ t 2000) 1)]
+                     [id [a len]] shares
+                     :let   [trim (mapv #(get-in values [id %] (get cta/trim-properties %))
+                                        [:trim-start :trim-end :trim-offset])]
+                     u      (range 0.05 1 0.1)
+                     :let   [x (mod (- (+ a (* u len)) from) 1)]
+                     :when  (and (> (mth/abs (- x 0.3)) 0.02) (> x 0.02) (< x 0.98))
+                     :when  (not= (< x 0.3) (drawn? trim u))]
+                 [t id u])]
+    (t/is (empty? wrong) (str (count wrong) " points drawn wrong, first " (first wrong)))))
+
 (t/deftest the-light-of-a-board-plays
   (let [board (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
                   (assoc :light {:angle 90 :height 30 :ambient 0.2}))

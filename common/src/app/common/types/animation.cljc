@@ -3681,14 +3681,14 @@
     (into {}
           (map-indexed
            (fn [i id]
-             (let [a      (/ (nth starts i) total)
-                   b      (/ (+ (nth starts i) (nth lengths i)) total)
-                   shares  (mapv (fn [[t s e o]] [t (turn-share a b s e o)]) samples)
-                   offsets (unwrapped-offsets (mapv (comp #(nth % 2) second) shares))
-                   shares  (mapv (fn [[t share] o] [t (assoc share 2 o)]) shares offsets)
-                   row     (fn [property k]
-                             (for [[t v] (thinned (mapv (fn [[t share]] [t (nth share k)]) shares) 0.002)]
-                               (make-keyframe {:time t :property property :value v :easing :linear})))]
+             (let [a         (/ (nth starts i) total)
+                   b         (/ (+ (nth starts i) (nth lengths i)) total)
+                   shares    (mapv (fn [[t s e o]] [t (turn-share a b s e o)]) samples)
+                   offsets   (unwrapped-offsets (mapv (comp #(nth % 2) second) shares))
+                   unwrapped (mapv (fn [[t share] o] [t (assoc share 2 o)]) shares offsets)
+                   row       (fn [property k]
+                               (for [[t v] (thinned (mapv (fn [[t share]] [t (nth share k)]) unwrapped) 0.002)]
+                                 (make-keyframe {:time t :property property :value v :easing :linear})))]
                [id (concat (row :trim-start 0) (row :trim-end 1) (row :trim-offset 2))])))
           ids)))
 
