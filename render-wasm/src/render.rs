@@ -4315,9 +4315,10 @@ impl RenderState {
         let moved_bounds = if self.options.is_interactive_transform() && !modifier_ids.is_empty() {
             let mut acc: Option<Rect> = None;
             for id in modifier_ids.iter() {
-                // Current (post-modifier) bounds
+                // Current (post-modifier) bounds, with the halo of the blur
+                // of their depth cues
                 if let Some(s) = tree.get(id) {
-                    let r = self.get_cached_extrect(s, tree, 1.0);
+                    let r = scene::indexed_extrect(s, tree, 1.0);
                     acc = Some(match acc {
                         None => r,
                         Some(mut prev) => {
@@ -4331,7 +4332,7 @@ impl RenderState {
                 // shape at its original position are considered "unsafe" even after the shape
                 // has moved away (e.g. dragging a child out of a clipped frame).
                 if let Some(raw) = tree.get_raw(id) {
-                    let r0 = self.get_cached_extrect(raw, tree, 1.0);
+                    let r0 = scene::indexed_extrect(raw, tree, 1.0);
                     acc = Some(match acc {
                         None => r0,
                         Some(mut prev) => {
@@ -4363,15 +4364,17 @@ impl RenderState {
             let scale = self.get_scale();
             let mut extrect: Option<Rect> = None;
             let projection = self.tilt_projection(element, tree);
+
+            // If the shape is not in the tile set, then we add them: as the
+            // pool holds it (see `scene::indexed_extrect`).
+            if self.tiles.get_tiles_of(node_id).is_none() {
+                self.add_shape_tiles(element, tree);
+            }
+
             // the light and the depth cues of its board, when it is in 3D:
             // the same both times the walker passes it
             let scened = self.with_scene(element, tree);
             let element: &Shape = &scened;
-
-            // If the shape is not in the tile set, then we add them.
-            if self.tiles.get_tiles_of(node_id).is_none() {
-                self.add_shape_tiles(element, tree);
-            }
 
             if visited_children {
                 if !node_render_state.flattened {
@@ -5250,10 +5253,13 @@ impl RenderState {
         prev_extrect: Option<skia::Rect>,
     ) -> skia::Rect {
         let scale = self.get_scale();
-        let new_extrect = self.get_cached_extrect(shape, tree, 1.0);
+        // with the halo of the blur of their depth cues, as the tiles hold it
+        let new_extrect = scene::indexed_extrect(shape, tree, 1.0);
         let prev_extrect = prev_extrect.or_else(|| {
-            tree.get_modifier(&shape.id)
-                .and_then(|_| tree.get_raw(&shape.id).map(|raw| raw.extrect(tree, 1.0)))
+            tree.get_modifier(&shape.id).and_then(|_| {
+                tree.get_raw(&shape.id)
+                    .map(|raw| scene::indexed_extrect(raw, tree, 1.0))
+            })
         });
         let indexed = self
             .tiles
@@ -5453,9 +5459,6 @@ fn masked_group_layer_paint(element: &Shape, filter: Option<skia::ImageFilter>) 
     paint
 }
 
-/// Paint for the layer of a shape that needs one (see `Shape::needs_layer`):
-/// its opacity and blend mode, but for a masked group, whose outer layer
-/// applies them (see `masked_group_layer_paint`).
 /// A step of opening the draw of a shape (see `open_shape_draw`).
 enum DrawStep<'a> {
     BlurLayer(&'a skia::ImageFilter),
@@ -5482,6 +5485,9 @@ fn open_shape_draw(
     }
 }
 
+/// Paint for the layer of a shape that needs one (see `Shape::needs_layer`):
+/// its opacity and blend mode, but for a masked group, whose outer layer
+/// applies them (see `masked_group_layer_paint`).
 fn shape_layer_paint(element: &Shape) -> skia::Paint {
     let mut paint = skia::Paint::default();
     if !element.is_masked_group() {

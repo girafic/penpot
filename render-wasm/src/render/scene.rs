@@ -70,16 +70,13 @@ impl SceneCache {
     }
 }
 
-/// The extrect of `shape` the tiles index it by: of a shape of `tree`, with
-/// the halo of the blur of its depth cues, which it draws in the space of
-/// the page (see `Shape::scene_effects`); a shape a pass shows lit carries
-/// it already.
+/// The extrect of `shape` the tiles index it by: with the halo of the blur
+/// of its depth cues, which it draws in the space of the page (see
+/// `Shape::scene_effects`). Of a shape as the pool holds it, before a pass
+/// lights it (see `SceneCache::scened`), which would carry that blur already.
 pub fn indexed_extrect(shape: &Shape, tree: ShapesPoolRef, scale: f32) -> Rect {
     let extrect = shape.extrect(tree, scale);
-    let of_tree = tree
-        .get(&shape.id)
-        .is_some_and(|own| std::ptr::eq(own, shape));
-    if !of_tree || !tree.has_tilts() {
+    if !tree.has_tilts() {
         return extrect;
     }
     match shape.scene_effects(tree) {
@@ -161,11 +158,11 @@ mod tests {
             indexed.contains(plain) && indexed.width() > plain.width() + 1.0,
             "{indexed:?}"
         );
-        let lit = SceneCache::default().scened(rect, &pool);
+        let copy = rect.clone();
         assert_eq!(
-            indexed_extrect(&lit, &pool, 1.0),
-            lit.extrect(&pool, 1.0),
-            "a lit copy carries its blur already"
+            indexed_extrect(&copy, &pool, 1.0),
+            indexed,
+            "any shape given, as a raw one before its modifiers"
         );
     }
 }
