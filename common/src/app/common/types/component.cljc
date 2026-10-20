@@ -102,6 +102,7 @@
    :depth-fade              :layer-effects-group
    :depth-blur              :layer-effects-group
    :depth-focus             :layer-effects-group
+   :offset-lines            :geometry-group
    :shadow                  :shadow-group
    :blur                    :blur-group
    :background-blur         :blur-group

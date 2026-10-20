@@ -8,11 +8,14 @@
   "Offset lines (Penpot Motion, see `app.common.geom.offset-lines`): a
   group of paths parallel to the outline of a shape, its source, which it
   holds hidden; made from a shape and made again as its settings change
-  or its source does."
+  or its source does, but in a copy of a component, which takes them from
+  its main."
   (:require
    [app.common.data :as d]
    [app.common.files.changes-builder :as pcb]
    [app.common.geom.offset-lines :as gol]
+   [app.common.schema :as sm]
+   [app.common.types.component :as ctk]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
@@ -36,6 +39,7 @@
                              :content content
                              :parent-id group-id
                              :frame-id frame-id
+                             :offset-line :line
                              :fills []
                              :strokes [{:stroke-color color
                                         :stroke-opacity opacity
@@ -44,30 +48,45 @@
                                         :stroke-alignment :center}]})))
         (gol/lines source spec)))
 
+(defn editable?
+  "Whether the offset lines of `group` of `objects` can be made again: it
+  holds their source (see `gol/layers-of`) and is no copy of a component,
+  which takes them from its main."
+  [objects group]
+  (boolean (and (some? (gol/layers-of objects group))
+                (not (ctk/in-component-copy? group)))))
+
 (defn set-offset-lines
   "Make the lines of the group of offset lines `group-id` again, its
-  settings with `changes` taken into them (see `gol/defaults`): the old
-  lines go, its source stays hidden."
-  ([group-id] (set-offset-lines group-id nil))
-  ([group-id changes]
+  settings with `changes` taken into them (see `gol/defaults`): the lines
+  it made go, its source stays hidden, what else it holds stays. The
+  first time, `source-id` is the layer they are made from. Nothing when
+  the group cannot make them (see `editable?`)."
+  ([group-id] (set-offset-lines group-id nil nil))
+  ([group-id changes] (set-offset-lines group-id changes nil))
+  ([group-id changes source-id]
    (ptk/reify ::set-offset-lines
      ptk/WatchEvent
      (watch [it state _]
        (let [page-id (:current-page-id state)
              objects (dsh/lookup-page-objects state page-id)
              group   (get objects group-id)
-             spec    (merge gol/defaults (:offset-lines group) changes)
-             source  (get objects (:source spec))]
-         (if (and (some? group) (some? source))
-           (let [old     (into [] (remove #{(:source spec)}) (:shapes group))
-                 lines   (line-shapes source spec group-id (:frame-id group))
+             layers  (if (some? source-id)
+                       {:source source-id :lines []}
+                       (gol/layers-of objects group))
+             source  (get objects (:source layers))
+             spec    (-> (merge gol/defaults (:offset-lines group) changes)
+                         (dissoc :source))]
+         (if (and (some? group) (some? source)
+                  (or (some? source-id) (editable? objects group)))
+           (let [lines   (line-shapes source spec group-id (:frame-id group))
                  changes (-> (pcb/empty-changes it page-id)
                              (pcb/with-objects objects)
                              ;; named so the first time
                              (pcb/update-shapes [group-id] #(cond-> (assoc % :offset-lines spec)
                                                               (nil? (:offset-lines %)) (assoc :name "Offset lines")))
-                             (pcb/update-shapes [(:id source)] #(assoc % :hidden true))
-                             (pcb/remove-objects old)
+                             (pcb/update-shapes [(:id source)] #(assoc % :hidden true :offset-line :source))
+                             (pcb/remove-objects (:lines layers))
                              (pcb/add-objects lines)
                              (pcb/resize-parents [group-id]))]
              (rx/of (dch/commit-changes changes)))
@@ -87,14 +106,15 @@
              source  (get objects source-id)
              stroke  (first (:strokes source))
              spec    (merge gol/defaults
-                            (when-let [color (:stroke-color stroke)] {:inner-color color})
-                            spec
-                            {:source source-id})
+                            (when-let [color (:stroke-color stroke)]
+                              (when (sm/validate cts/schema:six-digit-hex color)
+                                {:inner-color color}))
+                            spec)
              undo-id (js/Symbol)]
          (if (some? source)
            (rx/of (dwu/start-undo-transaction undo-id)
                   (dwg/group-shapes group-id [source-id])
-                  (set-offset-lines group-id spec)
+                  (set-offset-lines group-id spec source-id)
                   (when select?
                     (dws/select-shapes (into (d/ordered-set) [group-id])))
                   (dwu/commit-undo-transaction undo-id))

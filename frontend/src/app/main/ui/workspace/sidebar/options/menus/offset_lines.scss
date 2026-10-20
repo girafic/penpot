@@ -77,3 +77,16 @@
   grid-column: 1 / -1;
   display: flex;
 }
+
+// why the settings cannot change: a copy, or no source left
+.hint {
+  @include t.use-typography("body-small");
+
+  margin: 0;
+  padding-inline: var(--sp-xxs);
+  color: var(--color-foreground-secondary);
+}
+
+.wide {
+  grid-column: 1 / -1;
+}

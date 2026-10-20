@@ -9,6 +9,8 @@
   `app.common.geom.offset-lines`)."
   (:require
    [app.common.test-helpers.files :as cthf]
+   [app.common.uuid :as uuid]
+   [app.main.data.workspace.offset-lines :as dwol]
    [app.main.store :as st]
    [app.plugins.api :as api]
    [cljs.test :as t :include-macros true]
@@ -53,6 +55,7 @@
           (t/testing "what is not valid is refused"
             (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:count 0})))
             (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:innerColor "red"})))
+            (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:outerColor "#abc"})) "six digits")
             (t/is (thrown? js/Error (.makeOffsetLines path #js {:spacing -1})))
             (t/is (thrown? js/Error (.makeOffsetLines (.createRectangle context)))
                   "only a path makes them")
@@ -62,3 +65,57 @@
             (let [^js other (.group context #js [(.createRectangle context)])]
               (t/is (nil? (.-offsetLines other)))
               (t/is (thrown? js/Error (set! (.-offsetLines other) #js {:count 3}))))))))))
+
+(defn- offset-lines-of-a-rect
+  "A store, the plugin context and a group of 3 offset lines of a closed
+  path: `[store context group path]`."
+  []
+  (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+        ^js context (api/create-context plugin-id)
+        _           (set! st/state store)
+        _           (ptk/emit! store #(assoc-in % [:plugins :flags plugin-id :throw-validation-errors] true))
+        ^js path    (.createPath context)]
+    (set! (.-d path) "M0 0 L100 0 L100 50 L0 50 Z")
+    (set! (.-strokes path) #js [#js {:strokeColor "#336699" :strokeOpacity 1 :strokeWidth 2}])
+    [store context (.makeOffsetLines path #js {:count 3 :spacing 10}) path]))
+
+(defn- roles
+  "The roles of the layers of `group` in the live store (see `gol/layers-of`)."
+  [store context ^js group]
+  (let [objects (get-in @store [:files (aget (. context -currentFile) "$id") :data :pages-index
+                                (aget (. context -currentPage) "$id") :objects])]
+    (mapv #(get-in objects [% :offset-line] :none) (:shapes (stored store context group)))))
+
+(t/deftest offset-lines-are-made-again-from-their-own-source
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store context ^js group ^js path] (offset-lines-of-a-rect)]
+        (t/is (= [:source :line :line :line] (roles store context group)) "each layer says what it is")
+
+        (t/testing "a copy makes them from its own source"
+          (let [^js copy (.clone group)]
+            (set! (.-offsetLines copy) #js {:count 5})
+            (t/is (= [:source :line :line :line :line :line] (roles store context copy)))
+            (t/is (not= (.-id path) (.-id (.-source (.-offsetLines copy)))) "not from the source of the first")
+            (t/is (true? (:hidden (stored store context (.-source (.-offsetLines copy))))) "kept hidden")
+            (t/is (= [:source :line :line :line] (roles store context group)) "the first stays as it was")))
+
+        (t/testing "what else the group holds stays"
+          (let [^js rect (.createRectangle context)]
+            (.appendChild group rect)
+            (set! (.-offsetLines group) #js {:count 2})
+            (t/is (some #{(aget rect "$id")} (:shapes (stored store context group))))
+            (t/is (= 2 (count (filter #{:line} (roles store context group)))))))
+
+        (t/testing "without its source they cannot be made again"
+          (.remove path)
+          (t/is (nil? (.-source (.-offsetLines group))))
+          (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:count 4}))))))))
+
+(t/deftest a-copy-of-a-component-takes-its-offset-lines-from-its-main
+  (let [group   {:id (uuid/next) :shapes [:src] :offset-lines {:count 2}}
+        objects {:src {:id :src :offset-line :source}}]
+    (t/is (true? (dwol/editable? objects group)))
+    (t/is (false? (dwol/editable? objects (assoc group :shape-ref (uuid/next)))) "a copy")
+    (t/is (false? (dwol/editable? {} group)) "no source")))
+

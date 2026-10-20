@@ -9399,6 +9399,10 @@ msgid "workspace.options.offset-lines.add"
 msgstr "Make offset lines of the outline"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.copy"
+msgstr "A copy takes its offset lines from its main component: change them there"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
 msgid "workspace.options.offset-lines.count"
 msgstr "Lines"
 
@@ -9429,6 +9433,10 @@ msgstr "Inside"
 #: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
 msgid "workspace.options.offset-lines.inner.hint"
 msgstr "The colour and opacity of the line on the inner side"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.no-source"
+msgstr "The path these lines are made from is gone: make them anew from a path"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
 msgid "workspace.options.offset-lines.outer"

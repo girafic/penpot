@@ -284,6 +284,10 @@
    ;; Whether a group or board is a 3D space: what it holds keeps its depth
    ;; there, drawn back to front (see `gtl/three-d-space?`).
    [:preserve-depth {:optional true} :boolean]
+   ;; What a layer of a group of offset lines is (Penpot Motion, see
+   ;; `app.common.geom.offset-lines`): the hidden path they are made from,
+   ;; or one of the lines made from it, which making them again replaces.
+   [:offset-line {:optional true} [::sm/one-of #{:source :line}]]
 
    ;; Carried on circles, rects and texts too, not only on frames, so it
    ;; belongs here rather than in `schema:frame-attrs`. Not nilable: the key
@@ -303,17 +307,23 @@
    [:svg-transform {:optional true} :map]
    [:svg-viewbox {:optional true} :map]])
 
+(def schema:six-digit-hex
+  "A colour as `#` and six hex digits, which the offset lines mix."
+  [:and clr/schema:hex-color [:re #"^#[0-9a-fA-F]{6}$"]])
+
 (def schema:offset-lines
-  "How the lines of a group of offset lines are made from its `:source`
-  (see `app.common.geom.offset-lines`)."
+  "How the lines of a group of offset lines are made from its source, the
+  layer of the group that is `:offset-line :source` (see
+  `app.common.geom.offset-lines`). `:source`, its id, only in groups made
+  before the layers had their roles."
   [:map {:title "OffsetLines"}
-   [:source ::sm/uuid]
+   [:source {:optional true} ::sm/uuid]
    [:count [::sm/int {:min 1 :max 200}]]
    [:spacing [::sm/number {:min 0.1 :max 1000}]]
    [:width [::sm/number {:min 0.1 :max 1000}]]
-   [:inner-color ::sm/text]
+   [:inner-color schema:six-digit-hex]
    [:inner-opacity [::sm/number {:min 0 :max 1}]]
-   [:outer-color ::sm/text]
+   [:outer-color schema:six-digit-hex]
    [:outer-opacity [::sm/number {:min 0 :max 1}]]])
 
 (def schema:group-attrs

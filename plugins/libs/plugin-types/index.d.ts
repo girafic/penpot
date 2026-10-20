@@ -2766,7 +2766,10 @@ export interface Group extends ShapeBase {
    * How the offset lines this group holds are made from their source, or
    * `null` when it holds none (see `Path.makeOffsetLines`). Setting any of
    * the settings makes the lines again from the source as it is now; the
-   * others stay. Setting it on a group without offset lines is not valid.
+   * others stay, and so do other layers in the group. A copy of the group
+   * makes its lines from its own source. Setting it is not valid on a group
+   * without offset lines, on one whose source is gone (its `source` is then
+   * `null`), or on a copy of a component, which takes them from its main.
    * Requires `content:write` permission to set.
    *
    * @example
@@ -2823,9 +2826,10 @@ export interface OffsetLinesSettings {
  */
 export interface OffsetLines extends Required<OffsetLinesSettings> {
   /**
-   * The path the lines are made from, which the group holds hidden.
+   * The path the lines are made from, which the group holds hidden, or
+   * `null` when it is gone.
    */
-  readonly source: Path;
+  readonly source: Path | null;
 }
 
 /**
@@ -4079,8 +4083,10 @@ export interface Path extends ShapeBase {
    * Makes offset lines of this path: a group that holds it hidden and
    * `count` paths parallel to it, centred on it, their colour and opacity
    * going from the inner side to the outer one (see
-   * `OffsetLinesSettings`). Trim the group to draw them together or in
-   * turn. Requires `content:write` permission.
+   * `OffsetLinesSettings`). Lines that would go past the middle of a
+   * closed outline are left out; a concave one can still make loops. Trim
+   * the group to draw them together or in turn. Not valid on a layer of a
+   * copy of a component. Requires `content:write` permission.
    *
    * @param settings How the lines are made; each one optional.
    * @return The new group (see `Group.offsetLines`).

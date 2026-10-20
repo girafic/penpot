@@ -382,8 +382,7 @@
                        :inner-opacity (obj/get value "innerOpacity")
                        :outer-color (color "outerColor")
                        :outer-opacity (obj/get value "outerOpacity")}))]
-      (when (and (sm/validate cts/schema:offset-lines (merge gol/defaults settings {:source uuid/zero}))
-                 (every? #(re-matches #"#[0-9a-f]{6}" %) (keep settings [:inner-color :outer-color])))
+      (when (sm/validate cts/schema:offset-lines (merge gol/defaults settings))
         (or settings {})))))
 
 (defn shape-proxy
@@ -1518,6 +1517,9 @@
                  (not (cfh/path-shape? shape))
                  (u/not-valid plugin-id :makeOffsetLines (:type shape))
 
+                 (ctk/in-component-copy? shape)
+                 (u/not-valid plugin-id :makeOffsetLines "A layer of a copy of a component cannot make offset lines")
+
                  (nil? settings)
                  (u/not-valid plugin-id :makeOffsetLines value)
 
@@ -2152,15 +2154,18 @@
             {:name "offsetLines"
              :get
              (fn [self]
-               (when-let [spec (some->> self u/proxy->shape :offset-lines (merge gol/defaults))]
-                 #js {:source (shape-proxy plugin-id file-id page-id (:source spec))
-                      :count (:count spec)
-                      :spacing (:spacing spec)
-                      :width (:width spec)
-                      :innerColor (:inner-color spec)
-                      :innerOpacity (:inner-opacity spec)
-                      :outerColor (:outer-color spec)
-                      :outerOpacity (:outer-opacity spec)}))
+               (let [shape  (u/proxy->shape self)
+                     spec   (some->> shape :offset-lines (merge gol/defaults))
+                     source (:source (gol/layers-of (u/locate-objects file-id page-id) shape))]
+                 (when (some? spec)
+                   #js {:source (some->> source (shape-proxy plugin-id file-id page-id))
+                        :count (:count spec)
+                        :spacing (:spacing spec)
+                        :width (:width spec)
+                        :innerColor (:inner-color spec)
+                        :innerOpacity (:inner-opacity spec)
+                        :outerColor (:outer-color spec)
+                        :outerOpacity (:outer-opacity spec)})))
 
              :set
              (fn [self value]
@@ -2169,6 +2174,12 @@
                  (cond
                    (nil? (:offset-lines shape))
                    (u/not-valid plugin-id :offsetLines "The group holds no offset lines")
+
+                   (ctk/in-component-copy? shape)
+                   (u/not-valid plugin-id :offsetLines "A copy of a component takes its offset lines from its main")
+
+                   (nil? (gol/layers-of (u/locate-objects file-id page-id) shape))
+                   (u/not-valid plugin-id :offsetLines "The path the lines are made from is gone")
 
                    (nil? settings)
                    (u/not-valid plugin-id :offsetLines value)
