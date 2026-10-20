@@ -76,6 +76,33 @@
     (t/is (not (str/includes? plain "pathLength")))
     (t/is (= 1 (count (re-seq #"pathLength=\"1\"" trimmed))) "its stroke, not its fill")))
 
+(t/deftest the-stroke-of-an-outline-of-several-subpaths-is-drawn-by-pieces
+  ;; the canvas trims it along them all: each its share of the length
+  ;; two closed outlines, of 3 and 1 times 10 · (2 + √2) px, as an inner or
+  ;; outer stroke takes only them
+  (doseq [alignment [:center :inner :outer]]
+    (let [a       (cts/setup-shape {:type :path :content (path/from-string "M 0 0 L 30 0 L 30 30 Z M 40 0 L 50 0 L 50 10 Z")
+                                    :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                               :stroke-style :solid :stroke-alignment alignment}]})
+          {:keys [objects]} (board-with a)
+          trimmed (svgv/layer-markup objects (:id a) (track-of :trim-end))
+          plain   (svgv/layer-markup objects (:id a) nil)
+          pieces  (re-seq #"<path pathLength=\"([^\"]*)\" class=\"trim-piece-(\d)\" d=\"([^\"]*)\"" trimmed)]
+      (t/is (= ["0" "1"] (mapv #(nth % 2) pieces)) (name alignment))
+      (t/is (every? true? (map (fn [[_ length] share] (< (js/Math.abs (- (js/parseFloat length) share)) 1e-9))
+                               pieces [0.75 0.25])))
+      (t/is (every? #(= 1 (count (re-seq #"m" (nth % 3)))) pieces) "one subpath each")
+      (t/is (not (str/includes? plain "trim-piece")) "not trimmed, whole")
+      (when (not= :center alignment)
+        (t/is (re-find #"<(?:clipPath|mask)[^>]*><path pathLength=\"1\" d=\"m[^\"]*m" trimmed)
+              "its clip or mask whole"))))
+  (t/testing "an outline of one subpath, as before"
+    (let [a (cts/setup-shape {:type :path :content (path/from-string "M 0 0 L 30 0")
+                              :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                         :stroke-style :solid :stroke-alignment :center}]})
+          {:keys [objects]} (board-with a)]
+      (t/is (not (str/includes? (svgv/layer-markup objects (:id a) (track-of :trim-end)) "trim-piece"))))))
+
 (t/deftest the-effects-of-a-layer-are-not-drawn-in-it
   ;; A filter of its own draws them, as soft as the canvas does (see
   ;; `asvg/svg-filter-shadows?`).

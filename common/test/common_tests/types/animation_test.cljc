@@ -3290,7 +3290,18 @@
     (t/is (= 2 (:m (trim two))) "Lottie: one after another")
     (t/is (= 1 (:m (trim (assoc one :strokes (:strokes two))))) "one by itself, as before")
     (t/testing "without fills, no group of them"
-      (t/is (= ["strokes"] (mapv :nm (get-in (lottie-of board (assoc two :fills []) kfs) [:layers 0 :shapes])))))))
+      (t/is (= ["strokes"] (mapv :nm (get-in (lottie-of board (assoc two :fills []) kfs) [:layers 0 :shapes])))))
+    (t/testing "SVG: a rule of each piece, its dash from where it begins"
+      (let [bid (:id board)
+            sid (:id two)
+            tl  (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :trim-end :value 0.5}))
+            css (asvg/svg-appearance-css tl {bid (assoc board :shapes [sid])
+                                             sid (assoc two :parent-id bid :frame-id bid)})]
+        (t/is (str/includes? css ".stroke-shape > :not(defs) {") "the whole, for an element not split")
+        (t/is (str/includes? css ".stroke-shape > :not(defs).trim-piece-0 {"))
+        (t/is (str/includes? css ".stroke-shape > :not(defs).trim-piece-1 {"))
+        (t/is (re-find #"stroke-dasharray: 0.5 0.5; stroke-dashoffset: 0.75;" css) "the second, 0.75 along")))))
 
 (t/deftest lottie-draws-a-gradient
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})

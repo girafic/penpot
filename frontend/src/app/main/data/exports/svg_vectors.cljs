@@ -96,21 +96,64 @@
       (.join (.split markup attr) (str attr " data-penpot-outline=\"\"")))
     markup))
 
+(defn- strokes-start
+  "Where in `markup` the strokes of the shape `id` begin: the group of
+  class `strokes` whose id ends in it, whatever the order of its
+  attributes; -1 without."
+  [markup id]
+  (.search markup (js/RegExp. (str "<g(?=[^>]*\\sclass=\"(?:[^\"]*\\s)?strokes(?:\\s[^\"]*)?\")"
+                                   "(?=[^>]*\\sid=\"[^\"]*-" id "\")"))))
+
 (defn with-path-length
   "The `markup` of the shape `id` with the outlines its strokes are drawn
   along of length 1 (`pathLength`), so its trim plays as their dash (see
-  `asvg/svg-appearance-css`): those after the start of its strokes, the
-  group of class `strokes` whose id ends in it, whatever the order of
-  its attributes."
+  `asvg/svg-appearance-css`): those after the start of its strokes (see
+  `strokes-start`) but the pieces of one (see `split-trim-pieces`), of
+  their own length."
   [markup id]
-  (let [start (.search markup (js/RegExp. (str "<g(?=[^>]*\\sclass=\"(?:[^\"]*\\s)?strokes(?:\\s[^\"]*)?\")"
-                                               "(?=[^>]*\\sid=\"[^\"]*-" id "\")")))]
+  (let [start (strokes-start markup id)]
     (if (neg? start)
       markup
       (str (subs markup 0 start)
            (str/replace (subs markup start)
-                        #"<(path|rect|ellipse|circle|polygon|polyline|line) "
+                        #"<(path|rect|ellipse|circle|polygon|polyline|line) (?![^>]*pathLength=)"
                         "<$1 pathLength=\"1\" ")))))
+
+(defn- split-path
+  "The `<path>` of the attributes `attrs` (its `d` absolute, as the SVG
+  renderer writes it) as one element per subpath when it has as many as
+  `pieces` (`[[from share]...]`, see `aexp/trim-pieces`), each of its share
+  of the length of them all (`pathLength`) and of the class of its piece
+  (see `asvg/trim-piece-class`); else as it is."
+  [attrs pieces]
+  (let [d        (second (re-find #"(?:^|\s)d=\"([^\"]*)\"" attrs))
+        subpaths (some->> d (re-seq #"M[^M]*"))
+        whole    (str "<path " attrs "></path>")]
+    (if (or (not= (count subpaths) (count pieces))
+            (re-find #"(?:^|\s)class=" attrs))
+      whole
+      (str/join (map-indexed
+                 (fn [k [subpath [_ share]]]
+                   (str "<path pathLength=\"" share "\" class=\"" (asvg/trim-piece-class k) "\" "
+                        (.join (.split attrs (str "d=\"" d "\"")) (str "d=\"" (str/trim subpath) "\""))
+                        "></path>"))
+                 (map vector subpaths pieces))))))
+
+(defn- split-trim-pieces
+  "`markup` with the stroke each stroke of the shape `id` paints (the
+  first path of its group after its `<defs>`, as the SVG renderer draws
+  center, inner and outer strokes) split into its subpaths (see
+  `split-path`): the canvas trims an outline of several subpaths along
+  them all, an SVG dash each by itself, so each plays its part of the
+  trim on its own (see `asvg/svg-appearance-css`)."
+  [markup id pieces]
+  (let [start (strokes-start markup id)]
+    (if (neg? start)
+      markup
+      (str (subs markup 0 start)
+           (.replace (subs markup start)
+                     (js/RegExp. "(<g class=\"(?:inner-|outer-)?stroke-shape\">(?:<defs>[\\s\\S]*?</defs>)?)<path ([^>]*)></path>" "g")
+                     (fn [_ head attrs] (str head (split-path attrs pieces))))))))
 
 (defn- merged-attrs
   "The attributes of a copy of an element of the attributes
@@ -231,6 +274,10 @@
   `compact-path`). `track` is its animation (see `rest-shape`)."
   [objects id track]
   (let [shape  (rest-shape (get objects id) track)
+        smil?  (smil-outline? (get objects id) track)
+        trim?  (some #(trim-properties (:property %)) (:keyframes track))
+        ;; an outline playing by SMIL keeps its elements whole
+        pieces (when (and trim? (not smil?)) (aexp/trim-pieces shape))
         markup (rds/renderToStaticMarkup
                 (mf/element layer-svg* #js {:objects objects :shape shape}))]
     (cond-> (-> markup
@@ -238,9 +285,10 @@
                 (str/replace #"</svg>$" "")
                 (inline-uses)
                 ;; marked as the renderer writes it, before it is made compact
-                (cond-> (smil-outline? (get objects id) track) (mark-outline shape))
+                (cond-> smil? (mark-outline shape))
+                (cond-> (some? pieces) (split-trim-pieces id pieces))
                 (compact-paths))
-      (some #(trim-properties (:property %)) (:keyframes track))
+      trim?
       (with-path-length id))))
 
 (def ^:private media-fetches

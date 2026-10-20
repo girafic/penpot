@@ -164,16 +164,25 @@
   [v index]
   (if (map? v) (get v index) v))
 
+(defn trim-piece-class
+  "The class of the element drawing the subpath `k` of a trimmed stroke
+  (see `aexp/trim-pieces`), whose trim plays from where it begins on
+  them all (see `svg-trim-declarations`)."
+  [k]
+  (str "trim-piece-" k))
+
 (defn- svg-trim-declarations
   "The dash of the strokes of a layer drawn from `:trim-start` to
   `:trim-end` moved along by `:trim-offset` of `values`, on outlines of
-  length 1 (the vectors of the layer have a `pathLength` of 1)."
-  [values]
+  length 1 (the vectors of the layer have a `pathLength` of 1), or on
+  a piece of them that begins at `from` of that length (its `pathLength`
+  its share of it, see `trim-piece-class`)."
+  [values & [from]]
   (when (some #(contains? values %) svg-trim-properties)
     (let [{:keys [trim-start trim-end trim-offset]} (merge cta/trim-properties (select-keys values svg-trim-properties))
           length (mth/clamp (- trim-end trim-start) 0 1)]
       [(str "stroke-dasharray: " (acss/fmt length) " " (acss/fmt (- 1 length)) ";")
-       (str "stroke-dashoffset: " (acss/fmt (- (+ trim-start trim-offset))) ";")])))
+       (str "stroke-dashoffset: " (acss/fmt (- (or from 0) (+ trim-start trim-offset))) ";")])))
 
 (defn- svg-stroke-elements
   "The elements of the stroke `index` of `shape` as the SVG renderer
@@ -254,6 +263,10 @@
                           (comp (filter #(pset (:property %))) (map #(or (:index %) 0)))
                           (:keyframes track)))
         trim?     (some svg-trim-properties props)
+        ;; an outline of several subpaths trims along them all, each
+        ;; drawn by an element of its own (see `trim-piece-class`); the
+        ;; rule of the whole stays for one drawn whole
+        pieces    (when (and trim? (not text?)) (aexp/trim-pieces shape))
         fill-targets
         (for [index (kf-index svg-fill-properties)
               :when (or text? (< index (count fills)))]
@@ -280,16 +293,19 @@
                  factor (if (= :center (aexp/svg-stroke-alignment shape (get strokes index))) 1 2)
                  {:keys [paint mask]} (svg-stroke-elements shape index)
                  width  #(when-let [w (indexed-value (:stroke-width %) index)]
-                           (str "stroke-width: " (acss/fmt (* factor w)) ";"))]
-             (cond-> [[[paint]
-                       (fn [values]
-                         (let [color   (indexed-value (:stroke-color values) index)
-                               opacity (indexed-value (:stroke-opacity values) index)]
-                           (cond-> (if text? [] (vec (svg-trim-declarations values)))
-                             (some? color)   (conj (str "stroke: " color ";"))
-                             (some? opacity) (conj (str "stroke-opacity: " (acss/fmt opacity) ";"))
-                             (some? (width values)) (conj (width values)))))
-                       (cond-> svg-stroke-properties (not text?) (into svg-trim-properties))]]
+                           (str "stroke-width: " (acss/fmt (* factor w)) ";"))
+                 decls  (fn [values from]
+                          (let [color   (indexed-value (:stroke-color values) index)
+                                opacity (indexed-value (:stroke-opacity values) index)]
+                            (cond-> (if text? [] (vec (svg-trim-declarations values from)))
+                              (some? color)   (conj (str "stroke: " color ";"))
+                              (some? opacity) (conj (str "stroke-opacity: " (acss/fmt opacity) ";"))
+                              (some? (width values)) (conj (width values)))))
+                 reads  (cond-> svg-stroke-properties (not text?) (into svg-trim-properties))]
+             (cond-> (into [[[paint] #(decls % 0) reads]]
+                           (map-indexed (fn [k [from _]]
+                                          [[(str paint "." (trim-piece-class k))] #(decls % from) reads]))
+                           pieces)
                ;; the mask of an outer stroke is as wide
                (and (some? mask) (contains? props :stroke-width))
                (conj [[mask]
