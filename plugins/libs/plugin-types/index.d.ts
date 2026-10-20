@@ -4083,10 +4083,11 @@ export interface Path extends ShapeBase {
    * Makes offset lines of this path: a group that holds it hidden and
    * `count` paths parallel to it, centred on it, their colour and opacity
    * going from the inner side to the outer one (see
-   * `OffsetLinesSettings`). Lines that would go past the middle of a
-   * closed outline are left out; a concave one can still make loops. Trim
-   * the group to draw them together or in turn. Not valid on a layer of a
-   * copy of a component. Requires `content:write` permission.
+   * `OffsetLinesSettings`). The parts of a line that would come nearer the
+   * path than the line goes from it (in a notch, a waist or a curve tighter
+   * than the lines) are left out, but at the ends of an open path. Trim the
+   * group to draw them together or in turn. Not valid on a layer of a copy
+   * of a component. Requires `content:write` permission.
    *
    * @param settings How the lines are made; each one optional.
    * @return The new group (see `Group.offsetLines`).

@@ -89,3 +89,75 @@
     (t/is (not (valid? "#abc")) "three digits, which the mix misreads")
     (t/is (not (valid? "red")))))
 
+(defn- crossings
+  "How many times the polylines of the outline of `content` cross
+  themselves: pairs of segments not next to each other that meet."
+  [content]
+  (let [cross? (fn [a b c d]
+                 (let [side #(- (* (- (:x %2) (:x %1)) (- (:y %3) (:y %1)))
+                                (* (- (:y %2) (:y %1)) (- (:x %3) (:x %1))))]
+                   (and (neg? (* (side a b c) (side a b d)))
+                        (neg? (* (side c d a) (side c d b))))))]
+    (reduce + (for [{:keys [points closed?]} (gtl/outline-polylines {:type :path :content content})
+                    :let [pts  (vec points)
+                          segs (vec (partition 2 1 (cond-> pts closed? (conj (first pts)))))
+                          n    (count segs)]
+                    i (range n)
+                    j (range (+ i 2) n)
+                    :when (not (and closed? (= i 0) (= j (dec n))))
+                    :let [[a b] (nth segs i) [c d] (nth segs j)]
+                    :when (cross? a b c d)]
+                1))))
+
+(defn- nearest
+  "How far the point `p` is from the polyline `pts` (closed when `closed?`)."
+  [p pts closed?]
+  (let [pts (vec pts)]
+    (apply min (for [[a b] (partition 2 1 (cond-> pts closed? (conj (first pts))))]
+                 (let [dx (- (:x b) (:x a)) dy (- (:y b) (:y a))
+                       l2 (+ (* dx dx) (* dy dy))
+                       t  (if (zero? l2) 0 (mth/clamp (/ (+ (* (- (:x p) (:x a)) dx) (* (- (:y p) (:y a)) dy)) l2) 0 1))]
+                   (mth/hypot (- (:x p) (+ (:x a) (* t dx))) (- (:y p) (+ (:y a) (* t dy)))))))))
+
+(defn- closest
+  "How near the points of the line `line` come to the outline of
+  `shape`, against its offset: 1 when none comes nearer than it."
+  [shape line]
+  (let [{:keys [points closed?]} (first (gtl/outline-polylines shape))]
+    (/ (apply min (for [{pts :points} (gtl/outline-polylines {:type :path :content (:content line)})
+                        p pts]
+                    (nearest p points closed?)))
+       (mth/abs (:offset line)))))
+
+(t/deftest the-lines-of-a-concave-outline-keep-their-distance
+  ;; a notch 20 px wide: the lines outside it, further than 10 px, would
+  ;; run into it and back, closer to the outline than they are apart
+  (let [notched (cts/setup-shape {:type :path :content (path/from-string "M0 0 L90 0 L90 40 L110 40 L110 0 L200 0 L200 100 L0 100 Z")})
+        lines   (gol/lines notched {:count 12 :spacing 4})]
+    (t/is (= 12 (count lines)))
+    (t/is (every? #(> % 0.9) (map #(closest notched %) lines))
+          (str "nearest by line: " (mapv #(mth/precision (closest notched %) 2) lines)))
+    (t/is (every? zero? (map (comp crossings :content) lines)) "no loops"))
+  (t/testing "an open path bent tighter than its lines are apart"
+    (let [bent  (cts/setup-shape {:type :path :content (path/from-string "M0 0 L100 0 L100 10 L0 10")})
+          lines (gol/lines bent {:count 6 :spacing 6})]
+      (t/is (every? #(> % 0.9) (map #(closest bent %) lines))
+            (str "nearest by line: " (mapv #(mth/precision (closest bent %) 2) lines)))))
+  (t/testing "the end of an open path on its own lines, as the bowl of a P on its stem, cuts none"
+    (let [p     (cts/setup-shape {:type :path :content (path/from-string "M0 200 L0 0 L100 0 L100 100 L20 100")})
+          lines (gol/lines p {:count 2 :spacing 40})]
+      (t/is (= [1 1] (mapv #(count (gtl/outline-polylines {:type :path :content (:content %)})) lines)))))
+  (t/testing "two notches the lines bridge: one ring over both"
+    (let [h     (cts/setup-shape {:type :path :content (path/from-string "M0 0 L80 0 L80 80 L120 80 L120 0 L200 0 L200 200 L120 200 L120 120 L80 120 L80 200 L0 200 Z")})
+          outer (last (gol/lines h {:count 12 :spacing 4}))
+          rings (gtl/outline-polylines {:type :path :content (:content outer)})]
+      (t/is (= 22 (:offset outer)))
+      (t/is (= 1 (count rings)))
+      (t/is (> (closest h outer) 0.85) "nor through the middle")))
+  (t/testing "a waist narrower than the lines go in: a ring on each side"
+    (let [waisted (cts/setup-shape {:type :path :content (path/from-string "M0 0 L80 0 L80 40 L120 40 L120 0 L200 0 L200 100 L120 100 L120 60 L80 60 L80 100 L0 100 Z")})
+          inner   (last (filter #(neg? (:offset %)) (gol/lines waisted {:count 2 :spacing 24})))]
+      (t/is (= -12 (:offset inner)))
+      (t/is (= 2 (count (gtl/outline-polylines {:type :path :content (:content inner)})))
+            "the waist, 20 px, closes before 12 px in from both sides"))))
+
