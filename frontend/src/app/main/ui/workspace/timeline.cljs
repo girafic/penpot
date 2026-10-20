@@ -2676,9 +2676,12 @@
 
         ;; What the lanes show, read as they draw: they draw again on their
         ;; own as the view scrolls and as the playhead plays.
+        linked    (mf/with-memo [timeline objects]
+                    (cta/played-link-slots timeline objects))
         scene-ref (mf/use-ref nil)
         _         (mf/set-ref-val! scene-ref {:rows rows
                                               :timeline timeline
+                                              :linked linked
                                               :selected selected
                                               :selected-kfs selected-kfs
                                               :duration duration
@@ -3807,7 +3810,7 @@
                                          :index index
                                          :depth depth
                                          :looping? (cta/looping? timeline id property index)
-                                         :link-name (when (nil? index)
+                                         :link-name (when (and (nil? index) (contains? linked [id property]))
                                                       (some->> (cta/link-of timeline id property)
                                                                :source
                                                                (get objects)

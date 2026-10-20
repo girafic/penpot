@@ -3534,35 +3534,46 @@
                  (into done (map (fn [[id link]] [id (:property link)])) ready)
                  (remove (set ready) left)))))))
 
+(defn- played-links
+  "The links of `timeline` that play (see `link-order`), as `[shape-id
+  link]`, in the order they play: but those to a layer gone from
+  `objects` and those linked in a cycle, which link nothing."
+  [timeline objects]
+  (filter (fn [[_ link]] (contains? objects (:source link))) (link-order timeline)))
+
+(defn played-link-slots
+  "`#{[shape-id property]}` of the properties of `timeline` a link plays
+  (see `played-links`): their own keyframes do not play."
+  [timeline objects]
+  (into #{} (map (fn [[id link]] [id (:property link)])) (played-links timeline objects)))
+
 (defn- play-links
   "`timeline` (with its tracks as they play) with each linked property
   playing its source (see `schema:link`, `linked-row`): in place of its
-  own keyframes, looping where its source loops. A link to a layer that is
-  gone links nothing."
+  own keyframes, looping where its source loops; the links that play (see
+  `played-links`)."
   [timeline objects]
   (if-not (some (comp seq :links) (vals (:tracks timeline)))
     timeline
     (assoc timeline :tracks
            (reduce
             (fn [tracks [id link]]
-              (if-not (contains? objects (:source link))
-                tracks
-                (let [property (:property link)
-                      row      (linked-row timeline objects tracks id link)
-                      ;; a range samples the source through the duration
-                      loops?   (and (not (ranged-link? link))
-                                    (contains? (dm/get-in tracks [(:source link) :loops] #{})
-                                               (:source-property link)))]
-                  (update tracks id
-                          (fn [track]
-                            (-> track
-                                (update :keyframes
-                                        #(sort-keyframes
-                                          (into (filterv (fn [k] (not= property (:property k))) %)
-                                                row)))
-                                (update :loops (fnil (if loops? conj disj) #{}) property)))))))
+              (let [property (:property link)
+                    row      (linked-row timeline objects tracks id link)
+                    ;; a range samples the source through the duration
+                    loops?   (and (not (ranged-link? link))
+                                  (contains? (dm/get-in tracks [(:source link) :loops] #{})
+                                             (:source-property link)))]
+                (update tracks id
+                        (fn [track]
+                          (-> track
+                              (update :keyframes
+                                      #(sort-keyframes
+                                        (into (filterv (fn [k] (not= property (:property k))) %)
+                                              row)))
+                              (update :loops (fnil (if loops? conj disj) #{}) property))))))
             (:tracks timeline)
-            (link-order timeline)))))
+            (played-links timeline objects)))))
 
 (def ^:private cast-shadow-step
   "How often, ms, the shadows a turning light casts take a value (see

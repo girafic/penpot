@@ -173,14 +173,12 @@
    (+ (- (mth/clamp y header-height height) header-height) scroll-y)])
 
 (defn- property-lane
-  "The keyframes of the property of `row`, and whether they are locked,
-  hidden, or kept from playing by a link that plays the property (see
-  `cta/links-of`)."
+  "The keyframes of the property of `row`, and whether they are locked or
+  hidden."
   [timeline {:keys [id property index]}]
   {:keyframes (cta/property-keyframes timeline id property index)
    :locked?   (cta/slot-flag? timeline id :locked property index)
-   :hidden?   (cta/slot-flag? timeline id :hidden property index)
-   :linked?   (and (nil? index) (some? (cta/link-of timeline id property)))})
+   :hidden?   (cta/slot-flag? timeline id :hidden property index)})
 
 (defn- segment-ends
   "`[x0 x1]` of the line from keyframe `from` to `to`, clear of both."
@@ -654,8 +652,10 @@
   "The keyframes of the property of `row`, with its top at `y`, joined by
   lines; the easing of the one under the pointer (`hover`, see `hit`) or
   open in the editor shows on it."
-  [^js ctx geo {:keys [timeline selected-kfs easing]} palette row y color hover]
-  (let [{:keys [keyframes locked? hidden? linked?]} (property-lane timeline row)
+  [^js ctx geo {:keys [timeline selected-kfs easing linked]} palette row y color hover]
+  (let [{:keys [keyframes locked? hidden?]} (property-lane timeline row)
+        ;; a link plays it (see `cta/played-link-slots`): they do not
+        linked?  (and (nil? (:index row)) (contains? linked [(:id row) (:property row)]))
         shape-id (:id row)
         cy       (+ y (/ (row-height geo) 2))
         width    (:width geo)

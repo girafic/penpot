@@ -6840,6 +6840,15 @@
       (t/is (nil? (get-in (cta/remove-link tl wheel :rotation) [:tracks wheel])) "nothing left of the track")
       (t/is (empty? (cta/links-of (cta/remove-shapes tl [car]) wheel))))))
 
+(t/deftest the-properties-a-link-plays
+  (let [{:keys [car wheel timeline objects]} (car-and-wheel)
+        tl (cta/set-link timeline wheel {:property :rotation :source car :source-property :x})]
+    (t/is (= #{[wheel :rotation]} (cta/played-link-slots tl objects)))
+    (t/is (= #{} (cta/played-link-slots tl (dissoc objects car))) "its source gone, its own keyframes play")
+    (t/is (= #{} (cta/played-link-slots (cta/set-link tl car {:property :x :source wheel :source-property :rotation})
+                                        objects))
+          "linked in a cycle, neither")))
+
 (t/deftest a-link-follows-the-curve-of-its-source
   ;; the car swerves along a motion path: its x leaves its first keyframe
   ;; with a handle 300 out
