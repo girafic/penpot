@@ -3603,11 +3603,40 @@
                       :else                              []))))
         (reverse (:shapes (get objects id)))))
 
+(defn- turn-share
+  "The trim `[start end offset]` of a layer whose outline is the part from
+  `a` to `b` (shares of their joined length) of the layers a trim `s` `e`
+  `o` of their group draws in turn: its share of the part the trim draws
+  of them as one outline, as a single layer's trim draws it (from `(s +
+  o) mod 1`, as long as `e − s`, going on from the start past the end).
+  A layer holding both ends of that part draws them as one part of its
+  own that goes on past its end."
+  [a b s e o]
+  (let [s   (mth/clamp s 0 1)
+        e   (mth/clamp e 0 1)
+        len (- e s)]
+    (if (<= len 0)
+      [0 0 0]
+      (let [from  (mod (+ s o) 1)
+            to    (+ from len)
+            local #(/ (- % a) (- b a))
+            piece (fn [lo hi]
+                    (let [lo (max lo a) hi (min hi b)]
+                      (when (< lo hi) [(local lo) (local hi)])))
+            tail  (piece from (min to 1))
+            head  (when (> to 1) (piece 0 (- to 1)))]
+        (cond
+          (and tail head) [0 (+ (second head) (- 1 (first tail))) (first tail)]
+          (some? tail)    [(first tail) (second tail) 0]
+          (some? head)    [(first head) (second head) 0]
+          :else           [0 0 0])))))
+
 (defn- in-turn-rows
   "The trim rows of the layers `ids` of `objects` that the trim `rows` (by
   property, sorted, looping where `loops` says) of their group draws one
-  after another through `duration`: each takes its share of the length of
-  them all, sampled `group-trim-step` apart, thinned."
+  after another through `duration`, as if their outlines made one (see
+  `turn-share`): each takes its share of the length of them all, sampled
+  `group-trim-step` apart, thinned."
   [objects ids rows loops duration]
   (let [lengths (mapv #(max 1e-6 (gtl/outline-length (get objects %))) ids)
         total   (reduce + lengths)
@@ -3625,27 +3654,40 @@
     (into {}
           (map-indexed
            (fn [i id]
-             (let [a     (/ (nth starts i) total)
-                   b     (/ (+ (nth starts i) (nth lengths i)) total)
-                   local (fn [v] (mth/clamp (/ (- v a) (- b a)) 0 1))
-                   row   (fn [property pick]
-                           (for [[t v] (thinned (mapv (fn [[t s e o]] [t (local (+ (pick s e) o))]) samples) 0.002)]
-                             (make-keyframe {:time t :property property :value v :easing :linear})))]
-               [id (concat (row :trim-start (fn [s _] s)) (row :trim-end (fn [_ e] e)))])))
+             (let [a      (/ (nth starts i) total)
+                   b      (/ (+ (nth starts i) (nth lengths i)) total)
+                   shares (mapv (fn [[t s e o]] [t (turn-share a b s e o)]) samples)
+                   row    (fn [property k]
+                            (for [[t v] (thinned (mapv (fn [[t share]] [t (nth share k)]) shares) 0.002)]
+                              (make-keyframe {:time t :property property :value v :easing :linear})))]
+               [id (concat (row :trim-start 0) (row :trim-end 1) (row :trim-offset 2))])))
           ids)))
+
+(defn- depth
+  "How many layers `id` of `objects` is in."
+  [objects id]
+  (loop [id id n 0]
+    (let [parent (dm/get-in objects [id :parent-id])]
+      (if (or (nil? parent) (= parent id) (= parent uuid/zero))
+        n
+        (recur parent (inc n))))))
 
 (defn- play-group-trims
   "`timeline` (with its tracks as they play) with the trim of each group
   drawing the layers in it (see `trim-layers`): in place of their own
   trims, its rows all at once (`:together`, see `trim-mode-of`), or
-  one after another along their lengths (`:in-turn`, sampled). A group
-  draws nothing itself: its own trim rows go."
+  one after another along their lengths (`:in-turn`, sampled). In a
+  group in a trimmed group the nearest one's trim draws them. A group
+  draws nothing itself: its own trim rows go to `:group-trims` of its
+  track, which no renderer reads (see `shown-values`)."
   [timeline objects]
-  (let [groups (keep (fn [[id track]]
-                       (when (and (= :group (dm/get-in objects [id :type]))
-                                  (some #(contains? trim-properties (:property %)) (:keyframes track)))
-                         id))
-                     (:tracks timeline))]
+  (let [groups (->> (:tracks timeline)
+                    (keep (fn [[id track]]
+                            (when (and (= :group (dm/get-in objects [id :type]))
+                                       (some #(contains? trim-properties (:property %)) (:keyframes track)))
+                              id)))
+                    ;; the outer ones first: an inner one draws its layers
+                    (sort-by #(depth objects %)))]
     (if (empty? groups)
       timeline
       (reduce
@@ -3663,6 +3705,8 @@
                timeline (update-in timeline [:tracks group-id]
                                    (fn [track]
                                      (-> track
+                                         (assoc :group-trims {:keyframes (filterv trim? (:keyframes track))
+                                                              :loops loops})
                                          (update :keyframes #(filterv (complement trim?) %))
                                          (d/update-when :loops #(into #{} (remove trim-properties) %)))))]
            (reduce (fn [timeline id]
@@ -3678,6 +3722,21 @@
                    ids)))
        timeline
        groups))))
+
+(defn shown-values
+  "`{id {property value}}` of the layers `ids` at `time` as the Design
+  tab, the dock and the plugin API show them: as `resolved` (see
+  `resolve-animations`) plays them, but the trim of a group, which plays
+  on the layers in it (see `play-group-trims`): its own rows."
+  [resolved ids time]
+  (let [values (values-at (update resolved :tracks select-keys ids) time)]
+    (reduce (fn [values id]
+              (if-let [own (dm/get-in resolved [:tracks id :group-trims])]
+                (update values id merge
+                        (get (values-at (assoc resolved :tracks {id (assoc own :shape-id id)}) time) id))
+                values))
+            values
+            ids)))
 
 (defn- play-cast-shadows
   "`timeline` (with its tracks as they play) with the shadows of the

@@ -163,9 +163,9 @@
         objects  (mf/deref refs/workspace-page-objects)
         values   (mf/with-memo [timeline objects shape-id playhead]
                    (when (and (some? shape-id) (some? timeline))
+                     ;; a group's own, which play on its layers
                      (-> (cta/resolve-animations timeline objects)
-                         (update :tracks select-keys [shape-id])
-                         (cta/values-at playhead)
+                         (cta/shown-values [shape-id] playhead)
                          (get shape-id))))
         display  (fn [property]
                    (mth/round (dwa/value->display property (get values property (get cta/trim-properties property)))))

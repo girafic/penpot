@@ -352,6 +352,80 @@
         (t/is (nil? (get-in (cta/set-trim-mode turn gid :together) [:tracks gid :trim-mode]))
               "all at once as absence")))))
 
+(defn- trimmed-lines
+  "A board with a group `outer` holding a group `inner` that holds two
+  100 px lines (`top` on top of `bottom`), and a 100 px line `side` of
+  its own, each stroked: `[objects ids]`."
+  []
+  (let [stroke [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2 :stroke-style :solid :stroke-alignment :center}]
+        board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        line   (fn [y] (assoc (cts/setup-shape {:type :path :content (path/from-string (str "M 0 " y " L 100 " y))})
+                              :strokes stroke))
+        [top bottom side] [(line 10) (line 20) (line 30)]
+        inner  (cts/setup-shape {:type :group :x 0 :y 10 :width 100 :height 10})
+        outer  (cts/setup-shape {:type :group :x 0 :y 10 :width 100 :height 20})
+        bid    (:id board)
+        ids    {:board bid :outer (:id outer) :inner (:id inner) :top (:id top) :bottom (:id bottom) :side (:id side)}
+        in     (fn [shape parent] (assoc shape :parent-id parent :frame-id bid))]
+    [{bid (assoc board :shapes [(:id outer)])
+      (:id outer) (assoc (in outer bid) :shapes [(:id side) (:id inner)])
+      (:id inner) (assoc (in inner (:id outer)) :shapes [(:id bottom) (:id top)])
+      (:id top) (in top (:id inner))
+      (:id bottom) (in bottom (:id inner))
+      (:id side) (in side (:id outer))}
+     ids]))
+
+(defn- trims-at
+  "`[start end offset]` of the layer `id` as `timeline` plays it at `t`."
+  [timeline objects id t]
+  (let [values (get (cta/values-at (cta/resolve-animations timeline objects) t) id)]
+    (mapv #(mth/precision (get values % (get cta/trim-properties %)) 3) [:trim-start :trim-end :trim-offset])))
+
+(t/deftest a-group-shows-its-own-trim
+  (let [[objects {:keys [board inner top]}] (trimmed-lines)
+        tl     (-> (mk-timeline)
+                   (assoc :board-id board :duration 1000)
+                   (cta/add-keyframe inner {:time 0 :property :trim-end :value 0 :easing :linear})
+                   (cta/add-keyframe inner {:time 1000 :property :trim-end :value 1}))
+        played (cta/resolve-animations tl objects)]
+    (t/is (empty? (get-in played [:tracks inner :keyframes])) "the group draws nothing itself")
+    (t/is (= 0.5 (get-in (cta/shown-values played [inner top] 500) [inner :trim-end]))
+          "what the Design tab and the dock show of it")
+    (t/is (= 0.5 (get-in (cta/shown-values played [inner top] 500) [top :trim-end])) "and of its layers")))
+
+(t/deftest the-nearest-trimmed-group-draws-its-layers
+  (let [[objects {:keys [board outer inner top bottom side]}] (trimmed-lines)
+        trims  (fn [order]
+                 (let [tl (-> (mk-timeline)
+                              (assoc :board-id board :duration 1000)
+                              (cta/add-keyframe outer {:time 0 :property :trim-end :value 0.4 :easing :linear})
+                              (cta/add-keyframe inner {:time 0 :property :trim-end :value 0.8 :easing :linear}))]
+                   (update tl :tracks #(into (array-map) (map (fn [id] [id (get % id)])) order))))]
+    (doseq [order [[outer inner] [inner outer]]]
+      (let [tl (trims order)]
+        (t/is (= [[0.0 0.8 0.0] [0.0 0.8 0.0] [0.0 0.4 0.0]]
+                 (mapv #(trims-at tl objects % 500) [top bottom side]))
+              (if (= order [outer inner]) "the outer track first" "the inner track first"))))))
+
+(t/deftest a-trim-in-turn-goes-on-past-the-end
+  ;; two 100 px lines in turn, as one 200 px outline
+  (let [[objects {:keys [board inner top bottom]}] (trimmed-lines)
+        trim   (fn [s e o]
+                 (-> (mk-timeline)
+                     (assoc :board-id board :duration 1000)
+                     (cta/set-trim-mode inner :in-turn)
+                     (cta/add-keyframe inner {:time 0 :property :trim-start :value s})
+                     (cta/add-keyframe inner {:time 0 :property :trim-end :value e})
+                     (cta/add-keyframe inner {:time 0 :property :trim-offset :value o})))]
+    (t/testing "a part from 180 px on, 50 px long: the last 20 px, then the first 30"
+      (let [tl (trim 0 0.25 0.9)]
+        (t/is (= [0.0 0.3 0.0] (trims-at tl objects top 500)) "the topmost first")
+        (t/is (= [0.8 1.0 0.0] (trims-at tl objects bottom 500)))))
+    (t/testing "a layer holding both ends draws them as one part going on past its end"
+      (let [tl (trim 0 0.9 0.3)]
+        (t/is (= [0.0 0.8 0.6] (trims-at tl objects top 500)) "from 60 % past the end to 40 %")
+        (t/is (= [0.0 1.0 0.0] (trims-at tl objects bottom 500)))))))
+
 (t/deftest the-light-of-a-board-plays
   (let [board (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
                   (assoc :light {:angle 90 :height 30 :ambient 0.2}))

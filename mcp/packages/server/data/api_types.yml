@@ -18720,9 +18720,11 @@ Timeline:
         How the trim of the group `shape` (its `trimStart`, `trimEnd` and
         `trimOffset` keyframes) draws the layers in it: `'together'`, each
         as far along its own outline, or `'in-turn'`, one after another as if
-        their outlines made one, the topmost first. A group draws nothing
-        itself; its trim takes the place of those of the layers in it.
-        Penpot Motion.
+        their outlines made one, the topmost first, an offset going on from
+        the start past the end. A group draws nothing itself; its trim takes
+        the place of those of the layers in it, and in a trimmed group in a
+        trimmed group the nearest one draws them. `valueAt` gives the group's
+        own trim. Penpot Motion.
 
         Parameters
 

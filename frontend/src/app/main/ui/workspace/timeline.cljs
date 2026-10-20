@@ -2256,8 +2256,7 @@
                            (subvec (or rows []) row-start row-end)))
         values     (mf/with-memo [resolved shown-ids playhead]
                      (when (some? resolved)
-                       (-> (update resolved :tracks select-keys shown-ids)
-                           (cta/values-at playhead))))
+                       (cta/shown-values resolved shown-ids playhead)))
 
         position-offsets
         (mf/with-memo [timeline objects playhead values]

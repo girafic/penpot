@@ -1758,7 +1758,7 @@
               :else
               (let [objects (u/locate-objects file-id page-id)
                     values  (-> (cta/resolve-animations (locate) objects)
-                                (cta/values-at time)
+                                (cta/shown-values [shape-id] time)
                                 (get shape-id))
                     value   (cta/value-of values property (when (cta/indexed-property? property)
                                                             (d/nilv index 0)))]
