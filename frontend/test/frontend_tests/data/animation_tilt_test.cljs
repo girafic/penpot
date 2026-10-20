@@ -9,12 +9,14 @@
   `dwa/tilt-layers` and `dwa/move-vanishing-point`)."
   (:require
    [app.common.files.changes-builder :as pcb]
+   [app.common.geom.tilt :as gtl]
    [app.common.test-helpers.compositions :as tho]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
    [app.common.uuid :as uuid]
+   [app.main.data.changes :as dch]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.shapes :as dwsh]
    [beicon.v2.core :as rx]
@@ -83,19 +85,20 @@
           "its animated X at the playhead, Y on the board")))
 
 (defn- lit-file
-  "Board A lit from the top left, casting the shadows of its layers, with
-  a card whose shadow falls straight down and one whose shadow falls
-  from the light already."
-  []
-  (let [shadow (fn [ox oy] [{:id (thi/new-id! :shadow) :style :drop-shadow :offset-x ox :offset-y oy
-                             :blur 8 :spread 0 :hidden false :color {:color "#000000" :opacity 0.3}}])]
-    (-> (thf/sample-file :file1)
-        (tho/add-frame :board-a :x 0 :y 0 :width 400 :height 300)
-        (ths/update-shape :board-a :light {:angle 315 :height 45 :ambient 0.3 :shadows true})
-        (ths/add-sample-shape :down :type :rect :parent-label :board-a :x 40 :y 40 :width 100 :height 100
-                              :shadow (shadow 0 10))
-        (ths/add-sample-shape :cast :type :rect :parent-label :board-a :x 200 :y 40 :width 100 :height 100
-                              :shadow (shadow 4 4)))))
+  "Board A lit from the top left (or as `light` says), casting the
+  shadows of its layers, with a card whose shadow falls straight down and
+  one whose shadow falls from the light already (or is `cast`)."
+  ([] (lit-file {:angle 315 :height 45 :ambient 0.3 :shadows true} [4 4]))
+  ([light [cx cy]]
+   (let [shadow (fn [ox oy] [{:id (thi/new-id! :shadow) :style :drop-shadow :offset-x ox :offset-y oy
+                              :blur 8 :spread 0 :hidden false :color {:color "#000000" :opacity 0.3}}])]
+     (-> (thf/sample-file :file1)
+         (tho/add-frame :board-a :x 0 :y 0 :width 400 :height 300)
+         (ths/update-shape :board-a :light light)
+         (ths/add-sample-shape :down :type :rect :parent-label :board-a :x 40 :y 40 :width 100 :height 100
+                               :shadow (shadow 0 10))
+         (ths/add-sample-shape :cast :type :rect :parent-label :board-a :x 200 :y 40 :width 100 :height 100
+                               :shadow (shadow cx cy))))))
 
 (t/deftest ^:async a-shadow-the-light-does-not-cast-yet-falls-from-it
   (let [state (workspace-state (lit-file))]
@@ -108,4 +111,33 @@
     (t/is (= [::dwsh/update-shapes]
              (await (emitted (dwa/cast-shadows-of #{(thi/id :board-a)} (uuid/next)) state)))
           "the layers in a board that changed, too")))
+
+(defn- ^:async watched
+  "The types of the events the watch of cast shadows emits on `state` for
+  the commits `commits`."
+  [state commits]
+  (let [events (atom [])]
+    (await (async/observe (ptk/watch (dwa/watch-cast-shadows) state (rx/from commits))
+                          :on-next #(swap! events conj %)))
+    (mapv ptk/type @events)))
+
+(t/deftest ^:async the-watch-casts-after-local-edits-only
+  (let [state  (workspace-state (lit-file))
+        commit (fn [opts]
+                 (dch/commit (merge {:redo-changes [{:type :mod-obj :id (thi/id :down)
+                                                     :page-id (:current-page-id state) :operations []}]
+                                     :undo-changes []
+                                     :save-undo? true
+                                     :undo-group (uuid/next)}
+                                    opts)))]
+    (t/is (= [::dwa/cast-shadows-of] (await (watched state [(commit {})]))) "an edit here")
+    (t/is (= [] (await (watched state [(commit {:save-undo? false})]))) "not an undo or a redo")
+    (t/is (= [] (await (watched state [(commit {:source :remote})]))) "nor an edit of someone else")))
+
+(t/deftest ^:async a-cast-shadow-settles-at-once
+  ;; at 2° casting again may round its offset the other way
+  (let [light {:angle 2 :height 45 :ambient 0.3 :shadows true}
+        cast  (gtl/cast-shadow light {:offset-x -18.5 :offset-y -16.5})
+        state (workspace-state (lit-file light [(:offset-x cast) (:offset-y cast)]))]
+    (t/is (= [] (await (emitted (dwa/cast-shadows-of #{(thi/id :cast)} (uuid/next)) state))))))
 

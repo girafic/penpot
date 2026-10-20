@@ -1251,6 +1251,15 @@
            (animated? :perspective-x) (conj (set-value-at-playhead board-id :perspective-x fx))
            (animated? :perspective-y) (conj (set-value-at-playhead board-id :perspective-y fy))))))))
 
+(defn- cast?
+  "Whether `shadow` falls from `light` already (see `gtl/cast-shadow`),
+  within the hundredth of a px it rounds its offset to: casting it again
+  may round it the other way."
+  [light shadow]
+  (let [cast (gtl/cast-shadow light shadow)]
+    (and (mth/close? (or (:offset-x shadow) 0) (:offset-x cast) 0.011)
+         (mth/close? (or (:offset-y shadow) 0) (:offset-y cast) 0.011))))
+
 (defn- uncast-ids
   "The ids of the layers of `objects` among `ids` (and in them) whose
   shadows the light of their board casts (`:shadows` of its `:light`)
@@ -1264,9 +1273,7 @@
                             light (dm/get-in objects [(:frame-id shape) :light])]
                         (when (and (true? (:shadows light))
                                    (not= id (:frame-id shape))
-                                   (some #(not= (select-keys % [:offset-x :offset-y])
-                                                (select-keys (gtl/cast-shadow light %) [:offset-x :offset-y]))
-                                         (:shadow shape)))
+                                   (not-every? #(cast? light %) (:shadow shape)))
                           id)))))
         ids))
 
