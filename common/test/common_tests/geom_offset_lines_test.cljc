@@ -189,6 +189,23 @@
       (t/is (= 2 (count (gtl/outline-polylines {:type :path :content (:content inner)})))
             "the waist, 20 px, closes before 12 px in from both sides"))))
 
+(t/deftest the-distance-check-takes-the-segments-it-reaches
+  (let [circle (cts/setup-shape {:type :circle :x 0 :y 0 :width 200 :height 200})
+        grid   (#'gol/segments (gtl/outline-polylines circle))]
+    (t/testing "all segments, as a reach wider than the outline tests them, or those of the cells it reaches: alike"
+      (t/is (every? (fn [[px py limit]]
+                      (let [l2 (* limit limit)
+                            c  #(long (mth/floor (/ % 32)))]
+                        (= (#'gol/near-any? px py l2 grid)
+                           (#'gol/near-in-cells? px py l2 grid (c (- px limit)) (c (+ px limit)) (c (- py limit)) (c (+ py limit))))))
+                    (for [px (range -300 500 37) py (range -300 500 41) limit [3 50 400 3000]]
+                      [(double px) (double py) limit]))))
+    (t/testing "lines far apart"
+      (let [lines (gol/lines circle {:count 24 :spacing 1000})
+            outer (filter #(pos? (:offset %)) lines)]
+        (t/is (= 12 (count outer)))
+        (t/is (every? #(= 1 (count (gtl/outline-polylines {:type :path :content (:content %)}))) outer))))))
+
 (t/deftest stripes-and-accents-mark-lines
   ;; four lines from black and clear inside to white outside
   (let [rect  (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 50})

@@ -272,9 +272,27 @@
             ey (- py (+ ay (* t dy)))]
         (< (+ (* ex ex) (* ey ey)) l2)))))
 
+(defn- near-in-cells?
+  "Whether `px` `py` is nearer than the root of `l2` to one of the
+  segments of `grid` in the cells from `c0` `r0` to `c1` `r1`."
+  [px py l2 grid c0 c1 r0 r1]
+  (loop [cx c0 cy r0]
+    (cond
+      (> cx c1) false
+      (> cy r1) (recur (inc cx) r0)
+      (some #(near-segment? px py l2 %) (get grid (cell-key cx cy))) true
+      :else (recur cx (inc cy)))))
+
+(defn- near-any?
+  "Whether `px` `py` is nearer than the root of `l2` to one of the
+  segments of `grid`, all of them."
+  [px py l2 grid]
+  (boolean (some (fn [[_ segs]] (some #(near-segment? px py l2 %) segs)) grid)))
+
 (defn- near?
   "Whether the point `p` is nearer than `limit` to one of the segments of
-  `grid` (see `segments`): those of the cells it reaches that far."
+  `grid` (see `segments`): those of the cells it reaches that far or,
+  when those are more than the cells the segments are in, all of them."
   [p grid limit]
   (let [px (double (:x p))
         py (double (:y p))
@@ -283,12 +301,9 @@
         c1 (long (mth/floor (/ (+ px limit) cell)))
         r0 (long (mth/floor (/ (- py limit) cell)))
         r1 (long (mth/floor (/ (+ py limit) cell)))]
-    (loop [cx c0 cy r0]
-      (cond
-        (> cx c1) false
-        (> cy r1) (recur (inc cx) r0)
-        (some #(near-segment? px py l2 %) (get grid (cell-key cx cy))) true
-        :else (recur cx (inc cy))))))
+    (if (> (* (inc (- c1 c0)) (inc (- r1 r0))) (count grid))
+      (near-any? px py l2 grid)
+      (near-in-cells? px py l2 grid c0 c1 r0 r1))))
 
 (def ^:private kept-distance
   "The share of its offset a point of a line must keep from the outline:
