@@ -1839,7 +1839,7 @@
                                  [id (select-keys img [:id :w :h :p :e :x :y :runs :center])]))
                        images)
           data   (alottie/timeline->lottie tl objects assets (select-keys opts [:propagate]))
-          json   (js/JSON.stringify (clj->js data) nil 2)]
+          json   (js/JSON.stringify (clj->js data))]
       (js/Promise.resolve {:status :ok
                            :blob (wapi/create-blob json "application/json")
                            :ext ".json"

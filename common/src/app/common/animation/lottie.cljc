@@ -376,10 +376,12 @@
 
 (defn- lottie-trim-item
   "Lottie trim paths of the trim keyframes, or nil without any: start and
-  end in percent, the offset in degrees (a whole turn is the outline)."
-  [by-prop]
+  end in percent, the offset in degrees (a whole turn is the outline).
+  Of an outline of `paths` Lottie paths more than one, along them all one
+  after another (`m` 2), as the canvas trims them, not each by itself."
+  [by-prop paths]
   (when (some #(seq (by-prop %)) (keys cta/trim-properties))
-    {:ty "tm" :nm "trim" :m 1
+    {:ty "tm" :nm "trim" :m (if (> paths 1) 2 1)
      :s (lottie-prop-1d (by-prop :trim-start) (fn [v] (* 100.0 v)) 0)
      :e (lottie-prop-1d (by-prop :trim-end) (fn [v] (* 100.0 v)) 100)
      :o (lottie-prop-1d (by-prop :trim-offset) (fn [v] (* 360.0 v)) 0)}))
@@ -800,16 +802,16 @@
   "The Lottie groups drawing `shape` as vectors: its outline (resized as
   `sized` says, see `lottie-outline`) with its strokes over its fills. A
   trim trims the strokes only, as the canvas does: they get a trimmed
-  copy of the outline."
+  copy of the outline, the fills, when it has some, one of their own."
   [shape by-prop ox oy & [sized]]
   (let [{:keys [x y width height]} (:selrect shape)
         outline (lottie-outline shape by-prop ox oy sized)
         strokes (lottie-stroke-items shape by-prop)
         fills   (lottie-fill-items shape by-prop [(- x ox) (- y oy) width height])
-        trim    (lottie-trim-item by-prop)]
+        trim    (lottie-trim-item by-prop (count (filter #(= "sh" (:ty %)) outline)))]
     (if (and (some? trim) (seq strokes))
-      [(lottie-group "strokes" (concat outline [trim] strokes))
-       (lottie-group "fills" (concat outline fills))]
+      (cond-> [(lottie-group "strokes" (concat outline [trim] strokes))]
+        (seq fills) (conj (lottie-group "fills" (concat outline fills))))
       [(lottie-group "shape" (concat outline strokes fills))])))
 
 (defn- lottie-turned-back

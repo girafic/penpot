@@ -78,6 +78,21 @@
         (into (mapcat up) masked)
         (into (mapcat up) tilted))))
 
+(defn trim-pieces
+  "Where each subpath of the outline of `shape` begins on the length of
+  them all and how much of it it is, `[[from share]...]` (shares of 1), in
+  the order of its content: the canvas trims a stroke along them all, as
+  one outline. Nil for an outline of one subpath or of no length."
+  [shape]
+  (let [polylines (gtl/outline-polylines shape)]
+    (when (> (count polylines) 1)
+      (let [lengths (mapv gtl/polyline-length polylines)
+            total   (reduce + lengths)]
+        (when (pos? total)
+          (mapv (fn [from length] [(/ from total) (/ length total)])
+                (reductions + 0 lengths)
+                lengths))))))
+
 (defn hidden-in?
   "Whether the shape `id` of `objects` is hidden, or a shape it is in, up
   to the board `board-id`."

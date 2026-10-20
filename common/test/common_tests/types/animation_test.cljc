@@ -3278,6 +3278,20 @@
     (t/is (= ["sh" "fl" "tr"] (mapv :ty (:it fills))))
     (t/is (close-all? [[0] [100]] (mapv :s (get-in (lottie-item (:it strokes) "tm") [:e :k]))))))
 
+(t/deftest an-outline-of-several-subpaths-is-trimmed-along-them-all
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        two   (cts/setup-shape {:type :path :content (path/from-string "M 0 0 L 30 0 M 0 10 L 10 10")
+                                :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 4}]})
+        one   (cts/setup-shape {:type :path :content (path/from-string "M 0 0 L 30 0")})
+        kfs   [{:time 0 :property :trim-end :value 0} {:time 1000 :property :trim-end :value 1}]
+        trim  #(lottie-item (get-in (lottie-of board % kfs) [:layers 0 :shapes 0 :it]) "tm")]
+    (t/is (= [[0.0 0.75] [0.75 0.25]] (aexp/trim-pieces two)) "where each begins and how much of them it is")
+    (t/is (nil? (aexp/trim-pieces one)))
+    (t/is (= 2 (:m (trim two))) "Lottie: one after another")
+    (t/is (= 1 (:m (trim (assoc one :strokes (:strokes two))))) "one by itself, as before")
+    (t/testing "without fills, no group of them"
+      (t/is (= ["strokes"] (mapv :nm (get-in (lottie-of board (assoc two :fills []) kfs) [:layers 0 :shapes])))))))
+
 (t/deftest lottie-draws-a-gradient
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
         shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 50

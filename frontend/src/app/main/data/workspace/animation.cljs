@@ -3194,6 +3194,6 @@
       (when-let [tl (export-timeline state :text-split :whole :bake true)]
         (let [objects (dsh/lookup-page-objects state)
               data    (alottie/timeline->lottie tl objects)
-              json    (js/JSON.stringify (clj->js data) nil 2)
+              json    (js/JSON.stringify (clj->js data))
               blob    (wapi/create-blob json "application/json")]
           (dom/trigger-download (safe-filename (:name tl) ".json") blob))))))
