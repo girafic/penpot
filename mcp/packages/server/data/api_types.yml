@@ -10587,7 +10587,7 @@ Group:
 
           Example
           ```
-          const lines = path.makeOffsetLines({ count: 12 });lines.offsetLines = { spacing: 6, outerColor: '#FFD27A' };
+          const lines = path.makeOffsetLines({ count: 12 });lines.offsetLines = { spacing: 6, outerColor: '#FFD27A', stripeEvery: 3, stripeDim: 0.2 };lines.offsetLines = { accents: [{ line: 5, color: '#FF7A7A', width: 1.5 }] };
           ```
         * ```
           set offsetLines(value: OffsetLinesSettings): void
@@ -11199,6 +11199,9 @@ OffsetLinesSettings:
         innerOpacity?: number;
         outerColor?: string;
         outerOpacity?: number;
+        stripeEvery?: number | null;
+        stripeDim?: number;
+        accents?: OffsetLineAccent[];
     }
     ```
 
@@ -11248,6 +11251,72 @@ OffsetLinesSettings:
         ```
 
         The opacity of the outermost line, 0 to 1. Defaults to 1.
+      stripeEvery: |-
+        ```
+        stripeEvery?: number | null
+        ```
+
+        Every how many lines one is dimmer, as the threads of a light
+        painting: lines `stripeEvery`, `2 × stripeEvery`… (counted from the
+        inner side). `0` or `null` for none, the default.
+      stripeDim: |-
+        ```
+        stripeDim?: number
+        ```
+
+        How far the striped lines go back towards the inner colour, 0 to 1.
+        Defaults to 0.
+      accents: |-
+        ```
+        accents?: OffsetLineAccent[]
+        ```
+
+        Lines of their own colour, opacity or width (see `OffsetLineAccent`).
+OffsetLineAccent:
+  overview: |-
+    Interface OffsetLineAccent
+    ==========================
+
+    A line of offset lines of its own colour, and opacity or width (see
+    `OffsetLinesSettings.accents`). Penpot Motion.
+
+    ```
+    interface OffsetLineAccent {
+        line: number;
+        color: string;
+        opacity?: number;
+        width?: number;
+    }
+    ```
+
+    Referenced by: OffsetLines, OffsetLinesSettings
+  members:
+    Properties:
+      line: |-
+        ```
+        line: number
+        ```
+
+        Which line, counted from 1 on the inner side, as its layer is named
+        (`Line 1`, `Line 2`…).
+      color: |-
+        ```
+        color: string
+        ```
+
+        Its colour, `#RRGGBB`.
+      opacity: |-
+        ```
+        opacity?: number
+        ```
+
+        Its opacity, 0 to 1; as the others there without.
+      width: |-
+        ```
+        width?: number
+        ```
+
+        The width of its stroke, px; as the others without.
 OffsetLines:
   overview: |-
     Interface OffsetLines
@@ -11265,6 +11334,9 @@ OffsetLines:
         innerOpacity: number;
         outerColor: string;
         outerOpacity: number;
+        stripeEvery: number | null;
+        stripeDim: number;
+        accents: OffsetLineAccent[];
         source: Path | null;
     }
     ```
@@ -11320,6 +11392,27 @@ OffsetLines:
         ```
 
         The opacity of the outermost line, 0 to 1. Defaults to 1.
+      stripeEvery: |-
+        ```
+        stripeEvery: number | null
+        ```
+
+        Every how many lines one is dimmer, as the threads of a light
+        painting: lines `stripeEvery`, `2 × stripeEvery`… (counted from the
+        inner side). `0` or `null` for none, the default.
+      stripeDim: |-
+        ```
+        stripeDim: number
+        ```
+
+        How far the striped lines go back towards the inner colour, 0 to 1.
+        Defaults to 0.
+      accents: |-
+        ```
+        accents: OffsetLineAccent[]
+        ```
+
+        Lines of their own colour, opacity or width (see `OffsetLineAccent`).
       source: |-
         ```
         readonly source: Path | null

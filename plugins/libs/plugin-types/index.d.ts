@@ -2775,7 +2775,8 @@ export interface Group extends ShapeBase {
    * @example
    * ```js
    * const lines = path.makeOffsetLines({ count: 12 });
-   * lines.offsetLines = { spacing: 6, outerColor: '#FFD27A' };
+   * lines.offsetLines = { spacing: 6, outerColor: '#FFD27A', stripeEvery: 3, stripeDim: 0.2 };
+   * lines.offsetLines = { accents: [{ line: 5, color: '#FF7A7A', width: 1.5 }] };
    * ```
    */
   get offsetLines(): OffsetLines | null;
@@ -2818,6 +2819,45 @@ export interface OffsetLinesSettings {
    * The opacity of the outermost line, 0 to 1. Defaults to 1.
    */
   outerOpacity?: number;
+  /**
+   * Every how many lines one is dimmer, as the threads of a light
+   * painting: lines `stripeEvery`, `2 × stripeEvery`… (counted from the
+   * inner side). `0` or `null` for none, the default.
+   */
+  stripeEvery?: number | null;
+  /**
+   * How far the striped lines go back towards the inner colour, 0 to 1.
+   * Defaults to 0.
+   */
+  stripeDim?: number;
+  /**
+   * Lines of their own colour, opacity or width (see `OffsetLineAccent`).
+   */
+  accents?: OffsetLineAccent[];
+}
+
+/**
+ * A line of offset lines of its own colour, and opacity or width (see
+ * `OffsetLinesSettings.accents`). Penpot Motion.
+ */
+export interface OffsetLineAccent {
+  /**
+   * Which line, counted from 1 on the inner side, as its layer is named
+   * (`Line 1`, `Line 2`…).
+   */
+  line: number;
+  /**
+   * Its colour, `#RRGGBB`.
+   */
+  color: string;
+  /**
+   * Its opacity, 0 to 1; as the others there without.
+   */
+  opacity?: number;
+  /**
+   * The width of its stroke, px; as the others without.
+   */
+  width?: number;
 }
 
 /**

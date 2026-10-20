@@ -26,7 +26,8 @@
 
 (def defaults
   "How offset lines are made at first: a band of 24 lines, 4 px apart,
-  dim inside and bright outside."
+  dim inside and bright outside, without stripes (`:stripe-every`
+  `:stripe-dim`) or accents (`:accents`, see `look`)."
   {:count 24 :spacing 4 :width 2.5
    :inner-color "#5a667e" :inner-opacity 0.3
    :outer-color "#ffffff" :outer-opacity 1})
@@ -398,9 +399,29 @@
         lerp       (fn [x y] (mth/round (+ x (* t (- y x)))))]
     (clr/rgb->hex [(lerp r1 r2) (lerp g1 g2) (lerp b1 b2)])))
 
+(defn look
+  "`{:color :opacity :width}` of the line `number` (1 the innermost) of the
+  `n` lines of `spec`: its colour and opacity the share of the way from
+  the inner side to the outer one it is at, but every `:stripe-every`th
+  line's colour that much less `:stripe-dim` of the way (the dark threads
+  of a light painting), and an accent of `:accents` for it, `{:line
+  :color :opacity :width}`, in place of what it gives."
+  [spec number n]
+  (let [t      (if (> n 1) (/ (dec number) (dec n)) 1)
+        every  (:stripe-every spec)
+        tc     (cond-> t
+                 (and (some? every) (zero? (mod number every)))
+                 (* (- 1 (:stripe-dim spec 0))))
+        accent (d/seek #(= number (:line %)) (:accents spec))]
+    (merge {:color   (mix (:inner-color spec) (:outer-color spec) tc)
+            :opacity (+ (:inner-opacity spec) (* t (- (:outer-opacity spec) (:inner-opacity spec))))
+            :width   (:width spec)}
+           (some-> accent (select-keys [:color :opacity :width])))))
+
 (defn lines
-  "The lines `spec` makes from the outline of `source`: `{:offset :content
-  :color :opacity :width}` each, from the inner side to the outer one, its
+  "The lines `spec` makes from the outline of `source`: `{:number :offset
+  :content :color :opacity :width}` each, from the inner side to the
+  outer one (`:number` 1 the innermost, see `look`), its
   path content fitted smoothly through its points, closed where the
   outline is. The rings past the middle of a closed outline are left out
   (see `rings-kept`; a line of none left out too), and the parts of a line
@@ -424,8 +445,7 @@
     (into []
           (keep-indexed
            (fn [i d]
-             (let [t        (if (> n 1) (/ i (dec n)) 1)
-                   subpaths (for [[line source line-rings] (map vector polylines sources rings)
+             (let [subpaths (for [[line source line-rings] (map vector polylines sources rings)
                                   :let  [ring (nth line-rings i)]
                                   :when (some? ring)
                                   {pts :points closed? :closed?} (kept-pieces ring source (closed-polyline? line) d segs)]
@@ -433,9 +453,8 @@
                                                                         smoothness))
                                 closed? (conj {:command :close-path :params {}})))]
                (when (seq subpaths)
-                 {:offset  d
-                  :content (path/content (into [] cat subpaths))
-                  :color   (mix (:inner-color spec) (:outer-color spec) t)
-                  :opacity (+ (:inner-opacity spec) (* t (- (:outer-opacity spec) (:inner-opacity spec))))
-                  :width   (:width spec)}))))
+                 (merge {:number  (inc i)
+                         :offset  d
+                         :content (path/content (into [] cat subpaths))}
+                        (look spec (inc i) n))))))
           ds)))

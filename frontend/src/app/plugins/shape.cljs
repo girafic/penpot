@@ -368,21 +368,42 @@
 (defn- offset-lines-settings
   "The settings of offset lines a plugin gives (`count`, `spacing`,
   `width`, `innerColor`, `innerOpacity`, `outerColor`, `outerOpacity`,
-  each optional), as `gol/defaults` names them: nil when one is not
-  valid."
+  `stripeEvery`, `stripeDim`, `accents`, each optional), as `gol/defaults`
+  names them, `stripeEvery` 0 or `null` for no stripes: nil when one is
+  not valid."
   [value]
   (when (or (nil? value) (object? value))
-    (let [color    (fn [k] (let [v (obj/get value k)] (if (string? v) (str/lower v) v)))
+    (let [color    (fn [v] (if (string? v) (str/lower v) v))
+          accents  (obj/get value "accents")
+          every    (obj/get value "stripeEvery")
           settings (when (some? value)
-                     (d/without-nils
-                      {:count (obj/get value "count")
-                       :spacing (obj/get value "spacing")
-                       :width (obj/get value "width")
-                       :inner-color (color "innerColor")
-                       :inner-opacity (obj/get value "innerOpacity")
-                       :outer-color (color "outerColor")
-                       :outer-opacity (obj/get value "outerOpacity")}))]
-      (when (sm/validate cts/schema:offset-lines (merge gol/defaults settings))
+                     (cond-> (d/without-nils
+                              {:count (obj/get value "count")
+                               :spacing (obj/get value "spacing")
+                               :width (obj/get value "width")
+                               :inner-color (color (obj/get value "innerColor"))
+                               :inner-opacity (obj/get value "innerOpacity")
+                               :outer-color (color (obj/get value "outerColor"))
+                               :outer-opacity (obj/get value "outerOpacity")
+                               :stripe-every every
+                               :stripe-dim (obj/get value "stripeDim")
+                               :accents (cond
+                                          (nil? accents) nil
+                                          (array? accents)
+                                          (mapv (fn [a]
+                                                  (if (object? a)
+                                                    (d/without-nils
+                                                     {:line (obj/get a "line")
+                                                      :color (color (obj/get a "color"))
+                                                      :opacity (obj/get a "opacity")
+                                                      :width (obj/get a "width")})
+                                                    a))
+                                                accents)
+                                          :else accents)})
+                       ;; none
+                       (or (= 0 every) (and (obj/contains? value "stripeEvery") (nil? every)))
+                       (assoc :stripe-every nil)))]
+      (when (sm/validate cts/schema:offset-lines (d/without-nils (merge gol/defaults settings)))
         (or settings {})))))
 
 (defn shape-proxy
@@ -2165,7 +2186,15 @@
                         :innerColor (:inner-color spec)
                         :innerOpacity (:inner-opacity spec)
                         :outerColor (:outer-color spec)
-                        :outerOpacity (:outer-opacity spec)})))
+                        :outerOpacity (:outer-opacity spec)
+                        :stripeEvery (:stripe-every spec)
+                        :stripeDim (:stripe-dim spec 0)
+                        :accents (apply array
+                                        (map (fn [{:keys [line color opacity width]}]
+                                               (cond-> #js {:line line :color color}
+                                                 (some? opacity) (doto (obj/set! "opacity" opacity))
+                                                 (some? width)   (doto (obj/set! "width" width))))
+                                             (:accents spec)))})))
 
              :set
              (fn [self value]

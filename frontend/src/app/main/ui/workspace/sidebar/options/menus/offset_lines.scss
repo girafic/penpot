@@ -83,3 +83,24 @@
 .wide {
   grid-column: 1 / -1;
 }
+
+// a word and a + over the accents
+.accents-title {
+  @include t.use-typography("body-small");
+
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline-start: var(--sp-xxs);
+  color: var(--color-foreground-secondary);
+}
+
+// an accent: its line, its colour and its −, then its opacity and width
+.accent {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: var(--sp-xs);
+  align-items: center;
+}

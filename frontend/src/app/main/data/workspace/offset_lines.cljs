@@ -31,11 +31,12 @@
   `group-id` of the board `frame-id`."
   [source spec group-id frame-id]
   (into []
-        (map-indexed
-         (fn [i {:keys [content color opacity width]}]
+        (map
+         (fn [{:keys [number content color opacity width]}]
            (cts/setup-shape {:id (uuid/next)
                              :type :path
-                             :name (str "Line " (inc i))
+                             ;; by its number, which accents name
+                             :name (str "Line " number)
                              :content content
                              :parent-id group-id
                              :frame-id frame-id
@@ -75,8 +76,10 @@
                        {:source source-id :lines []}
                        (gol/layers-of objects group))
              source  (get objects (:source layers))
+             ;; a change to nil takes the setting away (no stripes)
              spec    (-> (merge gol/defaults (:offset-lines group) changes)
-                         (dissoc :source))]
+                         (dissoc :source)
+                         (d/without-nils))]
          (if (and (some? group) (some? source)
                   (or (some? source-id) (editable? objects group)))
            (let [lines   (line-shapes source spec group-id (:frame-id group))

@@ -119,3 +119,25 @@
     (t/is (false? (dwol/editable? objects (assoc group :shape-ref (uuid/next)))) "a copy")
     (t/is (false? (dwol/editable? {} group)) "no source")))
 
+(t/deftest offset-lines-take-stripes-and-accents
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store context ^js group] (offset-lines-of-a-rect)
+            line-color #(-> (some (fn [^js l] (when (= (str "Line " %) (.-name l)) l)) (.-children group))
+                            (.-strokes) (aget 0) (.-strokeColor))]
+        (set! (.-offsetLines group) #js {:stripeEvery 2 :stripeDim 0.5
+                                         :accents #js [#js {:line 3 :color "#FF7A7A" :width 1}]})
+        (let [^js spec (.-offsetLines group)]
+          (t/is (= [2 0.5] [(.-stripeEvery spec) (.-stripeDim spec)]))
+          (t/is (= {:line 3 :color "#ff7a7a" :width 1} (js->clj (aget (.-accents spec) 0) :keywordize-keys true))))
+        (t/is (= "#ff7a7a" (line-color 3)) "the accent on its line")
+        (t/is (= (:offset-lines (stored store context group))
+                 (merge (:offset-lines (stored store context group)) {:stripe-every 2 :stripe-dim 0.5})))
+        (set! (.-offsetLines group) #js {:stripeEvery 0 :accents #js []})
+        (t/is (nil? (.-stripeEvery (.-offsetLines group))) "none again")
+        (t/is (= 0 (.-length (.-accents (.-offsetLines group)))))
+        (t/testing "what is not valid is refused"
+          (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:stripeEvery 1})))
+          (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:accents #js [#js {:line 0 :color "#ffffff"}]})))
+          (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:accents "red"}))))))))
+

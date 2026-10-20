@@ -324,7 +324,18 @@
    [:inner-color schema:six-digit-hex]
    [:inner-opacity [::sm/number {:min 0 :max 1}]]
    [:outer-color schema:six-digit-hex]
-   [:outer-opacity [::sm/number {:min 0 :max 1}]]])
+   [:outer-opacity [::sm/number {:min 0 :max 1}]]
+   ;; every nth line a share of the way back to the inner colour
+   [:stripe-every {:optional true} [::sm/int {:min 2 :max 200}]]
+   [:stripe-dim {:optional true} [::sm/number {:min 0 :max 1}]]
+   ;; lines of their own colour, opacity or width, by number (1 the innermost)
+   [:accents {:optional true}
+    [:vector {:max 200}
+     [:map {:title "OffsetLineAccent"}
+      [:line [::sm/int {:min 1 :max 200}]]
+      [:color schema:six-digit-hex]
+      [:opacity {:optional true} [::sm/number {:min 0 :max 1}]]
+      [:width {:optional true} [::sm/number {:min 0.1 :max 1000}]]]]]])
 
 (def schema:group-attrs
   [:map {:title "GroupAttrs"}

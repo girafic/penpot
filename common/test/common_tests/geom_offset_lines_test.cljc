@@ -161,3 +161,23 @@
       (t/is (= 2 (count (gtl/outline-polylines {:type :path :content (:content inner)})))
             "the waist, 20 px, closes before 12 px in from both sides"))))
 
+(t/deftest stripes-and-accents-mark-lines
+  ;; four lines from black and clear inside to white outside
+  (let [rect  (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 50})
+        spec  {:count 4 :spacing 10
+               :inner-color "#000000" :inner-opacity 0 :outer-color "#ffffff" :outer-opacity 1
+               :stripe-every 2 :stripe-dim 0.5
+               :accents [{:line 3 :color "#ff0000" :width 1}]}
+        lines (gol/lines rect spec)]
+    (t/is (= [1 2 3 4] (mapv :number lines)) "numbered from the inner side")
+    (t/is (= ["#000000" "#2b2b2b" "#ff0000" "#808080"] (mapv :color lines))
+          "every second half the way back to the inner colour, the third an accent")
+    (t/is (= [0.0 0.333 0.667 1.0] (mapv #(mth/precision (:opacity %) 3) lines)) "the stripes keep their opacity")
+    (t/is (= [2.5 2.5 1 2.5] (mapv :width lines)) "the accent its own width"))
+  (t/testing "what is not valid is refused"
+    (let [valid? #(sm/validate cts/schema:offset-lines (merge gol/defaults %))]
+      (t/is (valid? {:stripe-every 3 :stripe-dim 0.22 :accents [{:line 9 :color "#FF7A7A" :opacity 0.6}]}))
+      (t/is (not (valid? {:stripe-every 1})) "a stripe on every line is none")
+      (t/is (not (valid? {:accents [{:line 0 :color "#ff7a7a"}]})) "lines count from 1")
+      (t/is (not (valid? {:accents [{:line 2 :color "#f7a"}]}))))))
+

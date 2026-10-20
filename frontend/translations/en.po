@@ -9447,6 +9447,54 @@ msgid "workspace.options.offset-lines.outer.hint"
 msgstr "The colour and opacity of the line on the outer side"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.accent.color"
+msgstr "The colour of this line"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.accent.line"
+msgstr "Line"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.accent.line.hint"
+msgstr "Which line, counted from the inner side, as its layer is named"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.accent.opacity"
+msgstr "The opacity of this line"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.accent.width"
+msgstr "The width of this line"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.accents"
+msgstr "Accents"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.accents.add"
+msgstr "Give a line a colour of its own"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.accents.remove"
+msgstr "Remove this accent"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.dim"
+msgstr "Dim"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.dim.hint"
+msgstr "How far the striped lines go back towards the inner colour"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.stripes"
+msgstr "Stripes"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.stripes.hint"
+msgstr "Every how many lines one is dimmer, as the threads of a light painting (0 for none)"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
 msgid "workspace.options.offset-lines.update"
 msgstr "Update from the outline"
 

@@ -56,6 +56,48 @@
               :on-blur on-blur
               :on-key-down on-key}]]))
 
+(mf/defc ^:private accents*
+  "The accents of offset lines `spec` (see `gol/look`): lines of their
+  own colour, opacity and width, by number from the inner side, each
+  with its −, and a + for one more; `on-change` gets them all."
+  [{:keys [spec disabled on-change]}]
+  (let [accents (vec (:accents spec))
+        edit    (fn [i k v] (on-change (assoc-in accents [i k] v)))
+        on-add  (mf/use-fn
+                 (mf/deps accents spec on-change)
+                 #(on-change (conj accents {:line (inc (quot (:count spec) 2))
+                                            :color "#ff7a7a"
+                                            :opacity 1
+                                            :width (:width spec)})))]
+    [:*
+     [:div {:class (stl/css :accents-title)}
+      [:span (tr "workspace.options.offset-lines.accents")]
+      (when-not disabled
+        [:> icon-button* {:variant "ghost"
+                          :aria-label (tr "workspace.options.offset-lines.accents.add")
+                          :on-click on-add
+                          :icon i/add}])]
+     (for [[i {:keys [line color opacity width]}] (map-indexed vector accents)]
+       [:div {:key (str "accent-" i) :class (stl/css :accent)}
+        [:> labelled-number* {:label (tr "workspace.options.offset-lines.accent.line")
+                              :hint (tr "workspace.options.offset-lines.accent.line.hint")
+                              :unit "" :min 1 :max (:count spec) :value line :disabled disabled
+                              :on-change #(edit i :line (mth/clamp (mth/round %) 1 (:count spec)))}]
+        [:> color-field* {:label "" :hint (tr "workspace.options.offset-lines.accent.color")
+                          :value color :disabled disabled
+                          :on-change #(edit i :color %)}]
+        (when-not disabled
+          [:> icon-button* {:variant "ghost"
+                            :aria-label (tr "workspace.options.offset-lines.accents.remove")
+                            :on-click #(on-change (into (subvec accents 0 i) (subvec accents (inc i))))
+                            :icon i/remove}])
+        [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.accent.opacity")
+                              :unit "%" :min 0 :max 100 :scale 100 :value (or opacity 1) :disabled disabled
+                              :on-change #(edit i :opacity (mth/clamp % 0 1))}]
+        [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.accent.width")
+                              :unit "px" :min 0.1 :max 1000 :value (or width (:width spec)) :disabled disabled
+                              :on-change #(edit i :width %)}]])]))
+
 (mf/defc offset-lines-menu*
   "Of the single selected `shape`: the + that makes offset lines of it,
   or, of a group of them, how they are made; in a copy of a component
@@ -115,6 +157,16 @@
         [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.outer.hint")
                               :unit "%" :min 0 :max 100 :scale 100 :value (:outer-opacity spec) :disabled copy?
                               :on-change #(change :outer-opacity (mth/clamp % 0 1))}]
+        ;; the dark threads: every nth line back towards the inner colour
+        [:> labelled-number* {:label (tr "workspace.options.offset-lines.stripes")
+                              :hint (tr "workspace.options.offset-lines.stripes.hint")
+                              :unit "" :min 0 :max 200 :value (or (:stripe-every spec) 0) :disabled copy?
+                              :on-change #(change :stripe-every (when (>= % 2) (mth/round %)))}]
+        [:> labelled-number* {:label (tr "workspace.options.offset-lines.dim")
+                              :hint (tr "workspace.options.offset-lines.dim.hint")
+                              :unit "%" :min 0 :max 100 :scale 100 :value (:stripe-dim spec 0) :disabled copy?
+                              :on-change #(change :stripe-dim (mth/clamp % 0 1))}]
+        [:> accents* {:spec spec :disabled copy? :on-change #(change :accents (not-empty %))}]
         (if copy?
           [:p {:class (stl/css :hint :wide)} (tr "workspace.options.offset-lines.copy")]
           [:div {:class (stl/css :update)}
