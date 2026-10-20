@@ -279,6 +279,19 @@
     (t/is (mth/close? (+ (get-in objects [board :selrect :x]) 10 dx 12.5)
                       (get-in (cltl/shown-shapes timelines objects 250) [copy-rect :selrect :x])))))
 
+#?(:cljs
+   (t/deftest the-timelines-of-copies-are-made-once-while-their-page-stays
+     (let [file  (component-file)
+           {:keys [objects timelines board]} (component-scene file)
+           files {(:id file) file}
+           once  (cltl/copy-timelines objects timelines files board)]
+       (t/is (seq once) "the copy plays")
+       (t/is (identical? once (cltl/copy-timelines objects timelines files board)) "every frame reads the same")
+       (t/is (not (identical? once (cltl/copy-timelines objects (assoc timelines board {}) files board)))
+             "other timelines make them anew")
+       (t/is (not (identical? once (cltl/copy-timelines (assoc objects :x 1) timelines files board)))
+             "and so do other objects"))))
+
 (t/deftest a-copy-plays-on-the-clock-its-board-gives-it
   ;; as a precomposition: from 500 ms on, at twice its pace
   (let [{:keys [objects board copy copy-rect main-page]} (component-scene)

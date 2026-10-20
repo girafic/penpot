@@ -703,12 +703,33 @@
      {}
      (copy-heads objects board-id))))
 
+;; The timelines of the component copies in the boards of a page, `[timelines
+;; files by-board]` by its objects: every frame of the playback asks for
+;; them again, and a timeline made anew would be resolved anew too (see
+;; `cta/resolve-animations`). Playback runs in the browser only.
+#?(:cljs
+   (defonce ^:private copies-cache
+     (js/WeakMap.)))
+
 (defn copy-timelines
   "The timelines of the component copies in the board `board-id` (see
   `instance-timelines`), for the pages with `objects` and `timelines`;
-  `files` holds the files of the components, by id."
+  `files` holds the files of the components, by id. In the browser the
+  same as last time while `objects`, `timelines` and `files` are."
   [objects timelines files board-id]
-  (instance-timelines objects board-id (get timelines board-id) (main-page-of files)))
+  (let [make #(instance-timelines objects board-id (get timelines board-id) (main-page-of files))]
+    #?(:cljs
+       (if (map? objects)
+         (let [[tls fls by-board] (.get copies-cache objects)
+               by-board (if (and (identical? tls timelines) (identical? fls files)) by-board {})]
+           (if (contains? by-board board-id)
+             (get by-board board-id)
+             (let [copies (make)]
+               (.set copies-cache objects [timelines files (assoc by-board board-id copies)])
+               copies)))
+         (make))
+       :clj
+       (make))))
 
 (defn guide-ids
   "The helper layers of the board `board-id` of `page`, as goal rings (see
