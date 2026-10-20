@@ -420,11 +420,46 @@
     (t/testing "a part from 180 px on, 50 px long: the last 20 px, then the first 30"
       (let [tl (trim 0 0.25 0.9)]
         (t/is (= [0.0 0.3 0.0] (trims-at tl objects top 500)) "the topmost first")
-        (t/is (= [0.8 1.0 0.0] (trims-at tl objects bottom 500)))))
+        (t/is (= [0.0 0.2 0.8] (trims-at tl objects bottom 500)) "from its offset, as long as its end")))
     (t/testing "a layer holding both ends draws them as one part going on past its end"
       (let [tl (trim 0 0.9 0.3)]
         (t/is (= [0.0 0.8 0.6] (trims-at tl objects top 500)) "from 60 % past the end to 40 %")
         (t/is (= [0.0 1.0 0.0] (trims-at tl objects bottom 500)))))))
+
+(defn- drawn?
+  "Whether a layer whose trim is `[start end offset]` draws the point `u`
+  (a share of its outline) of it, as the canvas draws a trim."
+  [[s e o] u]
+  (let [s (mth/clamp s 0 1) e (mth/clamp e 0 1)]
+    (cond
+      (>= (- e s) 1) true
+      (<= e s)       false
+      :else          (< (mod (- u (mod (+ s o) 1)) 1) (- e s)))))
+
+(t/deftest a-trim-in-turn-goes-round-smoothly
+  ;; a third of two 100 px lines as one, going round them in 2 s: between
+  ;; the times it is sampled at too, each draws its share of it
+  (let [[objects {:keys [board inner top bottom]}] (trimmed-lines)
+        tl     (-> (mk-timeline)
+                   (assoc :board-id board :duration 2000)
+                   (cta/set-trim-mode inner :in-turn)
+                   (cta/add-keyframe inner {:time 0 :property :trim-end :value 0.3})
+                   (cta/add-keyframe inner {:time 0 :property :trim-offset :value 0 :easing :linear})
+                   (cta/add-keyframe inner {:time 2000 :property :trim-offset :value 1}))
+        played (cta/resolve-animations tl objects)
+        wrong  (for [t      (range 3 2000 7)
+                     :let   [values (cta/values-at played t)
+                             from   (mod (/ t 2000) 1)]
+                     [id a] [[top 0] [bottom 0.5]]
+                     :let   [trim (mapv #(get-in values [id %] (get cta/trim-properties %))
+                                        [:trim-start :trim-end :trim-offset])]
+                     u      (range 0.01 1 0.02)
+                     :let   [x (mod (- (+ a (* u 0.5)) from) 1)]
+                     ;; clear of the ends of the part, which move between samples
+                     :when  (and (> (mth/abs (- x 0.3)) 0.02) (> x 0.02) (< x 0.98))
+                     :when  (not= (< x 0.3) (drawn? trim u))]
+                 [t id u])]
+    (t/is (empty? wrong) (str (count wrong) " points drawn wrong, first " (first wrong)))))
 
 (t/deftest the-light-of-a-board-plays
   (let [board (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})

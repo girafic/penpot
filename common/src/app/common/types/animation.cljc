@@ -3619,15 +3619,17 @@
   `a` to `b` (shares of their joined length) of the layers a trim `s` `e`
   `o` of their group draws in turn: its share of the part the trim draws
   of them as one outline, as a single layer's trim draws it (from `(s +
-  o) mod 1`, as long as `e − s`, going on from the start past the end).
-  A layer holding both ends of that part draws them as one part of its
-  own that goes on past its end."
+  o) mod 1`, as long as `e − s`, going on from the start past the end),
+  always as from its offset, as long as its end: `[0 length from]`, so
+  that its values go on smoothly from one time to the next. A layer
+  holding both ends of that part draws them as one part of its own that
+  goes on past its end. A layer it does not reach: `[0 0 nil]`."
   [a b s e o]
   (let [s   (mth/clamp s 0 1)
         e   (mth/clamp e 0 1)
         len (- e s)]
     (if (<= len 0)
-      [0 0 0]
+      [0 0 nil]
       (let [from  (mod (+ s o) 1)
             to    (+ from len)
             local #(/ (- % a) (- b a))
@@ -3638,9 +3640,23 @@
             head  (when (> to 1) (piece 0 (- to 1)))]
         (cond
           (and tail head) [0 (+ (second head) (- 1 (first tail))) (first tail)]
-          (some? tail)    [(first tail) (second tail) 0]
-          (some? head)    [(first head) (second head) 0]
-          :else           [0 0 0])))))
+          (some? tail)    [0 (- (second tail) (first tail)) (first tail)]
+          (some? head)    [0 (- (second head) (first head)) (first head)]
+          :else           [0 0 nil])))))
+
+(defn- unwrapped-offsets
+  "`offsets` (shares, nil where a layer draws nothing) as a row that goes
+  on smoothly: a nil takes the offset next to it, and each one the turn
+  (a whole number more or less) nearest the one before, which draws the
+  same (see `turn-share`)."
+  [offsets]
+  (let [first-set (or (d/seek some? offsets) 0)]
+    (first
+     (reduce (fn [[out prev] o]
+               (let [o (if (some? o) (+ o (mth/round (- prev o))) prev)]
+                 [(conj out o) o]))
+             [[] first-set]
+             offsets))))
 
 (defn- in-turn-rows
   "The trim rows of the layers `ids` of `objects` that the trim `rows` (by
@@ -3667,10 +3683,12 @@
            (fn [i id]
              (let [a      (/ (nth starts i) total)
                    b      (/ (+ (nth starts i) (nth lengths i)) total)
-                   shares (mapv (fn [[t s e o]] [t (turn-share a b s e o)]) samples)
-                   row    (fn [property k]
-                            (for [[t v] (thinned (mapv (fn [[t share]] [t (nth share k)]) shares) 0.002)]
-                              (make-keyframe {:time t :property property :value v :easing :linear})))]
+                   shares  (mapv (fn [[t s e o]] [t (turn-share a b s e o)]) samples)
+                   offsets (unwrapped-offsets (mapv (comp #(nth % 2) second) shares))
+                   shares  (mapv (fn [[t share] o] [t (assoc share 2 o)]) shares offsets)
+                   row     (fn [property k]
+                             (for [[t v] (thinned (mapv (fn [[t share]] [t (nth share k)]) shares) 0.002)]
+                               (make-keyframe {:time t :property property :value v :easing :linear})))]
                [id (concat (row :trim-start 0) (row :trim-end 1) (row :trim-offset 2))])))
           ids)))
 
