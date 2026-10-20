@@ -369,8 +369,8 @@
   "The settings of offset lines a plugin gives (`count`, `spacing`,
   `width`, `innerColor`, `innerOpacity`, `outerColor`, `outerOpacity`,
   `stripeEvery`, `stripeDim`, `accents`, each optional), as `gol/defaults`
-  names them, `stripeEvery` 0 or `null` for no stripes: nil when one is
-  not valid."
+  names them, `stripeEvery` 0 or `null` for no stripes, `accents` empty
+  for none: nil when one is not valid."
   [value]
   (when (or (nil? value) (object? value))
     (let [color    (fn [v] (if (string? v) (str/lower v) v))
@@ -402,7 +402,10 @@
                                           :else accents)})
                        ;; none
                        (or (= 0 every) (and (obj/contains? value "stripeEvery") (nil? every)))
-                       (assoc :stripe-every nil)))]
+                       (assoc :stripe-every nil)
+
+                       (and (array? accents) (zero? (alength accents)))
+                       (assoc :accents nil)))]
       (when (sm/validate cts/schema:offset-lines (d/without-nils (merge gol/defaults settings)))
         (or settings {})))))
 

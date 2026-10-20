@@ -157,6 +157,7 @@
    [frontend-tests.ui.measurements-test]
    [frontend-tests.ui.measures-menu-props-test]
    [frontend-tests.ui.motion-split-test]
+   [frontend-tests.ui.offset-lines-menu-test]
    [frontend-tests.ui.organization-team-switch-test]
    [frontend-tests.ui.routes-test]
    [frontend-tests.ui.settings-password-schema-test]
@@ -354,6 +355,7 @@
    'frontend-tests.ui.measurements-test
    'frontend-tests.ui.measures-menu-props-test
    'frontend-tests.ui.motion-split-test
+   'frontend-tests.ui.offset-lines-menu-test
    'frontend-tests.ui.organization-team-switch-test
    'frontend-tests.ui.routes-test
    'frontend-tests.render-dimensions-test

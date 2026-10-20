@@ -122,7 +122,7 @@
 (t/deftest offset-lines-take-stripes-and-accents
   (thw/with-wasm-mocks*
     (fn []
-      (let [[store context ^js group] (offset-lines-of-a-rect)
+      (let [[store ^js context ^js group] (offset-lines-of-a-rect)
             line-color #(-> (some (fn [^js l] (when (= (str "Line " %) (.-name l)) l)) (.-children group))
                             (.-strokes) (aget 0) (.-strokeColor))]
         (set! (.-offsetLines group) #js {:stripeEvery 2 :stripeDim 0.5
@@ -136,6 +136,15 @@
         (set! (.-offsetLines group) #js {:stripeEvery 0 :accents #js []})
         (t/is (nil? (.-stripeEvery (.-offsetLines group))) "none again")
         (t/is (= 0 (.-length (.-accents (.-offsetLines group)))))
+        (t/is (not-any? #(contains? (:offset-lines (stored store context group)) %) [:stripe-every :accents])
+              "as absence")
+        (t/testing "made with them"
+          (let [^js path  (.createPath context)
+                _         (set! (.-d path) "M0 0 L100 0 L100 50 L0 50 Z")
+                ^js other (.makeOffsetLines path #js {:count 3 :spacing 10 :stripeEvery 2
+                                                      :accents #js [#js {:line 1 :color "#00FF9C"}]})]
+            (t/is (= {:stripe-every 2 :accents [{:line 1 :color "#00ff9c"}]}
+                     (select-keys (:offset-lines (stored store context other)) [:stripe-every :accents])))))
         (t/testing "what is not valid is refused"
           (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:stripeEvery 1})))
           (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:accents #js [#js {:line 0 :color "#ffffff"}]})))

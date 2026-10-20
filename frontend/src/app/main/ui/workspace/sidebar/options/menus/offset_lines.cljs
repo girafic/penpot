@@ -11,6 +11,7 @@
   component, which takes them from its main."
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.common.data :as d]
    [app.common.geom.offset-lines :as gol]
    [app.common.math :as mth]
    [app.common.schema :as sm]
@@ -56,19 +57,34 @@
               :on-blur on-blur
               :on-key-down on-key}]]))
 
+(defn- free-line
+  "The line of the `n` lines nearest their middle that has none of
+  `accents`, or nil when each has one."
+  [n accents]
+  (let [taken  (into #{} (map :line) accents)
+        middle (inc (quot n 2))]
+    (->> (range 1 (inc n))
+         (sort-by #(mth/abs (- % middle)))
+         (d/seek (complement taken)))))
+
 (mf/defc ^:private accents*
   "The accents of offset lines `spec` (see `gol/look`): lines of their
   own colour, opacity and width, by number from the inner side, each
-  with its −, and a + for one more; `on-change` gets them all."
+  with its −, and a + for one more on a line that has none; `on-change`
+  gets them all. An accent without an opacity or a width shows the one
+  its line has without it."
   [{:keys [spec disabled on-change]}]
   (let [accents (vec (:accents spec))
         edit    (fn [i k v] (on-change (assoc-in accents [i k] v)))
+        free    (free-line (:count spec) accents)
+        plain   (dissoc spec :accents)
         on-add  (mf/use-fn
-                 (mf/deps accents spec on-change)
-                 #(on-change (conj accents {:line (inc (quot (:count spec) 2))
-                                            :color "#ff7a7a"
-                                            :opacity 1
-                                            :width (:width spec)})))]
+                 (mf/deps accents spec free on-change)
+                 #(when (some? free)
+                    (on-change (conj accents {:line free
+                                              :color "#ff7a7a"
+                                              :opacity 1
+                                              :width (:width spec)}))))]
     [:*
      [:div {:class (stl/css :accents-title)}
       [:span (tr "workspace.options.offset-lines.accents")]
@@ -76,6 +92,7 @@
         [:> icon-button* {:variant "ghost"
                           :aria-label (tr "workspace.options.offset-lines.accents.add")
                           :on-click on-add
+                          :disabled (nil? free)
                           :icon i/add}])]
      (for [[i {:keys [line color opacity width]}] (map-indexed vector accents)]
        [:div {:key (str "accent-" i) :class (stl/css :accent)}
@@ -86,13 +103,17 @@
         [:> color-field* {:label "" :hint (tr "workspace.options.offset-lines.accent.color")
                           :value color :disabled disabled
                           :on-change #(edit i :color %)}]
-        (when-not disabled
+        (if disabled
+          ;; its place kept, so the fields sit as they do with it
+          [:span]
           [:> icon-button* {:variant "ghost"
                             :aria-label (tr "workspace.options.offset-lines.accents.remove")
                             :on-click #(on-change (into (subvec accents 0 i) (subvec accents (inc i))))
                             :icon i/remove}])
         [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.accent.opacity")
-                              :unit "%" :min 0 :max 100 :scale 100 :value (or opacity 1) :disabled disabled
+                              :unit "%" :min 0 :max 100 :scale 100
+                              :value (or opacity (:opacity (gol/look plain line (:count spec))))
+                              :disabled disabled
                               :on-change #(edit i :opacity (mth/clamp % 0 1))}]
         [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.accent.width")
                               :unit "px" :min 0.1 :max 1000 :value (or width (:width spec)) :disabled disabled
