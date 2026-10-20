@@ -154,6 +154,17 @@
       (t/is (= 22 (:offset outer)))
       (t/is (= 1 (count rings)))
       (t/is (> (closest h outer) 0.85) "nor through the middle")))
+  (t/testing "a sharp spike: the lines outside it go round it whole"
+    (let [bolt  (cts/setup-shape {:type :path :content (path/from-string "M620 130 L330 600 L510 600 L420 950 L770 440 L580 440 L700 130 Z")})
+          outer (filter #(pos? (:offset %)) (gol/lines bolt {:count 16 :spacing 4}))]
+      (t/is (every? #(= 1 (count (gtl/outline-polylines {:type :path :content (:content %)}))) outer))
+      (t/is (every? #(> % 0.85) (map #(closest bolt %) outer)))))
+  (t/testing "a cut ring goes round from where the outline starts, so a trim goes along all lines alike"
+    (let [heart (cts/setup-shape {:type :path :content (path/from-string "M540 860 C300 690 190 520 250 370 C310 230 470 220 540 360 C610 220 770 230 830 370 C890 520 780 690 540 860 Z")})
+          firsts (map #(first (:points (first (gtl/outline-polylines {:type :path :content (:content %)}))))
+                      (gol/lines heart {:count 24 :spacing 4}))]
+      (t/is (every? #(< (mth/hypot (- (:x %) 540) (- (:y %) 860)) 60) firsts)
+            "all at the tip of the heart, where it starts")))
   (t/testing "a waist narrower than the lines go in: a ring on each side"
     (let [waisted (cts/setup-shape {:type :path :content (path/from-string "M0 0 L80 0 L80 40 L120 40 L120 0 L200 0 L200 100 L120 100 L120 60 L80 60 L80 100 L0 100 Z")})
           inner   (last (filter #(neg? (:offset %)) (gol/lines waisted {:count 2 :spacing 24})))]

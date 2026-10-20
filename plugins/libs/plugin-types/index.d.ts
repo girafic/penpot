@@ -4125,9 +4125,10 @@ export interface Path extends ShapeBase {
    * going from the inner side to the outer one (see
    * `OffsetLinesSettings`). The parts of a line that would come nearer the
    * path than the line goes from it (in a notch, a waist or a curve tighter
-   * than the lines) are left out, but at the ends of an open path. Trim the
-   * group to draw them together or in turn. Not valid on a layer of a copy
-   * of a component. Requires `content:write` permission.
+   * than the lines) are left out, but at the ends of an open path; corners
+   * sharper than about 40° go round in an arc. Trim the group to draw them
+   * together or in turn. Not valid on a layer of a copy of a component.
+   * Requires `content:write` permission.
    *
    * @param settings How the lines are made; each one optional.
    * @return The new group (see `Group.offsetLines`).

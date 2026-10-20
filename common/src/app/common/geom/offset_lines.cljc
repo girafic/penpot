@@ -90,35 +90,58 @@
     (and closed? (> (count points) 2) (< (gpt/distance (first points) (peek (vec points))) 1e-6))
     pop))
 
-(defn offset-polyline
-  "The points of the polyline `points` (closed when `closed?`) moved `d`
-  px along their normals, the normals of their two segments averaged (a
-  corner lengthens it, up to `max-miter`)."
+(defn offset-pairs
+  "`[[point source-point]...]`: the points of the polyline `points`
+  (closed when `closed?`) moved `d` px along their normals, the normals of
+  their two segments averaged, a corner lengthening it as far as the two
+  segments are apart; a corner sharper than `max-miter` allows rounded
+  instead, `d` px from it all along, so that the lines along its segments
+  keep their distance. Each with the point of `points` it comes from (see
+  `clean-points`)."
   [points closed? d]
   (let [pts (clean-points points closed?)
-        n   (count pts)]
+        n   (count pts)
+        at  (fn [p [nx ny] k] (gpt/point (+ (:x p) (* nx k)) (+ (:y p) (* ny k))))]
     (if (< n 2)
-      pts
-      (mapv (fn [i]
-              (let [p      (nth pts i)
-                    prev   (cond (pos? i) (nth pts (dec i)) closed? (nth pts (dec n)))
-                    next   (cond (< i (dec n)) (nth pts (inc i)) closed? (nth pts 0))
-                    n1     (some-> prev (normal p))
-                    n2     (some->> next (normal p))
-                    [nx ny] (cond
-                              (and n1 n2) [(+ (:x n1) (:x n2)) (+ (:y n1) (:y n2))]
-                              n1          [(:x n1) (:y n1)]
-                              n2          [(:x n2) (:y n2)]
-                              :else       [0 0])
-                    len    (mth/hypot nx ny)
-                    ;; along the bisector, as far as the two segments
-                    ;; are apart, at most `max-miter`
-                    miter  (if (and n1 n2 (> len 1e-9))
-                             (min max-miter (/ 2 len))
-                             1)
-                    k      (if (> len 1e-9) (/ (* d miter) len) 0)]
-                (gpt/point (+ (:x p) (* nx k)) (+ (:y p) (* ny k)))))
+      (mapv #(vector % %) pts)
+      (into []
+            (mapcat
+             (fn [i]
+               (let [p    (nth pts i)
+                     prev (cond (pos? i) (nth pts (dec i)) closed? (nth pts (dec n)))
+                     next (cond (< i (dec n)) (nth pts (inc i)) closed? (nth pts 0))
+                     n1   (some-> prev (normal p))
+                     n2   (some->> next (normal p))]
+                 (cond
+                   (and n1 n2)
+                   (let [nx  (+ (:x n1) (:x n2))
+                         ny  (+ (:y n1) (:y n2))
+                         len (mth/hypot nx ny)]
+                     (if (and (> len 1e-9) (<= (/ 2 len) max-miter))
+                       ;; along the bisector, as far as the two segments are apart
+                       [[(at p [nx ny] (/ (* d 2) (* len len))) p]]
+                       ;; round it, `d` px all along
+                       (let [sd    (if (neg? d) -1 1)
+                             a1    (mth/atan2 (* sd (:y n1)) (* sd (:x n1)))
+                             a2    (mth/atan2 (* sd (:y n2)) (* sd (:x n2)))
+                             turn  (let [t (- a2 a1)]
+                                     (cond (> t mth/PI) (- t (* 2 mth/PI)) (<= t (- mth/PI)) (+ t (* 2 mth/PI)) :else t))
+                             steps (max 1 (mth/ceil (/ (mth/abs turn) (/ mth/PI 12))))
+                             r     (mth/abs d)]
+                         (mapv (fn [k]
+                                 (let [a (+ a1 (* turn (/ k steps)))]
+                                   [(gpt/point (+ (:x p) (* r (mth/cos a))) (+ (:y p) (* r (mth/sin a)))) p]))
+                               (range (inc steps))))))
+                   n1 [[(at p [(:x n1) (:y n1)] d) p]]
+                   n2 [[(at p [(:x n2) (:y n2)] d) p]]
+                   :else [[p p]]))))
             (range n)))))
+
+(defn offset-polyline
+  "The points of the polyline `points` (closed when `closed?`) moved `d`
+  px off it (see `offset-pairs`)."
+  [points closed? d]
+  (mapv first (offset-pairs points closed? d)))
 
 (defn- signed-area
   "Twice the area of the polygon `pts`, its sign the way it goes round."
@@ -364,6 +387,12 @@
             (recur rings (into ring (nth left j)) (into (subvec left 0 j) (subvec left (inc j))))
             (recur (conj rings ring) (first left) (vec (rest left)))))))))
 
+(defn- started-at
+  "The closed ring `points` going round from its point nearest `p`."
+  [points p]
+  (let [i (apply min-key #(gpt/distance (nth points %) p) (range (count points)))]
+    (into (subvec points i) (subvec points 0 i))))
+
 (defn- kept-pieces
   "The pieces of `ring`, the offset `d` of the polyline `source` of an
   outline of `segments` (closed when `closed?`), that keep their distance
@@ -388,6 +417,9 @@
           (comp (map #(own-points (untwisted % closed?) cut?))
                 (filter #(> (count %) 1))
                 (map #(cond-> % cut? (bridged closed? step)))
+                ;; from where the ring starts, so that a trim of its lines
+                ;; goes along them all alike
+                (map #(cond-> % (and closed? cut?) (started-at (first ring))))
                 (map (fn [points] {:points points :closed? closed?})))
           (if closed? (chained pieces) pieces))))
 
@@ -431,24 +463,24 @@
         polylines (gtl/outline-polylines source)
         ds        (offsets spec)
         n         (count ds)
-        ;; for each polyline, its ring at each offset, or nil
-        sources   (mapv (fn [{:keys [points closed?]}] (clean-points points closed?)) polylines)
         segs      (segments polylines)
+        ;; for each polyline, its ring at each offset (see `offset-pairs`), or nil
         rings     (mapv (fn [{:keys [points closed?] :as line} hole?]
                           (let [sign  (outward-sign line hole?)
-                                rings (mapv #(offset-polyline points closed? (* sign %)) ds)
+                                rings (mapv #(offset-pairs points closed? (* sign %)) ds)
                                 kept  (if (closed-polyline? line)
-                                        (rings-kept points hole? ds rings)
+                                        (rings-kept points hole? ds (mapv #(mapv first %) rings))
                                         (repeat true))]
                             (mapv (fn [ring kept?] (when (and kept? (> (count ring) 1)) ring)) rings kept)))
                         polylines (holes polylines))]
     (into []
           (keep-indexed
            (fn [i d]
-             (let [subpaths (for [[line source line-rings] (map vector polylines sources rings)
+             (let [subpaths (for [[line line-rings] (map vector polylines rings)
                                   :let  [ring (nth line-rings i)]
                                   :when (some? ring)
-                                  {pts :points closed? :closed?} (kept-pieces ring source (closed-polyline? line) d segs)]
+                                  {pts :points closed? :closed?} (kept-pieces (mapv first ring) (mapv second ring)
+                                                                              (closed-polyline? line) d segs)]
                               (cond-> (vec (path/smooth-points->content (cond-> pts closed? (conj (first pts)))
                                                                         smoothness))
                                 closed? (conj {:command :close-path :params {}})))]
