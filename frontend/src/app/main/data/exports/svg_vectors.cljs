@@ -108,41 +108,139 @@
                         #"<(path|rect|ellipse|circle|polygon|polyline|line) (?![^>]*pathLength=)"
                         "<$1 pathLength=\"1\" ")))))
 
+(defn- path-data
+  "The `d` of the attributes `attrs` of an element."
+  [attrs]
+  (second (re-find #"(?:^|\s)d=\"([^\"]*)\"" attrs)))
+
+(defn- paint-id
+  "The id of the gradient or pattern the attributes `attrs` of an element
+  stroke with (`stroke:url(#…)` in its style, its quotes as the markup
+  writes them), or nil."
+  [attrs]
+  (some-> (re-find #"(?:^|[;\s\"])stroke:\s*url\(([^)]*)\)" attrs)
+          (second)
+          (str/replace #"&quot;|&#x27;|&apos;|['\"]" "")
+          (str/replace #"^#" "")))
+
+(defn- re-escaped
+  [s]
+  (.replace s (js/RegExp. "[.*+?^${}()|[\\]\\\\]" "g") "\\$&"))
+
+(defn- on-box
+  "The opening tag `open` of a gradient or pattern of `tag` laid on the box
+  `box` in the units of the page (`userSpaceOnUse`), as its units of a box
+  (`objectBoundingBox`, the default) laid it on the box of the element it
+  painted: a gradient through a transform that takes the box of 1 to it,
+  a pattern its place and size on it."
+  [open tag {:keys [x y width height]}]
+  (let [units (if (= "pattern" tag) "patternUnits" "gradientUnits")
+        open  (if (= "pattern" tag)
+                (.replace open (js/RegExp. "\\s(x|y|width|height)=\"([^\"]*)\"" "g")
+                          (fn [_ k v]
+                            (let [v (js/parseFloat v)]
+                              (str " " k "=\""
+                                   (case k
+                                     "x"      (+ x (* v width))
+                                     "y"      (+ y (* v height))
+                                     "width"  (* v width)
+                                     "height" (* v height))
+                                   "\""))))
+                (let [m (str "matrix(" width " 0 0 " height " " x " " y ")")]
+                  (if (re-find #"\sgradientTransform=\"" open)
+                    (.replace open (js/RegExp. "\\sgradientTransform=\"([^\"]*)\"")
+                              (fn [_ t] (str " gradientTransform=\"" (str/trim (str m " " t)) "\"")))
+                    (str/replace open #">$" (str " gradientTransform=\"" m "\">")))))]
+    (str/replace open #">$" (str " " units "=\"userSpaceOnUse\">"))))
+
+(defn- whole-paint
+  "The gradient or image pattern of the id `id` of `markup`, as it is
+  there (`:element`) and as a copy laid on the box `box` of a whole
+  outline (`:copy`, see `on-box`), its ids ending in `-whole`; nil when
+  `markup` has no such element."
+  [markup id box]
+  (let [re (js/RegExp. (str "<(linearGradient|radialGradient|pattern)\\b[^>]*\\sid=\"" (re-escaped id)
+                            "\"[^>]*>[\\s\\S]*?</\\1>"))]
+    (when-let [m (.exec re markup)]
+      (let [element (aget m 0)
+            tag     (aget m 1)
+            cut     (inc (.indexOf element ">"))
+            copy    (str (on-box (subs element 0 cut) tag box) (subs element cut))]
+        {:element element
+         :copy    (.replace copy (js/RegExp. "\\sid=\"([^\"]+)\"" "g")
+                            (fn [_ i] (str " id=\"" i "-whole\"")))}))))
+
 (defn- split-path
   "The `<path>` of the attributes `attrs` (its `d` absolute, as the SVG
   renderer writes it) as one element per subpath when it has as many as
   `pieces` (`[[from share]...]`, see `aexp/trim-pieces`), each of its share
   of the length of them all (`pathLength`) and of the class of its piece
-  (see `asvg/trim-piece-class`); else as it is."
-  [attrs pieces]
-  (let [d        (second (re-find #"(?:^|\s)d=\"([^\"]*)\"" attrs))
+  (see `asvg/trim-piece-class`); else as it is. Its caps stay on the ends
+  of the whole outline: the start on the first piece, the end on the
+  last. `paint`, `[id whole-id]`, is the gradient or pattern of its
+  stroke and its copy on the box of the whole outline (see `whole-paint`),
+  which the pieces paint with, as a piece of a box of its own would show
+  another part of it, or none when the box is flat."
+  [attrs pieces paint]
+  (let [d        (path-data attrs)
         subpaths (some->> d (re-seq #"M[^M]*"))
-        whole    (str "<path " attrs "></path>")]
+        whole    (str "<path " attrs "></path>")
+        last-k   (dec (count pieces))]
     (if (or (not= (count subpaths) (count pieces))
             (re-find #"(?:^|\s)class=" attrs))
       whole
       (str/join (map-indexed
                  (fn [k [subpath [_ share]]]
-                   (str "<path pathLength=\"" share "\" class=\"" (asvg/trim-piece-class k) "\" "
-                        (.join (.split attrs (str "d=\"" d "\"")) (str "d=\"" (str/trim subpath) "\""))
-                        "></path>"))
+                   (let [attrs (cond-> attrs
+                                 (some? paint)
+                                 (as-> a (.join (.split a (str "#" (first paint))) (str "#" (second paint))))
+                                 (pos? k)
+                                 (str/replace #"marker-start:\s*url\([^)]*\);?" "")
+                                 (< k last-k)
+                                 (str/replace #"marker-end:\s*url\([^)]*\);?" ""))]
+                     (str "<path pathLength=\"" share "\" class=\"" (asvg/trim-piece-class k) "\" "
+                          (.join (.split attrs (str "d=\"" d "\"")) (str "d=\"" (str/trim subpath) "\""))
+                          "></path>")))
                  (map vector subpaths pieces))))))
 
+(def ^:private stroke-paint-re
+  "The element each stroke of a shape paints: the first path of its group
+  after its `<defs>`, as the SVG renderer draws center, inner and outer
+  strokes."
+  "(<g class=\"(?:inner-|outer-)?stroke-shape\">(?:<defs>[\\s\\S]*?</defs>)?)<path ([^>]*)></path>")
+
 (defn- split-trim-pieces
-  "`markup` with the stroke each stroke of the shape `id` paints (the
-  first path of its group after its `<defs>`, as the SVG renderer draws
-  center, inner and outer strokes) split into its subpaths (see
-  `split-path`): the canvas trims an outline of several subpaths along
-  them all, an SVG dash each by itself, so each plays its part of the
-  trim on its own (see `asvg/svg-appearance-css`)."
+  "`markup` with the stroke each stroke of the shape `id` paints (see
+  `stroke-paint-re`) split into its subpaths (see `split-path`): the
+  canvas trims an outline of several subpaths along them all, an SVG
+  dash each by itself, so each plays its part of the trim on its own (see
+  `asvg/svg-appearance-css`). A stroke of a gradient or an image paints
+  with a copy of it on the box of the whole outline, after it (see
+  `whole-paint`); one whose gradient or pattern is not there stays whole."
   [markup id pieces]
   (let [start (strokes-start markup id)]
     (if (neg? start)
       markup
-      (str (subs markup 0 start)
-           (.replace (subs markup start)
-                     (js/RegExp. "(<g class=\"(?:inner-|outer-)?stroke-shape\">(?:<defs>[\\s\\S]*?</defs>)?)<path ([^>]*)></path>" "g")
-                     (fn [_ head attrs] (str head (split-path attrs pieces))))))))
+      (let [tail   (subs markup start)
+            copies (into {}
+                         (keep (fn [m]
+                                 (let [attrs (aget m 2)]
+                                   (when-let [pid (paint-id attrs)]
+                                     [pid (when-let [d (path-data attrs)]
+                                            (whole-paint markup pid (path/calc-selrect (path/from-string d))))]))))
+                         (es6-iterator-seq (.matchAll tail (js/RegExp. stroke-paint-re "g"))))
+            tail   (.replace tail (js/RegExp. stroke-paint-re "g")
+                             (fn [_ head attrs]
+                               (let [pid (paint-id attrs)]
+                                 (str head
+                                      (cond
+                                        (nil? pid)            (split-path attrs pieces nil)
+                                        (some? (get copies pid)) (split-path attrs pieces [pid (str pid "-whole")])
+                                        :else                 (str "<path " attrs "></path>"))))))]
+        (reduce (fn [markup {:keys [element copy]}]
+                  (.join (.split markup element) (str element copy)))
+                (str (subs markup 0 start) tail)
+                (keep val copies))))))
 
 (defn- merged-attrs
   "The attributes of a copy of an element of the attributes

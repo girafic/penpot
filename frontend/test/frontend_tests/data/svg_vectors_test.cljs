@@ -103,6 +103,57 @@
           {:keys [objects]} (board-with a)]
       (t/is (not (str/includes? (svgv/layer-markup objects (:id a) (track-of :trim-end)) "trim-piece"))))))
 
+(defn- trimmed-markup
+  "The markup of a layer drawing `content` with `stroke`, trimmed."
+  [content stroke]
+  (let [a (cts/setup-shape {:type :path :content (path/from-string content)
+                            :strokes [(merge {:stroke-opacity 1 :stroke-width 2 :stroke-style :solid
+                                              :stroke-alignment :center}
+                                             stroke)]})
+        {:keys [objects]} (board-with a)]
+    (svgv/layer-markup objects (:id a) (track-of :trim-end))))
+
+(def ^:private two-triangles
+  "Two closed outlines, 50 wide and 30 high together."
+  "M 0 0 L 30 0 L 30 30 Z M 40 0 L 50 0 L 50 10 Z")
+
+(t/deftest the-pieces-of-a-stroke-paint-with-its-gradient-on-the-whole-outline
+  (doseq [type [:linear :radial]]
+    (let [gradient {:type type :start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5 :width 1
+                    :stops [{:color "#ff0000" :opacity 1 :offset 0} {:color "#0000ff" :opacity 1 :offset 1}]}
+          markup   (trimmed-markup two-triangles {:stroke-color-gradient gradient})
+          tag      (if (= :linear type) "linearGradient" "radialGradient")
+          [copy]   (re-find (re-pattern (str "<" tag "[^>]*id=\"([^\"]*-whole)\"[^>]*>")) markup)
+          whole-id (second (re-find #"id=\"([^\"]*-whole)\"" (or copy "")))]
+      (t/is (some? copy) (str "a copy of its " (name type) " gradient"))
+      (t/is (str/includes? copy "gradientUnits=\"userSpaceOnUse\""))
+      (t/is (str/includes? copy "matrix(50 0 0 30 0 0") "laid on the box of the whole outline")
+      (t/is (= 2 (count (re-seq (re-pattern (str "class=\"trim-piece-\\d\"[^>]*url\\(#" whole-id "\\)")) markup)))
+            "both pieces paint with it"))))
+
+(t/deftest the-pieces-of-a-stroke-paint-with-its-image-on-the-whole-outline
+  (let [markup (trimmed-markup two-triangles {:stroke-image {:id (uuid/next) :width 10 :height 10 :mtype "image/png"}})
+        copy   (re-find #"<pattern[^>]*id=\"[^\"]*-whole\"[^>]*>" markup)]
+    (t/is (some? copy) "a copy of its pattern")
+    (t/is (str/includes? copy "patternUnits=\"userSpaceOnUse\""))
+    (t/is (re-find #"\swidth=\"5\d" copy) "as wide as the whole outline and the stroke past it")
+    (t/is (= 2 (count (re-seq #"class=\"trim-piece-\d\"[^>]*-whole" markup))))))
+
+(t/deftest the-caps-of-a-stroke-stay-on-the-ends-of-its-whole-outline
+  (let [markup (trimmed-markup "M 0 0 L 30 0 M 0 10 L 10 10"
+                               {:stroke-color "#000000" :stroke-cap-start :triangle-arrow :stroke-cap-end :circle-marker})
+        piece  #(re-find (re-pattern (str "<path[^>]*class=\"trim-piece-" % "\"[^>]*>")) markup)]
+    (t/is (str/includes? (piece 0) "marker-start"))
+    (t/is (not (str/includes? (piece 0) "marker-end")))
+    (t/is (str/includes? (piece 1) "marker-end"))
+    (t/is (not (str/includes? (piece 1) "marker-start")))))
+
+(t/deftest a-stroke-whose-gradient-is-missing-stays-whole
+  (let [split  #'svgv/split-trim-pieces
+        markup (str "<g id=\"strokes-1-abc\" class=\"strokes\"><g class=\"stroke-shape\"><defs></defs>"
+                    "<path d=\"M0,0L30,0M0,10L10,10\" style=\"stroke:url(#nowhere)\"></path></g></g>")]
+    (t/is (= markup (split markup "abc" [[0 0.75] [0.75 0.25]])))))
+
 (t/deftest the-effects-of-a-layer-are-not-drawn-in-it
   ;; A filter of its own draws them, as soft as the canvas does (see
   ;; `asvg/svg-filter-shadows?`).
