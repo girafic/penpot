@@ -391,7 +391,9 @@
      (for [[sid track] (:tracks timeline)
            :let  [shape (get objects sid)
                   props (into #{} (map :property) (:keyframes track))]
-           :when (and (some? shape) (some appearance props))
+           ;; a hidden layer, or one in a hidden one, has no elements
+           :when (and (some? shape) (some appearance props)
+                      (not (aexp/hidden-in? objects (:board-id timeline) sid)))
            [n [selectors declarations reads]] (map-indexed vector (svg-targets shape track props))
            :let  [kfs (filterv #(reads (:property %)) (:keyframes track))]
            :when (seq kfs)]
@@ -1402,8 +1404,11 @@
                                   (when (or (aexp/svg-outline-sized? shape track) (aexp/svg-box-sized? shape track))
                                     id))))
                         (:tracks timeline))
+         ids      (aexp/export-layer-ids objects timeline)
          css      (acss/timeline->css timeline objects
                                       {:svg? true
+                                       ;; what it draws: no rules of hidden layers
+                                       :ids (conj (set ids) board-id)
                                        :sized (-> sized
                                                   (into outlined)
                                                   ;; groups resize on their layers
@@ -1422,7 +1427,6 @@
                                                                   (acss/fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
                                                  :adjust (fn [text units] (aexp/turned-moves units (:rotation text)))})})
          played   (-> timeline cta/expand-paths cta/cut-timeline)
-         ids      (aexp/export-layer-ids objects timeline)
          nodes    (aexp/layer-nodes objects (set ids) board-id)
          ;; the layers holding layers, which may go anywhere in the view
          wide     (into #{board-id}

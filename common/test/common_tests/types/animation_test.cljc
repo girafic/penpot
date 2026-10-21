@@ -2400,12 +2400,14 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe (:id shown) {:time 0 :property :trim-end :value 0})
                     (cta/add-keyframe (:id shown) {:time 1000 :property :trim-end :value 1})
-                    (cta/add-keyframe (:id inside) {:time 0 :property :opacity :value 1}))]
+                    (cta/add-keyframe (:id inside) {:time 0 :property :opacity :value 1})
+                    (cta/add-keyframe (:id inside) {:time 0 :property :stroke-color :index 0 :value "#ff0000"})
+                    (cta/add-keyframe (:id inside) {:time 1000 :property :stroke-color :index 0 :value "#0000ff"}))]
     (t/is (= [(:id shown)] (aexp/export-layer-ids objects tl)))
     (let [svg (asvg/timeline->svg tl objects {} {})]
       (t/is (re-find (re-pattern (str "(?:id|class)=\"[^\"]*" (:id shown))) svg))
-      (t/is (not-any? #(re-find (re-pattern (str "(?:id|class)=\"[^\"]*" %)) svg) [(:id hidden) gid (:id inside)])
-            "SVG: no element of them"))
+      (t/is (not-any? #(str/includes? svg (str %)) [(:id hidden) gid (:id inside)])
+            "SVG: neither elements nor rules of them"))
     (doseq [assets [nil {}]]
       (t/is (= ["shown"] (filterv #{"shown" "hidden" "inside" "hidden group"}
                                   (lottie-layer-names (alottie/timeline->lottie tl objects assets))))
