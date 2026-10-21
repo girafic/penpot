@@ -26,6 +26,8 @@
    [app.common.types.shape :as cts]
    [clojure.string :as str]))
 
+(declare trim-pieces-of)
+
 (defn- svg-escape
   [s]
   (-> (str s)
@@ -266,7 +268,7 @@
         ;; an outline of several subpaths trims along them all, each
         ;; drawn by an element of its own (see `trim-piece-class`); the
         ;; rule of the whole stays for one drawn whole
-        pieces    (when (and trim? (not text?)) (aexp/trim-pieces shape))
+        pieces    (trim-pieces-of shape track)
         fill-targets
         (for [index (kf-index svg-fill-properties)
               :when (or text? (< index (count fills)))]
@@ -464,6 +466,28 @@
   (boolean
    (and (= :path (:type shape))
         (some #(= :content (:property %)) (:keyframes track)))))
+
+(defn smil-outline?
+  "Whether SMIL plays on the outline of `shape` what `track` animates:
+  its corners (see `svg-smil-corners?`), its size (see
+  `aexp/svg-outline-sized?`) or its outline (see `svg-smil-morph?`)."
+  [shape track]
+  (boolean (and (some? shape)
+                (or (svg-smil-corners? shape track)
+                    (aexp/svg-outline-sized? shape track)
+                    (svg-smil-morph? shape track)))))
+
+(defn trim-pieces-of
+  "The pieces (see `aexp/trim-pieces`) the stroke of `shape` is drawn by,
+  one element each, when `track` trims it: an outline of several
+  subpaths, but of a text (its trim stays as it rests) or of an outline
+  SMIL plays (see `smil-outline?`), which stays whole. Nil when it is
+  drawn whole."
+  [shape track]
+  (when (and (some svg-trim-properties (track-properties track))
+             (not= :text (:type shape))
+             (not (smil-outline? shape track)))
+    (aexp/trim-pieces shape)))
 
 (def ^:private smil-linear [0 0 1 1])
 

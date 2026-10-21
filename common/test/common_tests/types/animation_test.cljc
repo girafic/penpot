@@ -3320,6 +3320,42 @@
         (t/is (str/includes? css ".stroke-shape > :not(defs).trim-piece-1 {"))
         (t/is (re-find #"stroke-dasharray: 0.5 0.5; stroke-dashoffset: 0.75;" css) "the second, 0.75 along")))))
 
+(t/deftest a-boolean-is-trimmed-as-its-outline
+  ;; its subpaths, not its box: along them all in both exports
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bool  (-> (cts/setup-shape {:type :path :content (path/from-string "M 0 0 L 30 0 L 30 30 Z M 40 0 L 50 0 L 50 10 Z")
+                                    :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 4}]})
+                  (assoc :type :bool :bool-type :union :shapes []))
+        bid   (:id board)
+        sid   (:id bool)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :trim-end :value 0.5}))
+        objs  {bid (assoc board :shapes [sid]) sid (assoc bool :parent-id bid :frame-id bid)}
+        trim  (lottie-item (get-in (alottie/timeline->lottie tl objs) [:layers 0 :shapes 0 :it]) "tm")
+        share (map second (aexp/trim-pieces bool))]
+    (t/is (= 2 (count share)))
+    (t/is (every? true? (map #(mth/close? %1 %2 1e-9) share [0.75 0.25])))
+    (t/is (mth/close? (* 40 (+ 2 (mth/sqrt 2))) (gtl/outline-length bool) 1e-6) "its outline, not its box")
+    (t/is (= 2 (:m trim)) "Lottie: one after another")
+    (t/is (str/includes? (asvg/svg-appearance-css tl objs) ".trim-piece-1 {") "SVG: by pieces")))
+
+(t/deftest an-outline-playing-by-smil-is-trimmed-whole
+  ;; a morphing path keeps its element whole: no rules of pieces
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape (cts/setup-shape {:type :path :content (path/from-string "M 0 0 L 30 0 M 0 10 L 10 10")
+                                :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 4}]})
+        bid   (:id board)
+        sid   (:id shape)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :trim-end :value 0.5})
+                  (cta/add-keyframe sid {:time 0 :property :content :value (path/from-string "M 0 0 L 30 0 M 0 10 L 10 10")})
+                  (cta/add-keyframe sid {:time 1000 :property :content :value (path/from-string "M 0 0 L 40 0 M 0 10 L 20 10")}))
+        objs  {bid (assoc board :shapes [sid]) sid (assoc shape :parent-id bid :frame-id bid)}
+        track (get-in tl [:tracks sid])]
+    (t/is (asvg/smil-outline? shape track))
+    (t/is (nil? (asvg/trim-pieces-of shape track)))
+    (t/is (not (str/includes? (asvg/svg-appearance-css tl objs) "trim-piece")))))
+
 (t/deftest lottie-draws-a-gradient
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
         shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 50

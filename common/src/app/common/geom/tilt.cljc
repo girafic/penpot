@@ -696,11 +696,11 @@
 (defn outline-polylines
   "The outline of `shape` as it lies flat, polylines of points of the
   page (`{:points :closed?}`): the corners of its box, the points of an
-  ellipse, the subpaths of a path."
+  ellipse, the subpaths of a path or of a boolean."
   [shape]
   (case (:type shape)
-    :circle [(ellipse-polyline shape)]
-    :path   (path-polylines (:content shape))
+    :circle       [(ellipse-polyline shape)]
+    (:path :bool) (path-polylines (:content shape))
     [{:points (vec (:points shape)) :closed? true}]))
 
 (defn polyline-length

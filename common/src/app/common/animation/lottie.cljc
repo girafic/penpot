@@ -377,11 +377,12 @@
 (defn- lottie-trim-item
   "Lottie trim paths of the trim keyframes, or nil without any: start and
   end in percent, the offset in degrees (a whole turn is the outline).
-  Of an outline of `paths` Lottie paths more than one, along them all one
-  after another (`m` 2), as the canvas trims them, not each by itself."
-  [by-prop paths]
+  Of an outline of several subpaths (see `aexp/trim-pieces`), along them
+  all one after another (`m` 2), as the canvas trims them, not each by
+  itself."
+  [by-prop shape]
   (when (some #(seq (by-prop %)) (keys cta/trim-properties))
-    {:ty "tm" :nm "trim" :m (if (> paths 1) 2 1)
+    {:ty "tm" :nm "trim" :m (if (some? (aexp/trim-pieces shape)) 2 1)
      :s (lottie-prop-1d (by-prop :trim-start) (fn [v] (* 100.0 v)) 0)
      :e (lottie-prop-1d (by-prop :trim-end) (fn [v] (* 100.0 v)) 100)
      :o (lottie-prop-1d (by-prop :trim-offset) (fn [v] (* 360.0 v)) 0)}))
@@ -810,7 +811,7 @@
         outline (lottie-outline shape by-prop ox oy sized)
         strokes (lottie-stroke-items shape by-prop)
         fills   (lottie-fill-items shape by-prop [(- x ox) (- y oy) width height])
-        trim    (lottie-trim-item by-prop (count (filter #(= "sh" (:ty %)) outline)))]
+        trim    (lottie-trim-item by-prop shape)]
     (if (and (some? trim) (seq strokes))
       (cond-> [(lottie-group "strokes" (concat outline [trim] strokes))]
         (seq fills) (conj (lottie-group "fills" (concat outline fills))))

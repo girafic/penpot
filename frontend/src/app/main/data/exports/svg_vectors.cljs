@@ -12,7 +12,6 @@
   texts as the outlines of their glyphs (see `outlined`)."
   (:require
    ["react-dom/server" :as rds]
-   [app.common.animation.export :as aexp]
    [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
@@ -47,23 +46,13 @@
 (def ^:private trim-properties
   #{:trim-start :trim-end :trim-offset})
 
-(defn- smil-outline?
-  "Whether SMIL plays on the outline of `shape` what `track` animates:
-  its corners (see `asvg/svg-smil-corners?`), its size (see
-  `aexp/svg-outline-sized?`) or its outline (see `asvg/svg-smil-morph?`)."
-  [shape track]
-  (boolean (and (some? shape)
-                (or (asvg/svg-smil-corners? shape track)
-                    (aexp/svg-outline-sized? shape track)
-                    (asvg/svg-smil-morph? shape track)))))
-
 (defn- rest-shape
   "`shape` as its layer draws it: without its opacity, which the group of
   the layer has, and without what a filter of its own draws over it,
   which would else show twice: its blur, as strong as on the canvas, and
   the shadows its animation, `track`, plays (see `asvg/svg-filter-blur?`,
   `asvg/svg-filter-shadows?`). Its outline a path when SMIL plays its
-  corners or its size on it (see `smil-outline?`), as corners not alike
+  corners or its size on it (see `asvg/smil-outline?`), as corners not alike
   as it plays draw. A board that hides its fill in exports, without it."
   [shape track]
   (let [shadows? (asvg/svg-filter-shadows? shape)]
@@ -75,7 +64,7 @@
       (assoc :shadow [])
 
       ;; corners alike draw as a `rect`
-      (and (smil-outline? shape track) (= :rect (:type shape)) (ctsr/all-equal? shape))
+      (and (asvg/smil-outline? shape track) (= :rect (:type shape)) (ctsr/all-equal? shape))
       (as-> shape (assoc shape
                          :r1 (or (:r1 shape) 0) :r2 (or (:r2 shape) 0) :r3 (or (:r3 shape) 0)
                          :r4 (+ (or (:r4 shape) 0) 0.0001)))
@@ -86,7 +75,7 @@
 (defn- mark-outline
   "`markup` with the elements of the outline of `shape` (see
   `rest-shape`) marked, which SMIL plays the corners or the size on (see
-  `smil-outline?`): the path of a rectangle, or of a path, its fill and
+  `asvg/smil-outline?`): the path of a rectangle, or of a path, its fill and
   the strokes along it, as the SVG renderer writes them."
   [markup shape]
   (if-let [d (if (contains? #{:path :bool} (:type shape))
@@ -274,10 +263,9 @@
   `compact-path`). `track` is its animation (see `rest-shape`)."
   [objects id track]
   (let [shape  (rest-shape (get objects id) track)
-        smil?  (smil-outline? (get objects id) track)
+        smil?  (asvg/smil-outline? (get objects id) track)
         trim?  (some #(trim-properties (:property %)) (:keyframes track))
-        ;; an outline playing by SMIL keeps its elements whole
-        pieces (when (and trim? (not smil?)) (aexp/trim-pieces shape))
+        pieces (asvg/trim-pieces-of (get objects id) track)
         markup (rds/renderToStaticMarkup
                 (mf/element layer-svg* #js {:objects objects :shape shape}))]
     (cond-> (-> markup
