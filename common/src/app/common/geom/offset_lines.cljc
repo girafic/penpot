@@ -292,7 +292,8 @@
 (defn- near?
   "Whether the point `p` is nearer than `limit` to one of the segments of
   `grid` (see `segments`): those of the cells it reaches that far or,
-  when those are more than the cells the segments are in, all of them."
+  when those are many more than the cells the segments are in (a look at
+  an empty cell costs far less than a test of a segment), all of them."
   [p grid limit]
   (let [px (double (:x p))
         py (double (:y p))
@@ -301,7 +302,7 @@
         c1 (long (mth/floor (/ (+ px limit) cell)))
         r0 (long (mth/floor (/ (- py limit) cell)))
         r1 (long (mth/floor (/ (+ py limit) cell)))]
-    (if (> (* (inc (- c1 c0)) (inc (- r1 r0))) (count grid))
+    (if (> (* (inc (- c1 c0)) (inc (- r1 r0))) (* 4 (count grid)))
       (near-any? px py l2 grid)
       (near-in-cells? px py l2 grid c0 c1 r0 r1))))
 

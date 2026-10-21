@@ -67,6 +67,12 @@
          (sort-by #(mth/abs (- % middle)))
          (d/seek (complement taken)))))
 
+(defn- shown-opacity
+  "The opacity the accent `accent` of offset lines `spec` gives its line:
+  its own, or the one the line has without it (see `gol/look`)."
+  [spec {:keys [line opacity]}]
+  (or opacity (:opacity (gol/look (dissoc spec :accents) line (:count spec)))))
+
 (mf/defc ^:private accents*
   "The accents of offset lines `spec` (see `gol/look`): lines of their
   own colour, opacity and width, by number from the inner side, each
@@ -77,7 +83,6 @@
   (let [accents (vec (:accents spec))
         edit    (fn [i k v] (on-change (assoc-in accents [i k] v)))
         free    (free-line (:count spec) accents)
-        plain   (dissoc spec :accents)
         on-add  (mf/use-fn
                  (mf/deps accents spec free on-change)
                  #(when (some? free)
@@ -94,7 +99,7 @@
                           :on-click on-add
                           :disabled (nil? free)
                           :icon i/add}])]
-     (for [[i {:keys [line color opacity width]}] (map-indexed vector accents)]
+     (for [[i {:keys [line color width] :as accent}] (map-indexed vector accents)]
        [:div {:key (str "accent-" i) :class (stl/css :accent)}
         [:> labelled-number* {:label (tr "workspace.options.offset-lines.accent.line")
                               :hint (tr "workspace.options.offset-lines.accent.line.hint")
@@ -112,7 +117,7 @@
                             :icon i/remove}])
         [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.accent.opacity")
                               :unit "%" :min 0 :max 100 :scale 100
-                              :value (or opacity (:opacity (gol/look plain line (:count spec))))
+                              :value (shown-opacity spec accent)
                               :disabled disabled
                               :on-change #(edit i :opacity (mth/clamp % 0 1))}]
         [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.accent.width")
