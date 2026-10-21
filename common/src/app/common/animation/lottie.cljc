@@ -624,9 +624,11 @@
     (:rect :circle) true
     (:path :bool)   (some? (:content shape))
     ;; a masked group is a precomp of its layers (see
-    ;; `lottie-masked-layers`)
+    ;; `lottie-masked-layers`); a hidden one is none, as it draws nothing
+    ;; (see `aexp/export-layer-ids`)
     :group          (if (:masked-group shape)
-                      (every? #(contains? layer-ids %) (:shapes shape))
+                      (every? #(or (contains? layer-ids %) (true? (dm/get-in objects [% :hidden])))
+                              (:shapes shape))
                       (every? #(or (contains? layer-ids %)
                                    (lottie-content? objects layer-ids (get objects %)))
                               (:shapes shape)))

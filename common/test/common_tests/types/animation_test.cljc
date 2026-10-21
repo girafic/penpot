@@ -3017,6 +3017,23 @@
                                                  " color-interpolation-filters=\"sRGB\"")))
               (str "the filter of " mode))))))
 
+(t/deftest a-masked-group-holding-a-hidden-layer-stays-vectors
+  ;; the hidden layer draws nothing: no layer of the export, no picture
+  (let [{:keys [bid gid rid did objects]} (masked-reveal)
+        shadow  {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 4
+                 :spread 0 :hidden false :color {:color "#000000" :opacity 1}}
+        objects (-> objects
+                    (assoc-in [did :hidden] true)
+                    (assoc-in [gid :shadow] [shadow]))
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe rid {:time 0 :property :x :value 0})
+                    (cta/add-keyframe rid {:time 1000 :property :x :value 200}))
+        ids     (set (aexp/export-layer-ids objects tl))
+        layer   (first (:layers (alottie/timeline->lottie tl objects {})))]
+    (t/is (not (contains? ids did)))
+    (t/is (alottie/lottie-vector-layer? objects ids gid))
+    (t/is (= ["Drop Shadow"] (mapv :nm (:ef layer))) "its shadow kept")))
+
 (t/deftest lottie-draws-a-masked-group-as-vectors
   ;; Not an image any more: its own animation plays on it.
   (let [{:keys [bid gid objects]} (masked-reveal)
