@@ -287,55 +287,154 @@
         ;; Render wasm disabled, we do nothing
         (rx/empty)))))
 
+(defn- assoc-bundle
+  "`state` with the view-only `bundle` (see `load-bundle`) as what the
+  viewer shows."
+  [state {:keys [project file team share-links libraries users permissions thumbnails]}]
+  (let [pages   (->> (dm/get-in file [:data :pages])
+                     (map (fn [page-id]
+                            (let [data (get-in file [:data :pages-index page-id])]
+                              [page-id (assoc data
+                                              :frames (ctt/get-viewer-frames (:objects data))
+                                              :all-frames (ctt/get-viewer-frames (:objects data) {:all-frames? true}))])))
+                     (into {}))
+        team-id (:id team)
+        team    (assoc team :members users)]
+    (-> state
+        (assoc :share-links share-links)
+        (assoc :current-team-id team-id)
+        (assoc :teams {team-id team})
+        (assoc :files (-> (d/index-by :id libraries)
+                          (assoc (:id file) file)))
+        (assoc :viewer {:libraries (d/index-by :id libraries)
+                        :users (d/index-by :id users)
+                        :permissions permissions
+                        :project project
+                        :pages pages
+                        :thumbnails thumbnails
+                        :file file}))))
+
 (defn bundle-fetched
-  [{:keys [project file team share-links libraries users permissions thumbnails] :as bundle}]
-  (let [pages (->> (dm/get-in file [:data :pages])
-                   (map (fn [page-id]
-                          (let [data (get-in file [:data :pages-index page-id])]
-                            [page-id (assoc data
-                                            :frames (ctt/get-viewer-frames (:objects data))
-                                            :all-frames (ctt/get-viewer-frames (:objects data) {:all-frames? true}))])))
-                   (into {}))]
+  [bundle]
+  (ptk/reify ::bundle-fetched
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-bundle state bundle))
 
-    (ptk/reify ::bundle-fetched
-      ptk/UpdateEvent
-      (update [_ state]
-        (let [team-id (:id team)
-              team    (assoc team :members users)]
-          (-> state
-              (assoc :share-links share-links)
-              (assoc :current-team-id team-id)
-              (assoc :teams {team-id team})
-              (assoc :files (-> (d/index-by :id libraries)
-                                (assoc (:id file) file)))
-              (assoc :viewer {:libraries (d/index-by :id libraries)
-                              :users (d/index-by :id users)
-                              :permissions permissions
-                              :project project
-                              :pages pages
-                              :thumbnails thumbnails
-                              :file file}))))
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [route    (:route state)
+            qparams  (:query-params route)
+            index    (some-> (rt/get-query-param qparams :index) parse-long)
+            frame-id (some-> (:frame-id qparams) uuid/parse)
+            page-id (some-> (rt/get-query-param qparams :page-id) uuid/parse)
+            file-id (some-> (rt/get-query-param qparams :file-id) uuid/parse)]
 
-      ptk/WatchEvent
-      (watch [_ state _]
-        (let [route    (:route state)
-              qparams  (:query-params route)
-              index    (some-> (rt/get-query-param qparams :index) parse-long)
-              frame-id (some-> (:frame-id qparams) uuid/parse)
-              page-id (some-> (rt/get-query-param qparams :page-id) uuid/parse)
-              file-id (some-> (rt/get-query-param qparams :file-id) uuid/parse)]
+        (rx/merge
+         (rx/of (case (:zoom qparams)
+                  "fit" zoom-to-fit
+                  "fill" zoom-to-fill
+                  nil))
+         (rx/of
+          (update-page-position-data file-id page-id)
+          (cond
+            (some? frame-id) (go-to-frame frame-id)
+            (some? index) (go-to-frame-by-index index)
+            :else (go-to-frame-auto))))))))
 
-          (rx/merge
-           (rx/of (case (:zoom qparams)
-                    "fit" zoom-to-fit
-                    "fill" zoom-to-fill
-                    nil))
-           (rx/of
-            (update-page-position-data file-id page-id)
-            (cond
-              (some? frame-id) (go-to-frame frame-id)
-              (some? index) (go-to-frame-by-index index)
-              :else (go-to-frame-auto)))))))))
+;; --- The preview of a prototype in the workspace
+
+(defn preview?
+  "Whether the viewer shows as the preview of the prototype in a window
+  of the workspace (`?preview=true`, see
+  `app.main.ui.workspace.prototype-preview`)."
+  [state]
+  (contains? state :viewer-preview))
+
+(defn start-preview
+  "The viewer as the preview of the prototype: its screens replace each
+  other in the history of the browser, which it shares with the
+  workspace, and go back and forth in a history of their own (see
+  `preview-screen`, `preview-step`)."
+  []
+  (ptk/reify ::start-preview
+    ptk/UpdateEvent
+    (update [_ state]
+      (-> state
+          (assoc ::rt/replace-only true)
+          (assoc :viewer-preview {:back [] :forward []})))))
+
+(defn preview-screen
+  "The screen at `index` on show in the preview: the one it leaves goes
+  to its history, unless it got there going back or forth in it."
+  [index]
+  (ptk/reify ::preview-screen
+    ptk/UpdateEvent
+    (update [_ state]
+      (d/update-when state :viewer-preview
+                     (fn [{:keys [going] :as history}]
+                       (let [current (:index history)]
+                         (cond
+                           (or (nil? current) (= index current))
+                           (assoc history :index index)
+
+                           (= index going)
+                           (-> history (assoc :index index) (dissoc :going))
+
+                           :else
+                           (-> history
+                               (update :back conj current)
+                               (assoc :forward [] :index index)))))))))
+
+(defn preview-step
+  "The preview back to the screen before (`:back`) or forth to the one
+  after (`:forward`), in its history."
+  [direction]
+  (ptk/reify ::preview-step
+    ptk/UpdateEvent
+    (update [_ state]
+      (d/update-when state :viewer-preview
+                     (fn [{:keys [back forward index] :as history}]
+                       (let [[from to] (if (= :back direction) [:back :forward] [:forward :back])
+                             target    (peek (if (= :back direction) back forward))]
+                         (if (and (some? target) (some? index))
+                           (-> history
+                               (update from pop)
+                               (update to conj index)
+                               (assoc :going target))
+                           history)))))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when-let [target (dm/get-in state [:viewer-preview :going])]
+        (rx/of (go-to-frame-by-index target))))))
+
+(defn- bundle-refreshed
+  [bundle]
+  (ptk/reify ::bundle-refreshed
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-bundle state bundle))))
+
+(defn refresh-bundle
+  "The file shown fetched again, as it was saved last, the screen and the
+  overlays on it staying: the preview of the prototype, as the workspace
+  saves."
+  []
+  (ptk/reify ::refresh-bundle
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [params   (rt/get-params state)
+            file-id  (some-> (rt/get-query-param params :file-id) uuid/parse*)
+            page-id  (some-> (rt/get-query-param params :page-id) uuid/parse*)
+            share-id (some-> (rt/get-query-param params :share-id) uuid/parse*)]
+        (when (some? file-id)
+          (->> (load-bundle {:file-id file-id :share-id share-id})
+               (rx/mapcat
+                (fn [{:keys [fonts] :as bundle}]
+                  (rx/of (df/fonts-fetched fonts)
+                         (bundle-refreshed bundle)
+                         (update-page-position-data file-id page-id))))))))))
 
 (defn fetch-comment-threads
   [{:keys [file-id page-id share-id] :as params}]

@@ -400,7 +400,7 @@
                           :zoom zoom}])]])
 
 (mf/defc viewer-content*
-  [{:keys [data page-id share-id section index interactions-mode share]}]
+  [{:keys [data page-id share-id section index interactions-mode share preview]}]
   (let [{:keys [file users project permissions]} data
         allowed (or
                  (= section :interactions)
@@ -611,6 +611,45 @@
           #(doseq [key keys]
              (events/unlistenByKey key)))))
 
+    ;; As the preview of the prototype in the workspace (see
+    ;; `app.main.ui.workspace.prototype-preview`): the board fitted in its
+    ;; window as it resizes, the screens in a history of their own, and
+    ;; what the workspace asks of it (to show what it saved, to go back
+    ;; or forth); Shift + Space in it closes it, as in the workspace.
+    (mf/with-effect [preview index]
+      (when (and preview (some? index))
+        (st/emit! (dv/preview-screen index))))
+
+    (mf/with-effect [preview (:viewport-size local) (:id frame)]
+      (when (and preview (some? frame))
+        (st/emit! dv/zoom-to-fit)))
+
+    (mf/with-effect [preview]
+      (when preview
+        (let [parent (.-parent js/window)
+              origin (.. js/window -location -origin)
+
+              on-message
+              (fn [^js event]
+                (when (and (identical? (.-source event) parent)
+                           (= (.-origin event) origin))
+                  (case (some-> (.-data event) (unchecked-get "type"))
+                    "penpot:preview-refresh" (st/emit! (dv/refresh-bundle))
+                    "penpot:preview-back"    (st/emit! (dv/preview-step :back))
+                    "penpot:preview-forward" (st/emit! (dv/preview-step :forward))
+                    nil)))
+
+              on-key-down
+              (fn [^js event]
+                (when (and (kbd/space? event) (kbd/shift? event))
+                  (dom/prevent-default event)
+                  (.postMessage parent #js {:type "penpot:preview-close"} origin)))]
+          (.addEventListener js/window "message" on-message)
+          (.addEventListener js/window "keydown" on-key-down)
+          (fn []
+            (.removeEventListener js/window "message" on-message)
+            (.removeEventListener js/window "keydown" on-key-down)))))
+
     ;; Set the page title
     (mf/use-effect
      (mf/deps (:name file))
@@ -775,7 +814,8 @@
               :viewer-layout (not= section :inspect)
               :inspect-layout (= section :inspect))
       :data-fullscreen fullscreen?
-      :data-force-visible (:show-thumbnails local)}
+      :data-force-visible (:show-thumbnails local)
+      :data-preview (true? preview)}
 
 
      [:div {:class (stl/css :viewer-content)}
@@ -841,26 +881,30 @@
               :animated (some? clock)
               :sound board-sound?}]]))]]
 
-     [:& header/header {:project project
-                        :index index
-                        :file file
-                        :page page
-                        :frame frame
-                        :permissions permissions
-                        :zoom zoom
-                        :section section
-                        :shown-thumbnails (:show-thumbnails local)
-                        :interactions-mode interactions-mode
-                        :share share}]]))
+     (when-not preview
+       [:& header/header {:project project
+                          :index index
+                          :file file
+                          :page page
+                          :frame frame
+                          :permissions permissions
+                          :zoom zoom
+                          :section section
+                          :shown-thumbnails (:show-thumbnails local)
+                          :interactions-mode interactions-mode
+                          :share share}])]))
 
 ;; --- Component: Viewer
 
 (mf/defc viewer*
-  [{:keys [file-id share-id page-id] :as props}]
+  [{:keys [file-id share-id page-id preview] :as props}]
   (mf/with-effect [file-id page-id share-id]
     (let [params {:file-id file-id
                   :page-id page-id
                   :share-id share-id}]
+      ;; before it shows a screen, which it then shows in its own history
+      (when preview
+        (st/emit! (dv/start-preview)))
       (st/emit! (dv/initialize params))
       (fn []
         (st/emit! (dv/finalize params)))))

@@ -1,0 +1,113 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/_sizes.scss" as *;
+@use "ds/_borders.scss" as *;
+@use "ds/typography.scss" as t;
+
+// The window of the preview of the prototype, over the workspace and its
+// panels: its bar on top, then the view mode, on black where the board
+// leaves room. The sizes of its bar and border come inline.
+.window {
+  position: fixed;
+  z-index: calc(var(--timeline-maximized-z) + 3);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: var(--preview-border) solid var(--panel-border-color);
+  border-radius: $br-12;
+  background-color: var(--color-static-black);
+  box-shadow: var(--el-shadow-dark);
+}
+
+// The bar that moves the window: back, forth and start again at its
+// left, the board it started from, open in the view mode and close at
+// its right.
+.bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-xs);
+  box-sizing: border-box;
+  block-size: var(--preview-bar);
+  padding-inline: var(--sp-xs);
+  background-color: var(--color-background-primary);
+  border-block-end: var(--preview-border) solid var(--panel-border-color);
+  cursor: grab;
+  touch-action: none;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.buttons {
+  display: flex;
+  flex: none;
+  align-items: center;
+  cursor: default;
+}
+
+.title {
+  @include t.use-typography("body-small");
+
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--color-foreground-secondary);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  position: relative;
+  display: grid;
+  flex: 1;
+  place-items: center;
+  min-block-size: 0;
+}
+
+.frame {
+  inline-size: 100%;
+  block-size: 100%;
+  border: none;
+}
+
+// While it moves or resizes, the pointer stays with the window, not the
+// view mode under it.
+.dragging .frame {
+  pointer-events: none;
+}
+
+.saving {
+  @include t.use-typography("body-small");
+
+  color: var(--color-foreground-secondary);
+}
+
+// The corners at its bottom, which resize it.
+.corner {
+  position: absolute;
+  z-index: 1;
+  inline-size: $sz-12;
+  block-size: $sz-12;
+  touch-action: none;
+}
+
+.bottom-left {
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  cursor: nesw-resize;
+}
+
+.bottom-right {
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  cursor: nwse-resize;
+}

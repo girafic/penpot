@@ -218,7 +218,10 @@
              imode    (or (some-> (:interactions-mode params) keyword)
                           :show-on-click)
              frame-id (some-> (:frame-id params) uuid/parse*)
-             share    (:share params)]
+             share    (:share params)
+             ;; in a window of the workspace (see
+             ;; `app.main.ui.workspace.prototype-preview`)
+             preview  (= "true" (rt/get-query-param params :preview))]
 
          [:? {}
           [:> viewer-page*
@@ -229,7 +232,8 @@
             :index index
             :share-id share-id
             :interactions-mode imode
-            :share share}]])
+            :share share
+            :preview preview}]])
 
 
        :frame-preview

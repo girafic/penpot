@@ -33,6 +33,7 @@
    [app.main.ui.workspace.nudge]
    [app.main.ui.workspace.palette :refer [palette*]]
    [app.main.ui.workspace.plugins]
+   [app.main.ui.workspace.prototype-preview :refer [prototype-preview*]]
    [app.main.ui.workspace.sidebar :refer [sidebar*]]
    [app.main.ui.workspace.sidebar.history :refer [history-toolbox*]]
    [app.main.ui.workspace.timeline :refer [timeline*]]
@@ -186,7 +187,10 @@
                      :file file
                      :selected selected
                      :section options-mode
-                     :drawing-tool (get drawing :tool)}])]))
+                     :drawing-tool (get drawing :tool)}])
+
+     ;; the prototype in a window over it all (Shift + Space)
+     [:> prototype-preview* {:file-id (get file :id)}]]))
 
 (mf/defc workspace-loader*
   {::mf/private true}

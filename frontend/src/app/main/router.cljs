@@ -124,15 +124,19 @@
 
     ptk/EffectEvent
     (effect [_ state _]
-      (let [router (:router state)
-            path   (resolve router id params)]
+      (let [router   (:router state)
+            path     (resolve router id params)
+            ;; an app embedded in another (the preview of a prototype in
+            ;; the workspace) keeps the history of the browser, which
+            ;; they share, as it is
+            replace? (or (true? replace) (true? (::replace-only state)))]
 
         (if ^boolean new-window
           (let [name   (or (::window-name options) "_blank")
                 uri    (assoc cf/public-uri :query (some-> path (subs 1)))]
             (dom/open-new-window uri name nil))
           (ts/asap
-           #(if ^boolean replace
+           #(if ^boolean replace?
               (bhistory/replace-token! history-path-prefix path)
               (bhistory/set-token! history-path-prefix path))))))))
 

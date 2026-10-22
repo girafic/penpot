@@ -243,6 +243,27 @@
   }
 }
 
+/** PREVIEW: in a window of the workspace, the board alone fitted in it */
+[data-preview="true"] {
+  grid-template-rows: 1fr;
+  height: 100vh;
+}
+
+[data-preview="true"] .viewer-content {
+  grid-row: 1 / span 1;
+  background-color: var(--color-static-black);
+}
+
+[data-preview="true"] .viewer-section {
+  height: 100vh;
+}
+
+[data-preview="true"] .viewer-go-next,
+[data-preview="true"] .viewer-go-prev,
+[data-preview="true"] .viewer-bottom {
+  display: none;
+}
+
 /** FULLSCREEN */
 [data-fullscreen="true"] .viewer-bottom {
   transform: translateY(deprecated.$s-40);

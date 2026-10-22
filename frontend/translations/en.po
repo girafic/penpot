@@ -5303,6 +5303,9 @@ msgstr "Go to viewer interactions section"
 msgid "shortcuts.open-viewer"
 msgstr "Go to viewer interactions section"
 
+msgid "shortcuts.toggle-prototype-preview"
+msgstr "Preview the prototype"
+
 #: src/app/main/data/viewer/shortcuts.cljs:104
 msgid "shortcuts.open-workspace"
 msgstr "Go to workspace"
@@ -9348,6 +9351,33 @@ msgstr "Hide the back face"
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.perspective"
 msgstr "Perspective"
+
+msgid "workspace.preview.title"
+msgstr "Preview"
+
+msgid "workspace.preview.move"
+msgstr "Drag to move, double-click to fit it to the board again"
+
+msgid "workspace.preview.resize"
+msgstr "Drag to resize"
+
+msgid "workspace.preview.back"
+msgstr "Back"
+
+msgid "workspace.preview.forward"
+msgstr "Forward"
+
+msgid "workspace.preview.restart"
+msgstr "Restart"
+
+msgid "workspace.preview.open"
+msgstr "Open in view mode"
+
+msgid "workspace.preview.close"
+msgstr "Close preview (Shift+Space)"
+
+msgid "workspace.preview.saving"
+msgstr "Saving…"
 
 msgid "workspace.options.scene"
 msgstr "3D view"

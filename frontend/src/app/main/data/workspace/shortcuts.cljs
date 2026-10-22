@@ -22,6 +22,7 @@
    [app.main.data.workspace.drawing.common :as dwdc]
    [app.main.data.workspace.layers :as dwly]
    [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.prototype-preview :as dwpp]
    [app.main.data.workspace.shape-layout :as dwsl]
    [app.main.data.workspace.shapes :as dws]
    [app.main.data.workspace.text.shortcuts :as dwtxts]
@@ -745,6 +746,13 @@
                           :subsections [:navigation-workspace]
                           :section [:workspace]
                           :fn #(st/emit! (dcm/go-to-viewer))}
+
+   :toggle-prototype-preview {:tooltip (ds/shift "Space")
+                              :label (fn [] (tr "shortcuts.toggle-prototype-preview"))
+                              :command "shift+space"
+                              :subsections [:navigation-workspace]
+                              :section [:workspace]
+                              :fn #(st/emit! (dwpp/toggle-preview))}
 
    :open-inspect         {:tooltip "G I"
                           :label (fn [] (tr "shortcuts.open-inspect"))

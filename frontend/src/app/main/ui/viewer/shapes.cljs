@@ -141,7 +141,10 @@
       (st/emit! (dv/close-overlay dest-frame-id (:animation interaction))))
 
     :prev-screen
-    (st/emit! (rt/nav-back-local))
+    ;; the preview of the prototype in the workspace, in its own history
+    (st/emit! (if (dv/preview? @st/state)
+                (dv/preview-step :back)
+                (rt/nav-back-local)))
 
     :open-url
     (st/emit! (dom/open-new-window (:url interaction)))

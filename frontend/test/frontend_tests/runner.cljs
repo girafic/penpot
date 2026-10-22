@@ -32,6 +32,7 @@
    [frontend-tests.data.persistence-retry-test]
    [frontend-tests.data.persistence-test]
    [frontend-tests.data.profile-test]
+   [frontend-tests.data.prototype-preview-test]
    [frontend-tests.data.repo-test]
    [frontend-tests.data.store-test]
    [frontend-tests.data.svg-upload-test]
@@ -217,6 +218,7 @@
    'frontend-tests.data.persistence-retry-test
    'frontend-tests.data.persistence-test
    'frontend-tests.data.profile-test
+   'frontend-tests.data.prototype-preview-test
    'frontend-tests.data.repo-test
    'frontend-tests.data.store-test
    'frontend-tests.data.exports-assets-test
