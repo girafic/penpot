@@ -6846,6 +6846,42 @@ msgstr "Choose a layer"
 msgid "workspace.animation.follow-pick"
 msgstr "Pick the leader on the canvas or in the layers"
 
+msgid "workspace.animation.path-follow"
+msgstr "Path"
+
+msgid "workspace.animation.add-path-follow"
+msgstr "Ride a path"
+
+msgid "workspace.animation.remove-path-follow"
+msgstr "Ride no path"
+
+msgid "workspace.animation.path-follow-path"
+msgstr "Path"
+
+msgid "workspace.animation.path-follow-pick"
+msgstr "Pick the path on the canvas or in the layers"
+
+msgid "workspace.animation.path-progress"
+msgstr "Progress"
+
+msgid "workspace.animation.path-follow-orient"
+msgstr "Turn along the path"
+
+msgid "workspace.animation.path-follow-orient.hint"
+msgstr "The layer turns as the path goes, its own rotation on top"
+
+msgid "workspace.animation.path-follow-turn"
+msgstr "Turn"
+
+msgid "workspace.animation.path-follow-hint"
+msgstr "Its own X and Y keyframes don't play while it rides the path. Past 100% it goes round a closed path again."
+
+msgid "workspace.animation.rides"
+msgstr "Rides %s"
+
+msgid "workspace.animation.rides-hint"
+msgstr "The path it rides: click to select it"
+
 msgid "workspace.animation.wiggle"
 msgstr "Wiggle"
 

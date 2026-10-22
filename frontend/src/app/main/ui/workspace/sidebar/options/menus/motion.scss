@@ -190,6 +190,14 @@
   color: var(--color-foreground-secondary);
 }
 
+// What a layer riding a path plays no more.
+.path-hint {
+  @include t.use-typography("body-small");
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
+
 .reach-new-goal {
   align-self: flex-start;
 }

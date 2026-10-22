@@ -12,6 +12,7 @@
    [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.geom.modifiers :as cgm]
+   [app.common.geom.path-walk :as gpw]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
@@ -7226,3 +7227,125 @@
     (t/is (nil? (get-in once [:tracks wheel :wiggles])))
     (t/is (= (map #(get-in (cta/values-at once %) [wheel :rotation]) (range 0 1001 50))
              (map #(get-in (cta/values-at twice %) [wheel :rotation]) (range 0 1001 50))))))
+
+;; LAYERS RIDING A PATH (Penpot Motion)
+
+(defn- road-and-car
+  "A board at 0,0 with a road along y 300 from x 100 to 500, a ring (a
+  circle of radius 100 round 400,300) and a car of 40 × 20 at 50,50
+  riding the road, its progress from 0 to 1 over a second, evenly."
+  []
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 800 :height 600})
+        road    (cts/setup-shape {:type :path :content (path/from-string "M 100 300 L 500 300")})
+        ring    (cts/setup-shape {:type :circle :x 300 :y 200 :width 200 :height 200})
+        car     (cts/setup-shape {:type :rect :x 50 :y 50 :width 40 :height 20})
+        trailer (cts/setup-shape {:type :rect :x 0 :y 50 :width 30 :height 20})
+        bid     (:id board)
+        shapes  [road ring car trailer]
+        objects (into {bid (assoc board :shapes (mapv :id shapes))}
+                      (map (fn [s] [(:id s) (assoc s :frame-id bid :parent-id bid)]))
+                      shapes)
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/set-path-follow (:id car) {:path (:id road)})
+                    (cta/add-keyframe (:id car) {:time 0 :property :path-progress :value 0 :easing :linear})
+                    (cta/add-keyframe (:id car) {:time 1000 :property :path-progress :value 1}))]
+    {:car (:id car) :road (:id road) :ring (:id ring) :trailer (:id trailer) :board bid
+     :timeline tl :objects objects}))
+
+(defn- heading
+  "Which way the layer `id` of `objects` points as `timeline` shows it at
+  `time`: the angle of its x axis, degrees within 0 to 360."
+  [timeline objects id time]
+  (let [o (point-at timeline objects id time (gpt/point 0 0))
+        x (point-at timeline objects id time (gpt/point 1 0))]
+    (mod (mth/degrees (mth/atan2 (- (:y x) (:y o)) (- (:x x) (:x o)))) 360)))
+
+(t/deftest a-path-follow-is-stored-without-defaults
+  (let [{:keys [car road trailer timeline]} (road-and-car)]
+    (t/is (cta/valid-timeline? timeline))
+    (t/is (= {:path road} (get-in timeline [:tracks car :path-follow])))
+    (t/is (= {:path road :orient false :turn 0 :progress 0} (cta/path-follow-of timeline car)))
+    (t/testing "a layer follows a leader or rides a path, not both"
+      (t/is (nil? (get-in (cta/set-follow timeline car {:leader trailer}) [:tracks car :path-follow])))
+      (t/is (nil? (get-in (-> timeline
+                              (cta/set-follow trailer {:leader car})
+                              (cta/set-path-follow trailer {:path road}))
+                          [:tracks trailer :follow]))))
+    (t/testing "riding none drops the keyframes of its progress, and the track left empty"
+      (t/is (nil? (get-in (cta/set-path-follow timeline car nil) [:tracks car]))))
+    (t/testing "the path removed, it rides none"
+      (t/is (nil? (cta/path-follow-of (cta/remove-shapes timeline [road]) car))))))
+
+(t/deftest a-layer-rides-its-path
+  (let [{:keys [car timeline objects]} (road-and-car)]
+    (t/is (near? (gpt/point 100 300) (pivot-at timeline objects car 0)))
+    (t/is (near? (gpt/point 300 300) (pivot-at timeline objects car 500)))
+    (t/is (near? (gpt/point 500 300) (pivot-at timeline objects car 1000)))
+    (t/testing "its own position keyframes do not play"
+      (let [moving (-> timeline
+                       (cta/add-keyframe car {:time 0 :property :x :value 0})
+                       (cta/add-keyframe car {:time 1000 :property :x :value 300}))]
+        (t/is (near? (gpt/point 300 300) (pivot-at moving objects car 500)))))
+    (t/testing "an open path holds its ends"
+      (let [past (cta/set-path-follow timeline car {:path (:road (road-and-car)) :progress 1.5})]
+        (t/is (near? (gpt/point 300 300) (pivot-at timeline objects car 500)))
+        (t/is (some? past))))))
+
+(t/deftest a-layer-turns-along-its-path
+  (let [{:keys [car ring timeline objects]} (road-and-car)
+        tl   (cta/set-path-follow timeline car {:path ring :orient true})
+        walk (gpw/walker (get objects ring))]
+    (doseq [[t share] [[0 0] [250 0.25] [600 0.6]]]
+      (let [{:keys [point angle]} ((:at walk) share)]
+        (t/is (near? point (pivot-at tl objects car t)) (str "on the ring at " t))
+        (t/is (mth/close? (mod angle 360) (heading tl objects car t) 0.5) (str "along it at " t))))
+    (t/testing "a turn of its own on top"
+      (let [turned (cta/set-path-follow timeline car {:path ring :orient true :turn 90})]
+        (t/is (mth/close? (mod (+ 90 (:angle ((:at walk) 0.25))) 360) (heading turned objects car 250) 0.5))))
+    (t/testing "past the end of a closed outline, round again"
+      (let [laps (-> tl
+                     (cta/remove-property car :path-progress nil)
+                     (cta/add-keyframe car {:time 0 :property :path-progress :value 1.25}))]
+        (t/is (near? (:point ((:at walk) 0.25)) (pivot-at laps objects car 0)))))))
+
+(t/deftest a-layer-rides-its-path-as-it-moves
+  (let [{:keys [car road timeline objects]} (road-and-car)
+        tl (-> timeline
+               (cta/remove-property car :path-progress nil)
+               (cta/set-path-follow car {:path road :progress 0.5})
+               (cta/add-keyframe road {:time 0 :property :x :value 100 :easing :linear})
+               (cta/add-keyframe road {:time 1000 :property :x :value 200}))]
+    (t/is (near? (gpt/point 300 300) (pivot-at tl objects car 0)))
+    (t/is (near? (gpt/point 400 300) (pivot-at tl objects car 1000)))))
+
+(t/deftest a-layer-follows-one-riding-a-path
+  (let [{:keys [car trailer timeline objects]} (road-and-car)
+        tl    (cta/set-follow timeline trailer {:leader car})
+        moved (gpt/subtract (pivot-at tl objects trailer 1000) (pivot-at tl objects trailer 0))]
+    (t/is (near? (gpt/point 400 0) moved) "along with it")))
+
+(t/deftest a-path-ridden-bakes-into-keyframes
+  (let [{:keys [car ring timeline objects]} (road-and-car)
+        tl    (cta/set-path-follow timeline car {:path ring :orient true})
+        baked (ctaf/bake-follows tl objects)
+        track (get-in baked [:tracks car])]
+    (t/is (nil? (:path-follow track)))
+    (t/is (not-any? #(= :path-progress (:property %)) (:keyframes track)))
+    (t/is (some #(= :rotation (:property %)) (:keyframes track)))
+    (doseq [t [0 330 700 1000]]
+      (let [live  (pivot-at tl objects car t)
+            again (pivot-at baked objects car t)]
+        (t/is (< (gpt/distance live again) 0.6) (str "where it rides, at " t))))))
+
+(t/deftest what-a-layer-can-ride
+  (let [{:keys [car road ring board timeline objects]} (road-and-car)
+        text  (cts/setup-shape {:type :text :x 0 :y 0 :width 10 :height 10})
+        objs  (assoc objects (:id text) (assoc text :frame-id board :parent-id board))]
+    (t/is (cltl/can-ride-path? objs timeline car road))
+    (t/is (cltl/can-ride-path? objs timeline car ring))
+    (t/is (not (cltl/can-ride-path? objs timeline car car)) "not itself")
+    (t/is (not (cltl/can-ride-path? objs timeline car board)) "not its board")
+    (t/is (not (cltl/can-ride-path? objs timeline car (:id text))) "nor a shape without an outline")
+    (t/is (not (cltl/can-ride-path? objs (cta/set-path-follow timeline road {:path car}) car road))
+          "nor a path riding it")
+    (t/is (= #{road ring} (into #{} (filter #{road ring}) (cltl/ride-paths objs timeline car))))))

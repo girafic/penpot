@@ -1535,6 +1535,41 @@
   (t/is (empty? (cta/links-of (get (timelines (delete (linking-file) :rect)) (thi/id :board-a))
                               (thi/id :dot)))))
 
+(defn- riding-file
+  "`animated-file` with a road in board A (a path) that a dot rides."
+  []
+  (let [file (-> (animated-file)
+                 (ths/add-sample-shape :road :type :path :parent-label :board-a
+                                       :content (path/from-string "M 100 300 L 500 300"))
+                 (ths/add-sample-shape :dot :type :rect :parent-label :board-a
+                                       :x 300 :y 200 :width 10 :height 10))
+        a    (thi/id :board-a)
+        tl   (cta/set-path-follow (get (timelines file) a) (thi/id :dot) {:path (thi/id :road) :orient true})]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline a tl)))))
+
+(t/deftest a-copied-board-rides-in-its-copy
+  (let [file     (riding-file)
+        page     (thf/current-page file)
+        a        (thi/id :board-a)
+        changes  (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                 (:objects page) page #{a} (gpt/point 500 0)
+                                                 {(:id file) file} (:data file) (:id file))
+        copy-of  (into {} (keep #(when (= :add-obj (:type %)) [(:old-id %) (-> % :obj :id)])) (:redo-changes changes))
+        file     (thf/apply-changes file changes)
+        tl       (get (timelines file) (copy-of a))]
+    (t/is (= {:path (copy-of (thi/id :road)) :orient true}
+             (get-in tl [:tracks (copy-of (thi/id :dot)) :path-follow]))
+          "the copy of its path")
+    (t/is (cta/valid-timeline? tl))))
+
+(t/deftest a-path-that-leaves-the-board-or-goes-is-ridden-no-more
+  (t/is (nil? (cta/path-follow-of (get (timelines (relocate (riding-file) :road :board-b)) (thi/id :board-a))
+                                  (thi/id :dot))))
+  (t/is (nil? (cta/path-follow-of (get (timelines (delete (riding-file) :road)) (thi/id :board-a))
+                                  (thi/id :dot)))))
+
 (defn- reaching-board-file
   "`animated-file` with an arm in board A (an upper arm, a forearm
   following it and a hand following that) whose hand reaches a ball."

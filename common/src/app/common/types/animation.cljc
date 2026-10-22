@@ -70,12 +70,16 @@
     ;; path trim: the part of the outline the strokes are drawn along
     :trim-start :trim-end :trim-offset
     ;; the outline of a path, in its own frame (see `ctao/outline-of`)
-    :content})
+    :content
+    ;; how far along the path it rides a layer is, a share of its way
+    ;; (see `schema:path-follow`)
+    :path-progress})
 
 (def style-properties
   "The properties the keyframe entries of an animation style animate: all
-  but the outline of a path, which no value relative to a layer holds."
-  (disj animatable-properties :content))
+  but the outline of a path, which no value relative to a layer holds,
+  and the progress along a path, which only a layer riding one has."
+  (disj animatable-properties :content :path-progress))
 
 (def trim-properties
   "Path trim, as fractions of the outline: the strokes are drawn from
@@ -235,7 +239,8 @@
           keyframe-entries)]
    [:value
     (into [:map {:title "ValueKeyframe"}
-           [:property [::sm/one-of style-properties]]
+           ;; all but the outline, the progress along a path too
+           [:property [::sm/one-of (disj animatable-properties :content)]]
            [:value [:or ::sm/safe-number clr/schema:hex-color]]
            ;; Motion path: for `:x` and `:y`, how far along its axis the
            ;; curve leaves the keyframe towards the next one (`:path-out`)
@@ -426,6 +431,20 @@
    [:bend {:optional true} [:enum :cw :ccw]]
    [:turn {:optional true} [:enum :chain :keep :goal]]])
 
+(def schema:path-follow
+  "How a layer rides the outline of another shape of its board, its path
+  (see `path-follow-of`): its pivot on the outline as far along it as its
+  `:path-progress` says (a keyframed share of the way, `:progress` at
+  rest; past the end of a closed outline it goes round again), turned
+  along the outline with `:orient`, by `:turn` degrees more. Its own
+  position keyframes do not play while it rides. No orient, no turn and
+  the start are stored as absence."
+  [:map {:title "AnimationPathFollow"}
+   [:path ::sm/uuid]
+   [:orient {:optional true} :boolean]
+   [:turn {:optional true} ::sm/safe-number]
+   [:progress {:optional true} ::sm/safe-number]])
+
 (def link-properties
   "The rows a property link drives and reads (see `schema:link`): those
   of one number each."
@@ -513,6 +532,8 @@
    [:links {:optional true} [:vector {:gen/max 2} schema:link]]
    ;; its properties that shake (see `schema:wiggle`), one each
    [:wiggles {:optional true} [:vector {:gen/max 2} schema:wiggle]]
+   ;; the outline it rides (see `schema:path-follow`)
+   [:path-follow {:optional true} schema:path-follow]
    ;; How the trim of a group draws the layers in it (see
    ;; `play-group-trims`): all at once, the default, or one after another
    [:trim-mode {:optional true} [::sm/one-of #{:together :in-turn}]]
@@ -1111,6 +1132,7 @@
        (nil? (:ik track))
        (empty? (:links track))
        (empty? (:wiggles track))
+       (nil? (:path-follow track))
        (not (:guide track))))
 
 (defn set-track-origin
@@ -1145,8 +1167,13 @@
     (let [follow (-> (select-keys follow [:leader :from :position :rotation :scale :tilt :opacity :delay])
                      (d/update-when :delay #(int (mth/round %))))
           stored (into {} (remove (fn [[k v]] (= v (get follow-defaults k ::none)))) follow)]
+      ;; a layer follows a leader or rides a path, not both: the keyframes
+      ;; of its progress along the path go with it
       (-> (ensure-track timeline shape-id)
-          (assoc-in [:tracks shape-id :follow] stored)))
+          (assoc-in [:tracks shape-id :follow] stored)
+          (update-in [:tracks shape-id] dissoc :path-follow)
+          (update-in [:tracks shape-id :keyframes]
+                     (partial filterv #(not= :path-progress (:property %))))))
     (if-let [track (get-track timeline shape-id)]
       (store-track timeline shape-id (dissoc track :follow))
       timeline)))
@@ -1247,6 +1274,44 @@
     (let [links (filterv #(not= property (:property %)) (:links track))]
       (store-track timeline shape-id (if (seq links) (assoc track :links links) (dissoc track :links))))
     timeline))
+
+(def ^:private path-follow-defaults
+  {:orient false :turn 0 :progress 0})
+
+(defn path-follow-of
+  "The outline `shape-id` rides in `timeline` (see `schema:path-follow`),
+  with the defaults; nil when it rides none."
+  [timeline shape-id]
+  (when-let [path-follow (dm/get-in timeline [:tracks shape-id :path-follow])]
+    (merge path-follow-defaults path-follow)))
+
+(defn path-progress-rest
+  "How far along its path `shape-id` of `timeline` is without keyframes
+  of its progress (see `schema:path-follow`)."
+  [timeline shape-id]
+  (dm/get-in timeline [:tracks shape-id :path-follow :progress] 0))
+
+(declare remove-property)
+
+(defn set-path-follow
+  "`timeline` with `shape-id` riding the outline of the shape `:path` of
+  `path-follow` (see `schema:path-follow`), following no leader then; or
+  riding none for nil, without the keyframes of its progress. The
+  defaults are left out."
+  [timeline shape-id path-follow]
+  (if (some? (:path path-follow))
+    (let [path-follow (select-keys path-follow [:path :orient :turn :progress])
+          stored      (into {} (remove (fn [[k v]] (or (nil? v) (= v (get path-follow-defaults k ::none)))))
+                            path-follow)]
+      (-> (ensure-track timeline shape-id)
+          (assoc-in [:tracks shape-id :path-follow] stored)
+          (update-in [:tracks shape-id] dissoc :follow)))
+    (if (some? (get-track timeline shape-id))
+      (let [timeline (remove-property timeline shape-id :path-progress nil)]
+        (if-let [track (get-track timeline shape-id)]
+          (store-track timeline shape-id (dissoc track :path-follow))
+          timeline))
+      timeline)))
 
 (def ^:private wiggle-defaults
   {:octaves 1 :start 0 :fade 0})
@@ -3781,6 +3846,34 @@
           (into sampled)
           (into (if periodic? [] (filterv #(> (:time %) hi) row)))))))
 
+(defn- play-path-follows
+  "`timeline` (with its tracks as they play) without the position
+  keyframes of the layers that ride a path of `objects` (see
+  `schema:path-follow`): the path places them (see
+  `app.common.types.animation-follow/timeline->modif-tree`); and without
+  the keyframes of a progress along a path where there is none to ride."
+  [timeline objects]
+  (let [progress? #(= :path-progress (:property %))
+        position? #(and (contains? #{:x :y} (:property %)) (nil? (:index %)))]
+    (if-not (some #(or (some? (:path-follow %)) (some progress? (:keyframes %))) (vals (:tracks timeline)))
+      timeline
+      (update timeline :tracks
+              (fn [tracks]
+                (reduce-kv (fn [tracks id track]
+                             (cond
+                               (contains? objects (dm/get-in track [:path-follow :path]))
+                               (assoc tracks id (-> track
+                                                    (update :keyframes (partial filterv (complement position?)))
+                                                    (d/update-when :loops disj :x :y)))
+
+                               (some progress? (:keyframes track))
+                               (assoc tracks id (update track :keyframes (partial filterv (complement progress?))))
+
+                               :else
+                               tracks))
+                           tracks
+                           tracks))))))
+
 (defn- play-wiggles
   "`timeline` (with its tracks as they play) with each wiggled row shaken
   (see `schema:wiggle`, `wiggled-row`): on top of what it plays, its own
@@ -4076,22 +4169,25 @@
     (play-group-trims
      (play-wiggles
       (play-links
-       (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
-         (update timeline :tracks
-                 (fn [tracks]
-                   (reduce-kv (fn [tracks shape-id track]
-                                (let [track (resolve-track timeline objects shape-id (visible-track track))]
-                                  ;; Nothing left to play once all of it is hidden;
-                                  ;; a track that follows, reaches or holds the
-                                  ;; pivot others turn around plays still.
-                                  (if (and (empty? (:keyframes track)) (empty? (:animations track))
-                                           (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
-                                           (empty? (:links track)) (empty? (:wiggles track)))
-                                    (dissoc tracks shape-id)
-                                    (assoc tracks shape-id track))))
-                              tracks
-                              tracks)))
-         timeline)
+       (play-path-follows
+        (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
+          (update timeline :tracks
+                  (fn [tracks]
+                    (reduce-kv (fn [tracks shape-id track]
+                                 (let [track (resolve-track timeline objects shape-id (visible-track track))]
+                                   ;; Nothing left to play once all of it is hidden;
+                                   ;; a track that follows, reaches, rides or holds
+                                   ;; the pivot others turn around plays still.
+                                   (if (and (empty? (:keyframes track)) (empty? (:animations track))
+                                            (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
+                                            (empty? (:links track)) (empty? (:wiggles track))
+                                            (nil? (:path-follow track)))
+                                     (dissoc tracks shape-id)
+                                     (assoc tracks shape-id track))))
+                               tracks
+                               tracks)))
+          timeline)
+        objects)
        objects)
       objects)
      objects)
@@ -4943,7 +5039,8 @@
 
 (defn remove-shapes
   "Drop the tracks targeting any of `shape-ids`, the follows of the
-  layers that follow them and the goals of those that reach them, and the
+  layers that follow them, the goals of those that reach them, the paths
+  of those that ride them, and the
   clocks of the component copies among them (used when shapes are
   deleted). Returns the updated timeline."
   [timeline shape-ids]
@@ -4952,8 +5049,9 @@
         timeline (reduce-kv (fn [timeline id track]
                               (as-> timeline timeline
                                 (cond-> timeline
-                                  (contains? removed (dm/get-in track [:follow :leader])) (set-follow id nil)
-                                  (contains? removed (dm/get-in track [:ik :goal]))       (set-ik id nil))
+                                  (contains? removed (dm/get-in track [:follow :leader]))     (set-follow id nil)
+                                  (contains? removed (dm/get-in track [:ik :goal]))           (set-ik id nil)
+                                  (contains? removed (dm/get-in track [:path-follow :path])) (set-path-follow id nil))
                                 (reduce #(remove-link %1 id (:property %2))
                                         timeline
                                         (filter #(contains? removed (:source %)) (:links track)))))

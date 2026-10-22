@@ -18393,6 +18393,8 @@ Timeline:
         setTrimMode(shape: Group, mode: TrimMode): void;
         followOf(shape: Shape): Follow | null;
         setFollow(shape: Shape, follow: FollowProps | null): void;
+        pathFollowOf(shape: Shape): PathFollow | null;
+        setPathFollow(shape: Shape, pathFollow: PathFollowProps | null): void;
         linksOf(shape: Shape): Link[];
         link(shape: Shape, link: LinkProps): void;
         unlink(shape: Shape, property: LinkableProperty): void;
@@ -18909,6 +18911,56 @@ Timeline:
         Example
         ```
         timeline.setFollow(badge, { leader: card, delay: 100 });timeline.setFollow(shadow, { leader: button, rotation: false });timeline.setFollow(label, { leader: popIn, from: 'rest' });
+        ```
+      pathFollowOf: |-
+        ```
+        pathFollowOf(shape: Shape): PathFollow | null
+        ```
+
+        The outline `shape` rides, as the Path section of the Motion tab sets
+        it (see `setPathFollow`); `null` when it rides none.
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board.
+
+        Returns PathFollow | null
+      setPathFollow: |-
+        ```
+        setPathFollow(shape: Shape, pathFollow: PathFollowProps | null): void
+        ```
+
+        Makes `shape` ride the outline of `pathFollow.path`, another shape of
+        the board with an outline (a path, a boolean, a rectangle with its
+        rounded corners, an ellipse, a board): its pivot sits as far along the
+        outline as its `pathProgress` says, a share of the way (keyframes of
+        the `pathProgress` property animate it; `pathFollow.progress` without
+        them). Past 1 it goes round a closed outline again; an open one holds
+        its ends. With `orient` it turns as the outline goes, by `turn`
+        degrees more, its own rotation on top. Its own `x` and `y` keyframes
+        do not play while it rides; the path may move, morph or follow, and
+        the shape rides it as it plays. A shape rides a path or follows a
+        leader, not both. Every export plays it by keyframes. `null` rides
+        none, and drops the keyframes of its progress.
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board.
+        * pathFollow: PathFollowProps | null
+
+          The path and how the shape rides it, or `null`.
+
+          The car drives once along the road, turning with it:
+
+        Returns void
+
+        Example
+        ```
+        timeline.setPathFollow(car, { path: road, orient: true });timeline.addKeyframe(car, { time: 0, property: 'pathProgress', value: 0, easing: 'ease-in-out' });timeline.addKeyframe(car, { time: 3000, property: 'pathProgress', value: 1 });
         ```
       linksOf: |-
         ```
@@ -19863,6 +19915,97 @@ FollowProps:
         ```
 
         Do what the leader does this many milliseconds later. 0 by default.
+PathFollow:
+  overview: |-
+    Interface PathFollow
+    ====================
+
+    How a layer rides the outline of another shape of its board, as the
+    Path section of the Motion tab sets it (see `Timeline.setPathFollow`).
+
+    ```
+    interface PathFollow {
+        path: Shape;
+        orient: boolean;
+        turn: number;
+        progress: number;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      path: |-
+        ```
+        readonly path: Shape
+        ```
+
+        The shape whose outline it rides.
+      orient: |-
+        ```
+        readonly orient: boolean
+        ```
+
+        Whether it turns as the outline goes.
+      turn: |-
+        ```
+        readonly turn: number
+        ```
+
+        The degrees it turns more when it orients.
+      progress: |-
+        ```
+        readonly progress: number
+        ```
+
+        How far along the outline it is without keyframes of its
+        `pathProgress`, a share of the way.
+PathFollowProps:
+  overview: |-
+    Interface PathFollowProps
+    =========================
+
+    A path to ride, set with `Timeline.setPathFollow`.
+
+    ```
+    interface PathFollowProps {
+        path: Shape;
+        orient?: boolean;
+        turn?: number;
+        progress?: number;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      path: |-
+        ```
+        path: Shape
+        ```
+
+        The shape whose outline to ride: another shape of the board with an
+        outline, not one the layer is in or holds, nor one that moves with
+        it.
+      orient: |-
+        ```
+        orient?: boolean
+        ```
+
+        Turn as the outline goes. `false` by default.
+      turn: |-
+        ```
+        turn?: number
+        ```
+
+        Degrees to turn more when it orients. 0 by default.
+      progress: |-
+        ```
+        progress?: number
+        ```
+
+        How far along the outline it is without keyframes of its
+        `pathProgress`, a share of the way. 0 by default.
 Link:
   overview: |-
     Interface Link
@@ -29934,6 +30077,7 @@ AnimatableProperty:
         | "trimEnd"
         | "trimOffset"
         | "path"
+        | "pathProgress"
     ```
 
     A property a keyframe can animate, and what its value is:
@@ -29968,6 +30112,10 @@ AnimatableProperty:
       first); it takes no motion path (`pathIn`, `pathOut`) and no animation
       style holds it. Moving, turning or resizing the path takes its
       outlines along; setting its `d` changes the box they are kept in.
+    * `pathProgress`: how far along the path it rides a layer is (see
+      `Timeline.setPathFollow`), a share of the way; past 1 round a closed
+      path again. Only layers riding a path take it, and no animation style
+      holds it.
 
     The fill, stroke and shadow properties take the `index` of the fill,
     stroke or shadow of the layer.
@@ -30180,7 +30328,7 @@ Shape:
     let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, Follow, FollowProps, GridLayout, Group, Ik, IkProps, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, Link, LinkProps, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
+    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, Follow, FollowProps, GridLayout, Group, Ik, IkProps, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, Link, LinkProps, OpenOverlay, OverlayAction, Page, Path, PathFollow, PathFollowProps, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-

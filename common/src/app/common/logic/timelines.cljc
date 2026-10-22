@@ -19,6 +19,7 @@
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
    [app.common.geom.modifiers :as gm]
+   [app.common.geom.path-walk :as gpw]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.schema :as sm]
@@ -131,6 +132,23 @@
        (= board-id (cfh/get-shape-id-root-frame objects leader))
        (not (cta/nested-layers? objects id leader))))
 
+(defn- moves-with?
+  "Whether the layer `from` of `timeline` moves with the layer `id`,
+  through the leaders it follows and the paths it rides, and theirs."
+  [timeline from id]
+  (loop [front [from], seen #{}]
+    (if-let [at (first front)]
+      (cond
+        (= at id)           true
+        (contains? seen at) (recur (rest front) seen)
+        :else
+        (let [track (dm/get-in timeline [:tracks at])]
+          (recur (into (vec (rest front))
+                       (keep identity)
+                       [(dm/get-in track [:follow :leader]) (dm/get-in track [:path-follow :path])])
+                 (conj seen at))))
+      false)))
+
 (defn- leads-back?
   "Whether `leader` follows the layer `id` in `timeline`, through others."
   [timeline leader id]
@@ -150,8 +168,19 @@
   [objects timeline id leader]
   (and (placed-to-follow? objects (:board-id timeline) id leader)
        (not (leads-back? timeline leader id))
+       ;; nor through the paths ridden on the way
+       (not (moves-with? timeline leader id))
        (or (nil? (dm/get-in objects [leader :shape-ref]))
            (contains? (:tracks timeline) leader))))
+
+(defn- placed-to-ride?
+  "Whether the layer `id` of `objects` is where it can ride the outline of
+  the shape `path` (see `cta/schema:path-follow`): another shape of its
+  board `board-id` with an outline to walk (see `gpw/walker`), not one it
+  is in or that is in it."
+  [objects board-id id path]
+  (and (placed-to-follow? objects board-id id path)
+       (some? (gpw/walker (get objects path)))))
 
 (defn- placed-to-link?
   "Whether a property of a layer of the board `board-id` of `objects` can
@@ -176,10 +205,11 @@
 
 (defn- copied-follow
   "`track` of a copy in `new-board` of `objects`, following (see
-  `cta/follow-of`) and reaching (see `cta/ik-of`) the copies of its
-  leader and goal when they were copied too (in `ids-map`), else its
-  leader and goal still, each as long as it is placed for it (see
-  `placed-to-follow?`), else nothing; its links the copies of their
+  `cta/follow-of`), reaching (see `cta/ik-of`) and riding (see
+  `cta/path-follow-of`) the copies of its leader, goal and path when
+  they were copied too (in `ids-map`), else its leader, goal and path
+  still, each as long as it is placed for it (see `placed-to-follow?`,
+  `placed-to-ride?`), else nothing; its links the copies of their
   sources so (see `placed-to-link?`)."
   [track ids-map objects new-board]
   (let [placed #(when (some? %)
@@ -187,7 +217,8 @@
                     (when (placed-to-follow? objects new-board (:shape-id track) other)
                       other)))
         leader (dm/get-in track [:follow :leader])
-        goal   (dm/get-in track [:ik :goal])]
+        goal   (dm/get-in track [:ik :goal])
+        path   (dm/get-in track [:path-follow :path])]
     (cond-> (remapped-links track #(let [other (get ids-map % %)]
                                      (when (placed-to-link? objects new-board other) other)))
       (some? leader)
@@ -198,25 +229,34 @@
       (some? goal)
       (as-> track (if-let [goal (placed goal)]
                     (assoc-in track [:ik :goal] goal)
-                    (dissoc track :ik))))))
+                    (dissoc track :ik)))
+
+      (some? path)
+      (as-> track (let [other (get ids-map path path)]
+                    (if (placed-to-ride? objects new-board (:shape-id track) other)
+                      (assoc-in track [:path-follow :path] other)
+                      (dissoc track :path-follow)))))))
 
 (defn- strayed-follows-dropped
   "`timelines` (of the shapes `objects`) without the follows of layers
   whose leaders are gone, out of the board of their timeline, or now in
   them or holding them (see `placed-to-follow?`), nor the goals (see
-  `cta/ik-of`) so placed, nor the links whose sources left the board
-  (see `placed-to-link?`)."
+  `cta/ik-of`) and paths (see `placed-to-ride?`) so placed, nor the links
+  whose sources left the board (see `placed-to-link?`)."
   [timelines objects]
   (reduce-kv
    (fn [timelines board-id timeline]
      (reduce-kv (fn [timelines id track]
                   (let [leader  (dm/get-in track [:follow :leader])
                         goal    (dm/get-in track [:ik :goal])
+                        path    (dm/get-in track [:path-follow :path])
                         strayed #(and (some? %) (not (placed-to-follow? objects board-id id %)))
                         unlinked (remove #(placed-to-link? objects board-id (:source %)) (:links track))]
                     (cond-> timelines
                       (strayed leader) (update board-id cta/set-follow id nil)
                       (strayed goal)   (update board-id cta/set-ik id nil)
+                      (and (some? path) (not (placed-to-ride? objects board-id id path)))
+                      (update board-id cta/set-path-follow id nil)
                       (seq unlinked)   (update board-id #(reduce (fn [tl link] (cta/remove-link tl id (:property link)))
                                                                  % unlinked)))))
                 timelines
@@ -613,8 +653,9 @@
   and reaching the copies of their goals, by `refs` (a delay of each
   main shape a copy shape plays, to that copy shape, see `ref-ids`),
   with a track or not: a still goal, or an upper arm turning on its
-  centre, drives a chain. A follow or goal with no copy is dropped, as is
-  a link (see `cta/schema:link`) whose source has none."
+  centre, drives a chain; and the riders riding the copies of their
+  paths. A follow, goal or path with no copy is dropped, as is a link
+  (see `cta/schema:link`) whose source has none."
   [result head-id refs]
   (reduce-kv
    (fn [result k entry]
@@ -626,8 +667,9 @@
                          (fn [tracks id track]
                            (let [leader (dm/get-in track [:follow :leader])
                                  goal   (dm/get-in track [:ik :goal])
+                                 path   (dm/get-in track [:path-follow :path])
                                  copy   #(get @refs %)]
-                             (if (or (some? leader) (some? goal) (seq (:links track)))
+                             (if (or (some? leader) (some? goal) (some? path) (seq (:links track)))
                                (assoc tracks id
                                       (cond-> (remapped-links track copy)
                                         (some? leader)
@@ -638,7 +680,12 @@
                                         (some? goal)
                                         (as-> track (if-let [goal (copy goal)]
                                                       (assoc-in track [:ik :goal] goal)
-                                                      (dissoc track :ik)))))
+                                                      (dissoc track :ik)))
+
+                                        (some? path)
+                                        (as-> track (if-let [path (copy path)]
+                                                      (assoc-in track [:path-follow :path] path)
+                                                      (dissoc track :path-follow)))))
                                tracks)))
                          tracks
                          tracks))))
@@ -926,6 +973,24 @@
   that board, itself too."
   [objects timeline source]
   (placed-to-link? objects (:board-id timeline) source))
+
+(defn can-ride-path?
+  "Whether the layer `id` of the board of `timeline` (of `objects`) can
+  ride the outline of the shape `path` (see `cta/schema:path-follow`):
+  another shape of the board with an outline (see `gpw/walker`), not one
+  it is in or holds, nor one that moves with it, through the leaders it
+  follows and the paths it rides."
+  [objects timeline id path]
+  (and (placed-to-ride? objects (:board-id timeline) id path)
+       (not (moves-with? timeline path id))))
+
+(defn ride-paths
+  "The shapes of the board of `timeline` (of `objects`) whose outlines the
+  layer `id` can ride (see `can-ride-path?`), in the order of the layers
+  panel."
+  [objects timeline id]
+  (filterv #(can-ride-path? objects timeline id %)
+           (rest (layer-ids objects (:board-id timeline)))))
 
 (defn link-sources
   "The layers of the board of `timeline` (of `objects`) whose properties

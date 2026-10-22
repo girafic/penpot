@@ -4797,6 +4797,40 @@ export interface Timeline {
   setFollow(shape: Shape, follow: FollowProps | null): void;
 
   /**
+   * The outline `shape` rides, as the Path section of the Motion tab sets
+   * it (see `setPathFollow`); `null` when it rides none.
+   * @param shape A layer inside the board.
+   */
+  pathFollowOf(shape: Shape): PathFollow | null;
+
+  /**
+   * Makes `shape` ride the outline of `pathFollow.path`, another shape of
+   * the board with an outline (a path, a boolean, a rectangle with its
+   * rounded corners, an ellipse, a board): its pivot sits as far along the
+   * outline as its `pathProgress` says, a share of the way (keyframes of
+   * the `pathProgress` property animate it; `pathFollow.progress` without
+   * them). Past 1 it goes round a closed outline again; an open one holds
+   * its ends. With `orient` it turns as the outline goes, by `turn`
+   * degrees more, its own rotation on top. Its own `x` and `y` keyframes
+   * do not play while it rides; the path may move, morph or follow, and
+   * the shape rides it as it plays. A shape rides a path or follows a
+   * leader, not both. Every export plays it by keyframes. `null` rides
+   * none, and drops the keyframes of its progress.
+   * @param shape A layer inside the board.
+   * @param pathFollow The path and how the shape rides it, or `null`.
+   *
+   * The car drives once along the road, turning with it:
+   *
+   * @example
+   * ```js
+   * timeline.setPathFollow(car, { path: road, orient: true });
+   * timeline.addKeyframe(car, { time: 0, property: 'pathProgress', value: 0, easing: 'ease-in-out' });
+   * timeline.addKeyframe(car, { time: 3000, property: 'pathProgress', value: 1 });
+   * ```
+   */
+  setPathFollow(shape: Shape, pathFollow: PathFollowProps | null): void;
+
+  /**
    * The links of the properties of `shape`, as the Links section of the
    * Motion tab sets them (see `link`).
    * @param shape A layer inside the board.
@@ -5439,6 +5473,61 @@ export interface FollowProps {
    * Do what the leader does this many milliseconds later. 0 by default.
    */
   delay?: number;
+}
+
+/**
+ * How a layer rides the outline of another shape of its board, as the
+ * Path section of the Motion tab sets it (see `Timeline.setPathFollow`).
+ */
+export interface PathFollow {
+  /**
+   * The shape whose outline it rides.
+   */
+  readonly path: Shape;
+
+  /**
+   * Whether it turns as the outline goes.
+   */
+  readonly orient: boolean;
+
+  /**
+   * The degrees it turns more when it orients.
+   */
+  readonly turn: number;
+
+  /**
+   * How far along the outline it is without keyframes of its
+   * `pathProgress`, a share of the way.
+   */
+  readonly progress: number;
+}
+
+/**
+ * A path to ride, set with `Timeline.setPathFollow`.
+ */
+export interface PathFollowProps {
+  /**
+   * The shape whose outline to ride: another shape of the board with an
+   * outline, not one the layer is in or holds, nor one that moves with
+   * it.
+   */
+  path: Shape;
+
+  /**
+   * Turn as the outline goes. `false` by default.
+   */
+  orient?: boolean;
+
+  /**
+   * Degrees to turn more when it orients. 0 by default.
+   */
+  turn?: number;
+
+  /**
+   * How far along the outline it is without keyframes of its
+   * `pathProgress`, a share of the way. 0 by default.
+   */
+  progress?: number;
 }
 
 /**
@@ -6158,6 +6247,10 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  *   first); it takes no motion path (`pathIn`, `pathOut`) and no animation
  *   style holds it. Moving, turning or resizing the path takes its
  *   outlines along; setting its `d` changes the box they are kept in.
+ * - `pathProgress`: how far along the path it rides a layer is (see
+ *   `Timeline.setPathFollow`), a share of the way; past 1 round a closed
+ *   path again. Only layers riding a path take it, and no animation style
+ *   holds it.
  *
  * The fill, stroke and shadow properties take the `index` of the fill,
  * stroke or shadow of the layer.
@@ -6200,7 +6293,8 @@ export type AnimatableProperty =
   | 'trimStart'
   | 'trimEnd'
   | 'trimOffset'
-  | 'path';
+  | 'path'
+  | 'pathProgress';
 
 /**
  * How a value goes from a keyframe to the next one, or how a preset

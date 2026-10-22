@@ -327,6 +327,43 @@
         (.unwiggle timeline dot "rotation")
         (t/is (= [] (wiggles dot)))))))
 
+(t/deftest a-layer-rides-a-path
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]     (setup true)
+            [^js board [^js car ^js other]] (board-with-rects context 2)
+            ^js road                (.createPath context)
+            _                       (.appendChild board road)
+            _                       (set! (.-d road) "M10,100L410,100")
+            ^js timeline            (.addTimeline board)
+            ridden                  #(some-> (.pathFollowOf timeline %)
+                                             (js->clj :keywordize-keys true)
+                                             (update :path (fn [^js s] (aget s "$id"))))]
+        (t/is (nil? (ridden car)) "none at first")
+        (.setPathFollow timeline car #js {:path road :orient true})
+        (t/is (= {:path (aget road "$id") :orient true}
+                 (:path-follow (stored-track store context board car)))
+              "the defaults left out")
+        (t/is (= {:path (aget road "$id") :orient true :turn 0 :progress 0} (ridden car)))
+        (.addKeyframe timeline car #js {:property "pathProgress" :time 0 :value 0 :easing "linear"})
+        (.addKeyframe timeline car #js {:property "pathProgress" :time 1000 :value 1})
+        (t/is (= 2 (count (filter #(= :path-progress (:property %))
+                                  (:keyframes (stored-track store context board car)))))
+              "its progress takes keyframes")
+        (t/testing "what cannot be ridden is refused"
+          (t/is (thrown? js/Error (.setPathFollow timeline car #js {:path car})) "not itself")
+          (t/is (thrown? js/Error (.setPathFollow timeline car #js {:path road :orient "yes"})))
+          (t/is (thrown? js/Error (.setPathFollow timeline car #js {:path road :progress js/NaN})))
+          (t/is (thrown? js/Error (.setPathFollow timeline car #js {:path board})) "not its board"))
+        (.setFollow timeline car #js {:leader other})
+        (t/is (nil? (ridden car)) "a leader to follow in its place")
+        (.setPathFollow timeline car #js {:path road})
+        (.setPathFollow timeline car nil)
+        (t/is (nil? (ridden car)))
+        (t/is (empty? (filter #(= :path-progress (:property %))
+                              (:keyframes (stored-track store context board car))))
+              "nor the keyframes of its progress")))))
+
 (t/deftest a-link-maps-a-range-of-its-source
   (thw/with-wasm-mocks*
     (fn []

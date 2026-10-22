@@ -525,6 +525,7 @@
                        (some? (dm/get-in timeline [:tracks id :follow]))
                        (seq (dm/get-in timeline [:tracks id :links]))
                        (seq (dm/get-in timeline [:tracks id :wiggles]))
+                       (some? (dm/get-in timeline [:tracks id :path-follow]))
                        (contains? copy-spans id)
                        (seq child-ids))
                  (cons id child-ids)
@@ -857,7 +858,7 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [row-index shape depth expandable? expanded? selected? hovered? outside?
-           leader-id leader-name goal-id goal-name link link-name
+           leader-id leader-name goal-id goal-name path-id path-name link link-name
            on-toggle on-select on-context-menu on-hover]}]
   (let [shape-id (:id shape)
         ;; in the colour of components, as in the layers panel
@@ -915,6 +916,13 @@
            (dom/stop-propagation event)
            (st/emit! (dws/select-shape goal-id))))
 
+        on-path-click
+        (mf/use-fn
+         (mf/deps path-id)
+         (fn [event]
+           (dom/stop-propagation event)
+           (st/emit! (dws/select-shape path-id))))
+
         link-source (:source link)
         on-link-click
         (mf/use-fn
@@ -961,6 +969,14 @@
                   :title (tr "workspace.animation.follows-hint")
                   :on-click on-leader-click}
          (tr "workspace.animation.follows" leader-name)]
+
+        ;; the path it rides (see `cta/path-follow-of`)
+        (some? path-id)
+        [:button {:type "button"
+                  :class (stl/css :follow-chip)
+                  :title (tr "workspace.animation.rides-hint")
+                  :on-click on-path-click}
+         (tr "workspace.animation.rides" path-name)]
 
         ;; its first link (see `cta/links-of`), its source selected by a click
         (some? link)
@@ -3788,6 +3804,8 @@
                                     :leader-name (dm/get-in objects [(dm/get-in timeline [:tracks id :follow :leader]) :name])
                                     :goal-id (dm/get-in timeline [:tracks id :ik :goal])
                                     :goal-name (dm/get-in objects [(dm/get-in timeline [:tracks id :ik :goal]) :name])
+                                    :path-id (dm/get-in timeline [:tracks id :path-follow :path])
+                                    :path-name (dm/get-in objects [(dm/get-in timeline [:tracks id :path-follow :path]) :name])
                                     :link (first (dm/get-in timeline [:tracks id :links]))
                                     :link-name (dm/get-in objects [(dm/get-in timeline [:tracks id :links 0 :source]) :name])
                                     :selected? (contains? selected id)

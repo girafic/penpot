@@ -6,17 +6,21 @@
 
 (ns app.common.types.animation-follow
   "How a timeline plays its layers that follow others (see
-  `cta/follow-of`) and the chains that reach a goal (two-bone IK, see
-  `cta/ik-of`): the rules of both, the modifiers of a timeline at a time
-  with them (`timeline->modif-tree`), which the editor preview, the
-  viewer playback and the exports read, and their bake into keyframes
-  (`bake-follows`). Their data (the `:follow` and `:ik` of a track) and
-  the interpolation of keyframes are in `app.common.types.animation`."
+  `cta/follow-of`), the chains that reach a goal (two-bone IK, see
+  `cta/ik-of`) and the layers that ride the outline of a shape (see
+  `cta/path-follow-of`): the rules of these, the modifiers of a timeline
+  at a time with them (`timeline->modif-tree`), which the editor
+  preview, the viewer playback and the exports read, and their bake into
+  keyframes (`bake-follows`). Their data (the `:follow`, `:ik` and
+  `:path-follow` of a track) and the interpolation of keyframes are in
+  `app.common.types.animation`."
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
+   [app.common.geom.path-walk :as gpw]
    [app.common.geom.point :as gpt]
+   [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.modifiers :as ctm]))
@@ -36,24 +40,57 @@
    {}
    (cta/values-at timeline time)))
 
+(defn- moved-by
+  "The layers the layer `id` of `timeline` moves with: the leader it
+  follows and the shape whose outline it rides."
+  [timeline id]
+  (let [track (dm/get-in timeline [:tracks id])]
+    (keep identity [(dm/get-in track [:follow :leader]) (dm/get-in track [:path-follow :path])])))
+
+(defn- cyclic?
+  "Whether the layer `id` of `timeline` moves with itself, through the
+  leaders and the paths of the layers it moves with (see `moved-by`): a
+  cycle plays nothing."
+  [timeline id]
+  (loop [front (moved-by timeline id), seen #{}]
+    (if-let [at (first front)]
+      (cond
+        (= at id)           true
+        (contains? seen at) (recur (rest front) seen)
+        :else               (recur (into (vec (rest front)) (moved-by timeline at)) (conj seen at)))
+      false)))
+
 (defn followers
   "The layers of `timeline` that follow a leader of `objects` (see
-  `cta/follow-of`), but those whose leaders lead back to a layer of the
-  chain (a cycle follows nothing) and those in their leader or holding
-  it, which move with it already."
+  `cta/follow-of`), but those that move with themselves through their
+  leaders and the paths they ride (a cycle follows nothing, see
+  `cyclic?`) and those in their leader or holding it, which move with it
+  already."
   [timeline objects]
-  (let [leader-of (fn [id] (dm/get-in timeline [:tracks id :follow :leader]))
-        cyclic?   (fn [id]
-                    (loop [at (leader-of id) seen #{id}]
-                      (cond (nil? at)           false
-                            (contains? seen at) true
-                            :else               (recur (leader-of at) (conj seen at)))))]
+  (let [leader-of (fn [id] (dm/get-in timeline [:tracks id :follow :leader]))]
     (into #{}
           (filter #(and (contains? objects %)
                         (contains? objects (leader-of %))
-                        (not (cyclic? %))
+                        (not (cyclic? timeline %))
                         (not (cta/nested-layers? objects % (leader-of %)))))
           (keys (:tracks timeline)))))
+
+(defn riders
+  "The layers of `timeline` that ride the outline of a shape of `objects`
+  (see `cta/path-follow-of`), but those that move with themselves (see
+  `cyclic?`), those in their path or holding it, and those whose path
+  has no outline (see `gpw/walker`)."
+  [timeline objects]
+  (into #{}
+        (filter (fn [id]
+                  (let [path (dm/get-in timeline [:tracks id :path-follow :path])]
+                    (and (contains? objects id)
+                         (contains? objects path)
+                         (not= id path)
+                         (not (cyclic? timeline id))
+                         (not (cta/nested-layers? objects id path))
+                         (some? (gpw/walker (get objects path)))))))
+        (keep (fn [[id track]] (when (some? (:path-follow track)) id)) (:tracks timeline))))
 
 (defn- ik-links*
   "`{:a :b}`, the links of the chain of two follows that ends at `id` in
@@ -249,11 +286,11 @@
       (ctm/move (gpt/subtract moved pivot)))))
 
 (defn- follow-chain
-  "The layers `follows` of `timeline` and the leaders they follow, through
-  a chain of followers."
+  "The layers `follows` of `timeline` and the leaders they follow and the
+  paths they ride (see `moved-by`), through a chain of them."
   [timeline follows]
   (loop [ids (set follows), front follows]
-    (let [leaders (into #{} (keep #(dm/get-in timeline [:tracks % :follow :leader])) front)
+    (let [leaders (into #{} (mapcat #(moved-by timeline %)) front)
           new     (remove ids leaders)]
       (if (empty? new)
         ids
@@ -335,12 +372,18 @@
   from where its leader is at its first frame with no reaching at all
   (`:none`), so a turn there moves its followers too.
 
-  The other times play the follow chains and goals only, their first
-  frame read once while `key` (the timeline the caller keeps, before it
-  is resolved) stays."
+  A layer that rides the outline of a shape (see `riders`) has its pivot
+  where its progress along the outline as it plays then puts it, turned
+  along the outline when it orients, its own turn added; what follows it
+  goes along.
+
+  The other times play the follow chains, goals and paths only, their
+  first frame read once while `key` (the timeline the caller keeps,
+  before it is resolved) stays."
   [timeline objects time own & {:keys [key back?]}]
-  (let [follows (followers timeline objects)]
-    (if (empty? follows)
+  (let [follows (followers timeline objects)
+        rides   (riders timeline objects)]
+    (if (and (empty? follows) (empty? rides))
       own
       (let [duration   (:duration timeline 0)
             mode       (cta/playback-mode timeline)
@@ -360,7 +403,9 @@
                              (mapcat (fn [chain] (map (fn [id] [id chain]) [(:a chain) (:b chain) (:e chain)])))
                              (vals chains))
             goals      (into #{} (map :goal) (vals chains))
-            chain      (update timeline :tracks select-keys (follow-chain timeline (into follows goals)))
+            chain      (update timeline :tracks select-keys (follow-chain timeline (into follows (concat goals rides))))
+            ;; the progress of the riders along their paths
+            ridden     (update timeline :tracks select-keys rides)
             own-at     (memoize #(if (zero? %)
                                    (first-frame-modifiers key objects chain)
                                    (own-modifiers chain objects %)))
@@ -383,7 +428,8 @@
                      (fn []
                        (if (and (= :all mode) (contains? chain-of id))
                          (reached id u (played id u :fk))
-                         (let [mods (get (if (= u now) own (own-at (fold u))) id)]
+                         (let [mods (cond->> (get (if (= u now) own (own-at (fold u))) id)
+                                      (contains? rides id) (ride id u))]
                            (if-not (contains? follows id)
                              mods
                              (let [follow  (cta/follow-of timeline id)
@@ -419,6 +465,26 @@
                                   :opacity
                                   (* (modifiers-opacity mods (:opacity (get objects id) 1))
                                      (modifiers-opacity lplayed (:opacity lshape 1)))))))))))))
+
+                ;; `mods` of the layer `id` riding its path at `u`: its pivot
+                ;; at its progress along the outline as it plays then
+                (ride [id u mods]
+                  (let [{:keys [path orient turn progress]} (cta/path-follow-of timeline id)
+                        pmods (played path u :all)
+                        walk  (gpw/walker (cond-> (get objects path)
+                                            (some? pmods) (gsh/transform-shape pmods)))]
+                    (if (nil? walk)
+                      mods
+                      (let [values (cached [::ridden u] #(cta/values-at ridden (fold u)))
+                            p      (or (dm/get-in values [id :path-progress]) progress)
+                            ;; round again past the end of a closed outline
+                            share  (if (:closed? walk) (- p (mth/floor p)) (mth/clamp p 0 1))
+                            {:keys [point angle]} ((:at walk) share)
+                            mods   (or mods (ctm/empty))
+                            pivot  (gpt/transform (rested id) (matrix mods))]
+                        (-> mods
+                            (cond-> orient (ctm/add-modifiers (ctm/rotation nil pivot (+ angle turn))))
+                            (ctm/add-modifiers (ctm/move nil (gpt/subtract point pivot))))))))
 
                 ;; where the layer `id` turns around at `u`, played in `mode`
                 (pivot-at [id u mode]
@@ -458,7 +524,7 @@
                       (assoc acc id mods)
                       acc))
                   own
-                  (into follows (keys chain-of))))))))
+                  (-> follows (into (keys chain-of)) (into rides))))))))
 
 (defn timeline->modif-tree
   "Compute a transient modif-tree `{shape-id {:modifiers ...}}` for
@@ -588,6 +654,15 @@
       ;; shrunk to nothing (a leader flipping through 0), it has no turn
       (< scale 1e-6) (assoc :rotation nil))))
 
+(defn- unridden
+  "`track` riding no path (see `cta/schema:path-follow`), and without the
+  keyframes of its progress along one, which no export plays."
+  [track]
+  (let [progress? #(= :path-progress (:property %))]
+    (cond-> (dissoc track :path-follow)
+      (some progress? (:keyframes track)) (update :keyframes (partial filterv (complement progress?)))
+      (some? (:loops track))              (update :loops disj :path-progress))))
+
 (defn- baked-track
   "The track of the follower `id` of `timeline` playing its `poses` (see
   `followed-pose`, one at each of `times`) as linear keyframes, from its
@@ -617,7 +692,7 @@
                                                 (some #(> (mth/abs (- % (get at-rest property))) tol) values)))
                                    [property (thin-samples (map vector (map first samples) values) tol)]))))
                        (keys bake-tolerances))]
-    (-> track
+    (-> (unridden track)
         (dissoc :follow :ik)
         (update :keyframes (fn [keyframes]
                              (->> (remove #(and (contains? baked (:property %)) (nil? (:index %))) keyframes)
@@ -630,9 +705,10 @@
         (d/update-when :loops #(into #{} (remove (fn [k] (contains? baked k))) %)))))
 
 (defn follows?
-  "Whether a layer of `timeline` follows another (see `cta/follow-of`)."
+  "Whether a layer of `timeline` follows another (see `cta/follow-of`) or
+  rides the outline of a shape (see `cta/path-follow-of`)."
   [timeline]
-  (boolean (some :follow (vals (:tracks timeline)))))
+  (boolean (some #(or (:follow %) (:path-follow %)) (vals (:tracks timeline)))))
 
 (defn- round-trip
   "The ping-pong `timeline` as the loop of its way there and back (see
@@ -665,6 +741,8 @@
   turns into the loop of its way there and back first (see
   `round-trip`), where the followers lag behind both ways. A follow
   that plays nothing (a cycle, a leader gone) is left out. The layers
+  that ride a path bake so too, their position and turn, and none keeps
+  its path or the keyframes of its progress. The layers
   `keep?` is true of keep their follows, as the Lottie export plays
   some by parenting (see `app.common.animation.lottie/parent-candidates`)."
   [timeline objects & {:keys [fps keep?] :or {fps 60 keep? (constantly false)}}]
@@ -675,7 +753,8 @@
           resolved (cta/resolve-animations timeline objects)
           chains   (vals (ik-chains resolved objects))
           ;; the followers, and the upper links of chains that reach
-          follows  (into #{} (remove keep?) (into (followers resolved objects) (map :a) chains))
+          follows  (into #{} (remove keep?) (concat (followers resolved objects) (map :a chains)
+                                                    (riders resolved objects)))
           ids      (follow-chain resolved (into follows (map :goal) chains))
           played   (update resolved :tracks select-keys ids)
           times    (cta/frame-times (:duration timeline) fps)
@@ -698,7 +777,7 @@
                 (as-> tracks tracks
                   (reduce-kv (fn [tracks id track]
                                (let [track (or (get baked id)
-                                               (cond-> track (not (keep? id)) (dissoc :follow :ik)))]
+                                               (cond-> (unridden track) (not (keep? id)) (dissoc :follow :ik)))]
                                  (if (cta/empty-track? track)
                                    (dissoc tracks id)
                                    (assoc tracks id track))))

@@ -69,6 +69,7 @@
       :trim-end (tr "workspace.animation.trim-end")
       :trim-offset (tr "workspace.animation.trim-offset")
       :content (tr "workspace.animation.path")
+      :path-progress (tr "workspace.animation.path-progress")
       (name property))))
 
 (defn animation-label

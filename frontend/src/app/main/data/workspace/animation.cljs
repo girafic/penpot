@@ -508,7 +508,8 @@
    :trim-start :trim-end :trim-offset])
 
 (def animatable-properties
-  (into transform-properties (concat camera-properties light-properties [:opacity :r1 :r2 :r3 :r4] appearance-properties [:content])))
+  (into transform-properties (concat [:path-progress] camera-properties light-properties [:opacity :r1 :r2 :r3 :r4]
+                                     appearance-properties [:content])))
 
 (defn- store-value
   [m property index v]
@@ -546,7 +547,12 @@
 
                    (= :path (:type shape))
                    (assoc :content (or (:content animated)
-                                       (ctao/outline-value shape (cta/get-track timeline (:id shape))))))]
+                                       (ctao/outline-value shape (cta/get-track timeline (:id shape)))))
+
+                   ;; how far along the path it rides
+                   (some? (cta/path-follow-of timeline (:id shape)))
+                   (assoc :path-progress (get animated :path-progress
+                                              (cta/path-progress-rest timeline (:id shape)))))]
     (reduce
      (fn [values {:keys [index properties]}]
        (reduce (fn [values property]
@@ -579,7 +585,8 @@
   [property value]
   (case property
     (:scale-x :scale-y :opacity :fill-opacity :stroke-opacity :shadow-opacity
-              :trim-start :trim-end :trim-offset :perspective-x :perspective-y :light-ambient)
+              :trim-start :trim-end :trim-offset :perspective-x :perspective-y :light-ambient
+              :path-progress)
     (* value 100)
     value))
 
@@ -588,7 +595,8 @@
   [property display]
   (case property
     (:scale-x :scale-y :opacity :fill-opacity :stroke-opacity :shadow-opacity
-              :trim-start :trim-end :trim-offset :perspective-x :perspective-y :light-ambient)
+              :trim-start :trim-end :trim-offset :perspective-x :perspective-y :light-ambient
+              :path-progress)
     (/ display 100)
     display))
 
@@ -749,6 +757,44 @@
           (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview))
           (rx/empty))))))
+
+;; PATH
+
+(defn set-path-follow
+  "Make the layer `shape-id` ride the outline of another shape of its
+  board as `path-follow` says (see `cta/set-path-follow`), in one undo
+  step; nil rides none. A path it cannot ride (see `cltl/can-ride-path?`)
+  changes nothing."
+  [shape-id path-follow]
+  (ptk/reify ::set-path-follow
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl      (layer-board-timeline state shape-id)
+            objects (dsh/lookup-page-objects state)
+            path    (:path path-follow)
+            tl'     (some-> tl (cta/set-path-follow shape-id path-follow))]
+        (if (and (some? tl)
+                 (not= tl tl')
+                 (or (nil? path) (cltl/can-ride-path? objects tl shape-id path)))
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview))
+          (rx/empty))))))
+
+(defn clear-path-follow
+  "Make the layer `shape-id` ride no path (see `set-path-follow`)."
+  [shape-id]
+  (set-path-follow shape-id nil))
+
+(defn update-path-follow
+  "Change how the layer `shape-id` rides its path: `changes` taken into
+  it (see `cta/path-follow-of`), such as `:orient`."
+  [shape-id changes]
+  (ptk/reify ::update-path-follow
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if-let [path-follow (some-> (layer-board-timeline state shape-id) (cta/path-follow-of shape-id))]
+        (rx/of (set-path-follow shape-id (merge path-follow changes)))
+        (rx/empty)))))
 
 ;; WIGGLE
 
@@ -928,9 +974,9 @@
 
 (defn picking-purpose
   "What the pick of the layer `picking-leader` is for: its leader
-  (`:leader`, see `pick-leader`), its goal (`:goal`, see `pick-goal`) or
-  the source of the link of a property (`[:link property]`, see
-  `pick-link-source`)."
+  (`:leader`, see `pick-leader`), its goal (`:goal`, see `pick-goal`),
+  the path it rides (`:path`, see `pick-path`) or the source of the link
+  of a property (`[:link property]`, see `pick-link-source`)."
   [state]
   (dm/get-in state [:workspace-animation :picking-purpose] :leader))
 
@@ -938,7 +984,7 @@
   "End the pick of a leader or goal of `shape-id` (see `pick-leader` and
   `pick-goal`), whose leader is `leader`, or goal `goal`, or none.
   `shape-id` stays selected, while it is on the page."
-  [shape-id {:keys [leader goal source property]}]
+  [shape-id {:keys [leader goal path source property]}]
   (ptk/reify ::end-pick-leader
     ptk/UpdateEvent
     (update [_ state]
@@ -957,6 +1003,9 @@
              (and (some? goal) (not= goal shape-id))
              ;; as stored: an elbow never set bends as drawn
              (rx/of (set-ik shape-id (assoc (dm/get-in tl [:tracks shape-id :ik]) :goal goal)))
+
+             (and (some? path) (not= path shape-id))
+             (rx/of (set-path-follow shape-id (assoc (some-> tl (cta/path-follow-of shape-id)) :path path)))
 
              (and (some? source) (some? property))
              (rx/of (set-link shape-id (assoc (or (some-> tl (cta/link-of shape-id property))
@@ -990,16 +1039,19 @@
             objects  (dsh/lookup-page-objects state)
             purpose  (picking-purpose state)
             goal?    (= :goal purpose)
+            path?    (= :path purpose)
             link     (when (vector? purpose) (second purpose))]
         (if (and (some? leader-id)
                  (some? tl)
                  (cond
                    (some? link) (cltl/can-link? objects tl leader-id)
                    goal?        (cltl/can-reach? objects tl shape-id leader-id)
+                   path?        (cltl/can-ride-path? objects tl shape-id leader-id)
                    :else        (cltl/can-follow? objects tl shape-id leader-id)))
           (rx/of (end-pick-leader shape-id (cond
                                              (some? link) {:source leader-id :property link}
                                              goal?        {:goal leader-id}
+                                             path?        {:path leader-id}
                                              :else        {:leader leader-id})))
           (rx/empty))))))
 
@@ -1055,6 +1107,13 @@
   a leader."
   [shape-id]
   (pick shape-id :goal))
+
+(defn pick-path
+  "Make the next shape clicked on the canvas or in the layers the path
+  the layer `shape-id` rides (see `set-path-follow`), as `pick-leader`
+  does for a leader."
+  [shape-id]
+  (pick shape-id :path))
 
 (defn pick-link-source
   "Make the next layer clicked on the canvas or in the layers the source

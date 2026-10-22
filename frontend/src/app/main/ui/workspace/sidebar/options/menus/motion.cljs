@@ -1798,6 +1798,153 @@
                               :duration (max 1 (or (:duration timeline) 0))
                               :default-open (= [shape-id (:property wiggle)] (deref fresh*))}])])])))
 
+(mf/defc path-menu*
+  "The outline the selected layer, a single one in a board, rides (see
+  `cta/path-follow-of`): a shape of its board with an outline, chosen in
+  the list or picked on the canvas with the picker; how far along it,
+  its progress (keyframes too), and whether it turns along it, by a turn
+  more. The + of the title shows the section; its - rides none."
+  [{:keys [ids]}]
+  (let [shape-id  (when (= 1 (count ids)) (first ids))
+        objects   (mf/deref refs/workspace-page-objects)
+        timelines (mf/deref ref:timelines)
+        picking   (mf/deref ref:picking)
+        playhead  (mf/deref ref:playhead)
+        board-id  (when (some? shape-id) (cfh/get-shape-id-root-frame objects shape-id))
+        layer?    (and (some? board-id) (not= uuid/zero board-id) (not= board-id shape-id))
+        timeline  (mf/with-memo [timelines board-id]
+                    (or (get timelines board-id) (cta/make-timeline {:board-id board-id})))
+        ridden    (when layer? (cta/path-follow-of timeline shape-id))
+        paths     (mf/with-memo [objects timeline shape-id layer?]
+                    (when layer? (cltl/ride-paths objects timeline shape-id)))
+        options   (mf/with-memo [paths objects]
+                    (into [{:id "" :label (tr "workspace.animation.follow-choose")}]
+                          (map (fn [id] {:id (dm/str id) :label (dm/get-in objects [id :name])}))
+                          paths))
+        ;; the layer whose section the + opened
+        open*     (mf/use-state nil)
+        open?     (or (some? ridden) (= shape-id (deref open*)))
+        [shown? toggle-shown show] (use-section-open :path)
+        picking?  (and (some? shape-id) (= picking [shape-id :path]))
+        animated? (boolean (and (some? ridden) (seq (cta/property-keyframes timeline shape-id :path-progress))))
+        progress  (when (some? ridden)
+                    (if animated?
+                      (:path-progress (dwa/shape-values-at timeline objects (get objects shape-id) playhead))
+                      (:progress ridden)))
+
+        on-add
+        (mf/use-fn
+         (mf/deps shape-id show)
+         (fn []
+           (show)
+           (reset! open* shape-id)))
+
+        on-remove
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn []
+           (reset! open* nil)
+           (st/emit! (dwa/clear-path-follow shape-id))))
+
+        on-path
+        (mf/use-fn
+         (mf/deps shape-id ridden)
+         (fn [id]
+           (when-let [path (uuid/parse* id)]
+             (st/emit! (dwa/set-path-follow shape-id (assoc ridden :path path))))))
+
+        on-pick
+        (mf/use-fn
+         (mf/deps shape-id picking?)
+         (fn []
+           (st/emit! (if picking?
+                       (dwa/cancel-pick-leader)
+                       (dwa/pick-path shape-id)))))
+
+        ;; with keyframes, one at the playhead; else where it rests
+        on-progress
+        (mf/use-fn
+         (mf/deps shape-id animated?)
+         (number-handler
+          (fn [value]
+            (let [value (/ value 100)]
+              (st/emit! (if animated?
+                          (dwa/set-value-at-playhead shape-id :path-progress value)
+                          (dwa/update-path-follow shape-id {:progress value})))))))
+
+        on-orient
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn [event]
+           (st/emit! (dwa/update-path-follow shape-id {:orient (dom/checked? (dom/get-current-target event))}))))
+
+        on-turn
+        (mf/use-fn
+         (mf/deps shape-id)
+         (number-handler #(st/emit! (dwa/update-path-follow shape-id {:turn %}))))]
+
+    ;; leaving the layer closes its section
+    (mf/with-effect [shape-id]
+      #(reset! open* nil))
+
+    (when layer?
+      [:div {:class (stl/css :follow-menu)}
+       [:div {:class (stl/css :animations-title)}
+        [:> title-bar* {:collapsable open?
+                        :collapsed (not shown?)
+                        :on-collapsed toggle-shown
+                        :title (tr "workspace.animation.path-follow")}
+         (if open?
+           [:> icon-button* {:variant "ghost"
+                             :aria-label (tr "workspace.animation.remove-path-follow")
+                             :icon i/remove
+                             :on-click on-remove}]
+           [:> icon-button* {:variant "ghost"
+                             :aria-label (tr "workspace.animation.add-path-follow")
+                             :icon i/add
+                             :on-click on-add}])]]
+
+       (when (and open? shown?)
+         [:div {:class (stl/css :follow-rows)}
+          [:> animation-row* {:label (tr "workspace.animation.path-follow-path")}
+           [:div {:class (stl/css :follow-leader)}
+            [:> select* {:class (stl/css :follow-leader-select)
+                         :options options
+                         :default-selected (if (some? ridden) (dm/str (:path ridden)) "")
+                         :aria-label (tr "workspace.animation.path-follow-path")
+                         :on-change on-path}]
+            [:> icon-button* {:variant "ghost"
+                              :aria-label (tr "workspace.animation.path-follow-pick")
+                              :aria-pressed picking?
+                              :class (stl/css-case :follow-picking picking?)
+                              :icon i/picker
+                              :on-click on-pick}]]]
+
+          (when (some? ridden)
+            [:*
+             [:> animation-row* {:label (tr "workspace.animation.path-progress")}
+              [:div {:class (stl/css :follow-leader)}
+               [:> numeric-input* {:text-icon "%"
+                                   :property (tr "workspace.animation.path-progress")
+                                   :step 1
+                                   :value (mth/precision (* 100 (or progress 0)) 2)
+                                   :on-change on-progress}]
+               [:> keyframe-diamond* {:properties [:path-progress]}]]]
+             [:div {:class (stl/css :link-range)
+                    :title (tr "workspace.animation.path-follow-orient.hint")}
+              [:> checkbox* {:id (dm/str "path-orient-" shape-id)
+                             :label (tr "workspace.animation.path-follow-orient")
+                             :checked (true? (:orient ridden))
+                             :on-change on-orient}]]
+             (when (:orient ridden)
+               [:> animation-row* {:label (tr "workspace.animation.path-follow-turn")}
+                [:> numeric-input* {:text-icon "°"
+                                    :property (tr "workspace.animation.path-follow-turn")
+                                    :step 1
+                                    :value (:turn ridden)
+                                    :on-change on-turn}]])
+             [:p {:class (stl/css :path-hint)} (tr "workspace.animation.path-follow-hint")]])])])))
+
 (mf/defc reach-menu*
   "The goal the selected layer reaches (see `cta/ik-of`), when it ends a
   chain of two follows (an arm: the hand follows the forearm, which

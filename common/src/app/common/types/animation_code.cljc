@@ -63,7 +63,9 @@
    :trim-start "trimStart"
    :trim-end "trimEnd"
    :trim-offset "trimOffset"
-   :content "path"})
+   :content "path"
+   ;; the code has none: it plays a layer riding a path by keyframes
+   :path-progress "pathProgress"})
 
 (def token-setting-names
   "The settings of a style entry a design token sets (see
@@ -80,6 +82,7 @@
   "The animatable properties in the order of the rows of the dock, which
   the code follows."
   [:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y :translate-z
+   :path-progress
    :perspective :perspective-x :perspective-y
    :light-angle :light-height :light-ambient
    :opacity :r1 :r2 :r3 :r4

@@ -10,6 +10,7 @@
   (see `dwa/motion-path`); and the line to the layer it follows."
   (:require
    [app.common.data.macros :as dm]
+   [app.common.geom.path-walk :as gpw]
    [app.common.geom.rect :as grc]
    [app.common.logic.timelines :as cltl]
    [app.common.types.animation :as cta]
@@ -155,11 +156,40 @@
                  :fill color
                  :pointer-events "none"}]])))
 
+(def ^:private ridden-steps
+  "How many pieces the outline of a path ridden is drawn of."
+  240)
+
+(mf/defc ridden-path*
+  "The outline the layer `shape-id` rides (see `cta/path-follow-of`),
+  dashed, where `timeline` shows it at `playhead`, on the way back of
+  ping-pong with `back?`."
+  {::mf/private true}
+  [{:keys [shape-id timeline objects playhead back? zoom]}]
+  (let [path   (dm/get-in timeline [:tracks shape-id :path-follow :path])
+        points (mf/with-memo [timeline objects playhead back? path]
+                 (when (contains? objects path)
+                   (let [board (:board-id timeline)
+                         moved (cltl/shown-shapes {board timeline} objects playhead
+                                                  :back (when back? #{board}))]
+                     (when-let [{:keys [at closed?]} (gpw/walker (or (get moved path) (get objects path)))]
+                       (cond-> (mapv #(:point (at (/ % ridden-steps))) (range (inc ridden-steps)))
+                         closed? (conj (:point (at 0))))))))]
+    (when (some? points)
+      [:polyline {:class "ridden-path"
+                  :points (str/join " " (map #(dm/str (:x %) "," (:y %)) points))
+                  :fill "none"
+                  :stroke color
+                  :stroke-width (/ 1.5 zoom)
+                  :stroke-dasharray (dm/str (/ 6 zoom) " " (/ 3 zoom))
+                  :pointer-events "none"}])))
+
 (mf/defc motion-path*
   "The motion path of the layer `shape-id`. While it is edited (a drag,
   `editing?`), the path follows the edit as it will be recorded (see
   `dwa/edited-motion-path`). While it stands still, the line to the
-  layer it follows, if any."
+  layer it follows, if any. A layer riding a path shows that path, and
+  no motion path of its own, which does not play."
   [{:keys [shape-id zoom editing?]}]
   (let [timeline (mf/deref ref:timeline)
         objects  (mf/deref refs/workspace-page-objects)
@@ -168,12 +198,20 @@
         playhead (mf/deref ref:playhead)
         playing? (mf/deref ref:playing?)
         back?    (mf/deref ref:back?)
-        path     (mf/with-memo [timeline objects shape-id edit playhead]
-                   (when (some? timeline)
+        riding?  (some? (some-> timeline (cta/path-follow-of shape-id)))
+        path     (mf/with-memo [timeline objects shape-id edit playhead riding?]
+                   (when (and (some? timeline) (not riding?))
                      (if (some? edit)
                        (dwa/edited-motion-path timeline objects shape-id playhead edit)
                        (dwa/motion-path timeline objects shape-id))))]
     [:*
+     (when (and riding? (not playing?))
+       [:> ridden-path* {:shape-id shape-id
+                         :timeline timeline
+                         :objects objects
+                         :playhead playhead
+                         :back? back?
+                         :zoom zoom}])
      (when (and (some? timeline) (not playing?) (not editing?))
        [:> follow-line* {:shape-id shape-id
                          :timeline timeline

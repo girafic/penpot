@@ -1167,7 +1167,7 @@
       "Not a property that can be animated"
 
       (not (contains? cta/style-properties property))
-      "A style holds no outline of a path, which is no value relative to a layer"
+      "A style holds no outline of a path, which is no value relative to a layer, nor a progress along one"
 
       (and (some? index) (not (cta/indexed-property? property)))
       "Only fills, strokes and shadows take an index"
@@ -1879,6 +1879,57 @@
                                                     (cond-> (assoc parts :leader leader-id)
                                                       (some? delay) (assoc :delay (mth/round delay))
                                                       (some? from)  (assoc :from (keyword from))))))))))
+
+      ;; The outline a layer rides, as the Path section of the Motion tab
+      ;; sets it: its pivot along it as far as its progress says
+      :pathFollowOf
+      (fn [shape]
+        (when-let [shape-id (layer :pathFollowOf shape)]
+          (when-let [{:keys [path orient turn progress]} (cta/path-follow-of (locate) shape-id)]
+            #js {:path (shape-proxy plugin-id file-id page-id path)
+                 :orient orient
+                 :turn turn
+                 :progress progress})))
+
+      :setPathFollow
+      (fn [shape path-follow]
+        (when-let [shape-id (layer :setPathFollow shape)]
+          (if (nil? path-follow)
+            (write! :setPathFollow #(cta/set-path-follow % shape-id nil))
+            (let [prop     #(when (object? path-follow) (obj/get path-follow %))
+                  path     (prop "path")
+                  path-id  (when (shape-proxy? path) (obj/get path "$id"))
+                  orient   (prop "orient")
+                  turn     (prop "turn")
+                  progress (prop "progress")
+                  objects  (u/locate-objects file-id page-id)
+                  timeline (or (locate) (cta/make-timeline {:board-id board-id}))
+                  error    (cond
+                             (not (object? path-follow))
+                             "The path follow should be an object with a path, or null"
+
+                             (nil? path-id)
+                             "The path should be a shape"
+
+                             (and (some? orient) (not (boolean? orient)))
+                             "orient should be true or false"
+
+                             (and (some? turn) (not (sm/valid-safe-number? turn)))
+                             "turn should be a number of degrees"
+
+                             (and (some? progress) (not (sm/valid-safe-number? progress)))
+                             "progress should be a share of the way, 0 to 1 (past 1 round a closed path again)"
+
+                             (not (cltl/can-ride-path? objects timeline shape-id path-id))
+                             (dm/str "The path should be another shape of the board with an outline, "
+                                     "not one the shape is in or holds, nor one that moves with it"))]
+              (if (some? error)
+                (u/not-valid plugin-id :setPathFollow error)
+                (write! :setPathFollow #(cta/set-path-follow % shape-id
+                                                             (cond-> {:path path-id}
+                                                               (some? orient)   (assoc :orient orient)
+                                                               (some? turn)     (assoc :turn turn)
+                                                               (some? progress) (assoc :progress progress)))))))))
 
       ;; The links of the properties of a layer, as the Links section of
       ;; the Motion tab sets them: each plays a property of a layer of the
