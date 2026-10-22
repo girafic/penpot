@@ -149,8 +149,8 @@
   color: var(--color-accent-primary);
 }
 
-// A link of a property: its head (the property and its remove button),
-// then its rows.
+// A link of a property: its head (the pill of a link, the property and
+// the remove button of a draft), then its rows.
 .link-item {
   display: flex;
   flex-direction: column;
@@ -164,18 +164,14 @@
   justify-content: space-between;
 }
 
-.link-property {
-  @include t.use-typography("body-small");
-
-  color: var(--color-foreground-primary);
-}
-
-// The range switch and the clamp of a link, and the two ends of a range.
+// The range switch and the clamp of a link, as tall as a field, and the
+// two ends of a range.
 .link-range {
   @include t.use-typography("body-small");
 
   display: flex;
   align-items: center;
+  min-block-size: $sz-32;
   color: var(--color-foreground-secondary);
 }
 

@@ -20,6 +20,7 @@
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [use-section-open]]
    [app.main.ui.workspace.timeline.audio-lane :refer [use-lane-rename]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -102,10 +103,14 @@
         input-ref (mf/use-ref nil)
         rows      (mf/with-memo [timeline]
                     (filterv #(= :audio (:type %)) (dwaa/audio-rows timeline)))
+        [shown? toggle-shown show] (use-section-open :audio)
 
         on-add
         (mf/use-fn
-         #(some-> (mf/ref-val input-ref) (dom/click)))
+         (mf/deps show)
+         (fn []
+           (show)
+           (some-> (mf/ref-val input-ref) (dom/click))))
 
         on-files
         (mf/use-fn
@@ -121,7 +126,9 @@
     (when (and (= 1 (count ids)) (= (first ids) board-id))
       [:div {:class (stl/css :audio-menu)}
        [:div {:class (stl/css :audio-title)}
-        [:> title-bar* {:collapsable false
+        [:> title-bar* {:collapsable (boolean (seq rows))
+                        :collapsed (not shown?)
+                        :on-collapsed toggle-shown
                         :title (tr "workspace.animation.audio")}
          [:> icon-button* {:variant "ghost"
                            :aria-label (tr "workspace.animation.add-audio")
@@ -135,7 +142,7 @@
                  :tab-index -1
                  :aria-hidden true
                  :on-change on-files}]]
-       (when (seq rows)
+       (when (and (seq rows) shown?)
          [:div {:class (stl/css :audio-list)}
           (for [row rows]
             [:> audio-lane* {:key (dm/str (:lane row))

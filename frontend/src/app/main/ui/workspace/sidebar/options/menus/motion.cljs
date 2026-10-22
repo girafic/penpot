@@ -51,6 +51,26 @@
 (def ^:private ref:playhead
   (l/derived dwa/shown-playhead st/state))
 
+;; the Motion sections opened or closed by the arrow of their title, by
+;; key, which stay so from layer to layer for the session
+(defonce ^:private opened-sections (atom {}))
+
+(defn use-section-open
+  "Whether the Motion section `key` shows its rows, with the fns that
+  toggle it from the arrow of its title and open it, as its + adds a
+  row: `[open? toggle open]`. It starts open, or closed when
+  `default-open` is false."
+  ([key] (use-section-open key true))
+  ([key default-open]
+   (let [open?  (get (mf/deref opened-sections) key default-open)
+         toggle (mf/use-fn
+                 (mf/deps key default-open)
+                 #(swap! opened-sections (fn [opened] (assoc opened key (not (get opened key default-open))))))
+         open   (mf/use-fn
+                 (mf/deps key)
+                 #(swap! opened-sections assoc key true))]
+     [open? toggle open])))
+
 (def ^:private ref:timeline
   (l/derived dwa/current-timeline st/state))
 
@@ -1149,12 +1169,15 @@
         ;; the layer whose section the + opened
         open*     (mf/use-state nil)
         open?     (or (some? follow) (= shape-id (deref open*)))
+        [shown? toggle-shown show] (use-section-open :follow)
         picking?  (and (some? shape-id) (= picking [shape-id :leader]))
 
         on-add
         (mf/use-fn
-         (mf/deps shape-id)
-         #(reset! open* shape-id))
+         (mf/deps shape-id show)
+         (fn []
+           (show)
+           (reset! open* shape-id)))
 
         on-remove
         (mf/use-fn
@@ -1204,7 +1227,9 @@
     (when layer?
       [:div {:class (stl/css :follow-menu)}
        [:div {:class (stl/css :animations-title)}
-        [:> title-bar* {:collapsable false
+        [:> title-bar* {:collapsable open?
+                        :collapsed (not shown?)
+                        :on-collapsed toggle-shown
                         :title (tr "workspace.animation.follow")}
          (if open?
            [:> icon-button* {:variant "ghost"
@@ -1216,7 +1241,7 @@
                              :icon i/add
                              :on-click on-add}])]]
 
-       (when open?
+       (when (and open? shown?)
          [:div {:class (stl/css :follow-rows)}
           [:> animation-row* {:label (tr "workspace.animation.follow-leader")}
            [:div {:class (stl/css :follow-leader)}
@@ -1273,18 +1298,35 @@
                (map (fn [property] {:id (name property) :label (labels/property-label property nil)})))
          cta/link-properties)))
 
+(defn- link-summary
+  "What the `link` plays, for its closed head: the layer, among the
+  options `sources`, and the property of its source, then its factor
+  unless it is 1 or the link maps a range."
+  [{:keys [source source-property factor input]} sources]
+  (let [layer (:label (d/seek #(= (dm/str source) (:id %)) sources))]
+    (cond-> (dm/str layer " · " (labels/property-label source-property nil))
+      (and (nil? input) (number? factor) (not= 1 factor))
+      (dm/str " × " (mth/precision factor 2)))))
+
 (mf/defc link-item*
   "A link of the layer `shape-id`, `link` (see `cta/links-of`), or a
   draft of one (`draft?`, no source yet): the layer and property it plays
   and how (factor, offset, delay). `sources` are the options of its
   layer, `picking` the pick under way (see `ref:picking`), `taken` the
   properties linked already, which a draft cannot take; `on-draft` takes
-  the property a draft is for, `on-remove` drops a draft."
+  the property a draft is for, `on-remove` drops a draft. A link shows
+  its head, opened by its left button; a draft starts open and stays
+  open once its layer is chosen."
   {::mf/private true}
   [{:keys [shape-id link draft? sources picking taken on-draft on-remove]}]
   (let [{:keys [property source source-property factor offset delay input output clamp easing]} link
         picking? (= picking [shape-id [:link property]])
         ranged?  (some? input)
+        open*    (mf/use-state (true? draft?))
+        open?    (deref open*)
+
+        on-toggle
+        (mf/use-fn #(swap! open* not))
 
         on-property
         (mf/use-fn
@@ -1376,102 +1418,112 @@
              (st/emit! (dwa/remove-link shape-id property)))))]
 
     [:div {:class (stl/css :link-item)}
-     [:div {:class (stl/css :link-head)}
-      (if draft?
+     (if draft?
+       [:div {:class (stl/css :link-head)}
         [:> select* {:class (stl/css :follow-leader-select)
                      :options (link-property-options taken)
                      :default-selected (name property)
                      :aria-label (tr "workspace.animation.link-property")
                      :on-change on-property}]
-        [:span {:class (stl/css :link-property)} (labels/property-label property nil)])
-      [:> icon-button* {:variant "ghost"
-                        :aria-label (tr "workspace.animation.remove-link")
-                        :icon i/remove
-                        :on-click on-unlink}]]
-     [:> animation-row* {:label (tr "workspace.animation.link-source")}
-      [:div {:class (stl/css :follow-leader)}
-       [:> select* {:class (stl/css :follow-leader-select)
-                    :options sources
-                    :default-selected (if (some? source) (dm/str source) "")
-                    :aria-label (tr "workspace.animation.link-source")
-                    :on-change on-source}]
-       [:> icon-button* {:variant "ghost"
-                         :aria-label (tr "workspace.animation.link-pick")
-                         :aria-pressed picking?
-                         :class (stl/css-case :follow-picking picking?)
-                         :icon i/picker
-                         :on-click on-pick}]]]
-     (when-not draft?
+        [:> icon-button* {:variant "ghost"
+                          :aria-label (tr "workspace.animation.remove-link")
+                          :icon i/remove
+                          :on-click on-unlink}]]
+       [:> prototype-pill* {:title (labels/property-label property nil)
+                            :description (link-summary link sources)
+                            :left-button-icon-id i/hsva
+                            :left-button-tooltip (tr "labels.options")
+                            :is-left-button-active open?
+                            :on-left-button-click on-toggle
+                            :right-button-icon-id i/remove
+                            :right-button-tooltip (tr "workspace.animation.remove-link")
+                            :on-right-button-click on-unlink}])
+     (when open?
        [:*
-        [:> animation-row* {:label (tr "workspace.animation.link-source-property")}
-         [:> select* {:class (stl/css :follow-leader-select)
-                      :options (link-property-options)
-                      :default-selected (name source-property)
-                      :aria-label (tr "workspace.animation.link-source-property")
-                      :on-change on-source-property}]]
-        [:div {:class (stl/css :link-range)
-               :title (tr "workspace.animation.link-range.hint")}
-         [:> checkbox* {:id (dm/str "link-range-" (name property))
-                        :label (tr "workspace.animation.link-range")
-                        :checked ranged?
-                        :on-change on-range}]]
-        (if ranged?
+        [:> animation-row* {:label (tr "workspace.animation.link-source")}
+         [:div {:class (stl/css :follow-leader)}
+          [:> select* {:class (stl/css :follow-leader-select)
+                       :options sources
+                       :default-selected (if (some? source) (dm/str source) "")
+                       :aria-label (tr "workspace.animation.link-source")
+                       :on-change on-source}]
+          [:> icon-button* {:variant "ghost"
+                            :aria-label (tr "workspace.animation.link-pick")
+                            :aria-pressed picking?
+                            :class (stl/css-case :follow-picking picking?)
+                            :icon i/picker
+                            :on-click on-pick}]]]
+        (when-not draft?
           [:*
-           ;; its input, from and to, and the output they map to
-           [:> animation-row* {:label (tr "workspace.animation.link-input")}
-            [:div {:class (stl/css :link-ends)}
-             [:> numeric-input* {:property (tr "workspace.animation.link-input")
-                                 :value (first input)
-                                 :on-change on-input-from}]
-             [:> numeric-input* {:text-icon "→"
-                                 :property (tr "workspace.animation.link-input")
-                                 :value (second input)
-                                 :on-change on-input-to}]]]
-           [:> animation-row* {:label (tr "workspace.animation.link-output")}
-            [:div {:class (stl/css :link-ends)}
-             [:> numeric-input* {:property (tr "workspace.animation.link-output")
-                                 :value (first output)
-                                 :on-change on-output-from}]
-             [:> numeric-input* {:text-icon "→"
-                                 :property (tr "workspace.animation.link-output")
-                                 :value (second output)
-                                 :on-change on-output-to}]]]
-           [:> animation-row* {:label (tr "workspace.options.interaction-easing")}
+           [:> animation-row* {:label (tr "workspace.animation.link-source-property")}
             [:> select* {:class (stl/css :follow-leader-select)
-                         :options [{:id "linear" :label (tr "workspace.options.interaction-easing-linear")}
-                                   {:id "ease" :label (tr "workspace.options.interaction-easing-ease")}
-                                   {:id "ease-in" :label (tr "workspace.options.interaction-easing-ease-in")}
-                                   {:id "ease-out" :label (tr "workspace.options.interaction-easing-ease-out")}
-                                   {:id "ease-in-out" :label (tr "workspace.options.interaction-easing-ease-in-out")}]
-                         :default-selected (name easing)
-                         :aria-label (tr "workspace.options.interaction-easing")
-                         :on-change on-easing}]]
+                         :options (link-property-options)
+                         :default-selected (name source-property)
+                         :aria-label (tr "workspace.animation.link-source-property")
+                         :on-change on-source-property}]]
            [:div {:class (stl/css :link-range)
-                  :title (tr "workspace.animation.link-clamp.hint")}
-            [:> checkbox* {:id (dm/str "link-clamp-" (name property))
-                           :label (tr "workspace.animation.link-clamp")
-                           :checked (true? clamp)
-                           :on-change on-clamp}]]]
-          [:*
-           [:> animation-row* {:label (tr "workspace.animation.link-factor")}
-            [:> numeric-input* {:text-icon "×"
-                                :property (tr "workspace.animation.link-factor")
-                                :step 0.1
-                                :value factor
-                                :on-change on-factor}]]
-           [:> animation-row* {:label (tr "workspace.animation.link-offset")}
-            [:> numeric-input* {:text-icon "+"
-                                :property (tr "workspace.animation.link-offset")
-                                :step 1
-                                :value offset
-                                :on-change on-offset}]]])
-        [:> animation-row* {:label (tr "workspace.animation.link-delay")}
-         [:> numeric-input* {:text-icon "ms"
-                             :property (tr "workspace.animation.link-delay")
-                             :min 0
-                             :step 10
-                             :value delay
-                             :on-change on-delay}]]])]))
+                  :title (tr "workspace.animation.link-range.hint")}
+            [:> checkbox* {:id (dm/str "link-range-" (name property))
+                           :label (tr "workspace.animation.link-range")
+                           :checked ranged?
+                           :on-change on-range}]]
+           (if ranged?
+             [:*
+              ;; its input, from and to, and the output they map to
+              [:> animation-row* {:label (tr "workspace.animation.link-input")}
+               [:div {:class (stl/css :link-ends)}
+                [:> numeric-input* {:property (tr "workspace.animation.link-input")
+                                    :value (first input)
+                                    :on-change on-input-from}]
+                [:> numeric-input* {:text-icon "→"
+                                    :property (tr "workspace.animation.link-input")
+                                    :value (second input)
+                                    :on-change on-input-to}]]]
+              [:> animation-row* {:label (tr "workspace.animation.link-output")}
+               [:div {:class (stl/css :link-ends)}
+                [:> numeric-input* {:property (tr "workspace.animation.link-output")
+                                    :value (first output)
+                                    :on-change on-output-from}]
+                [:> numeric-input* {:text-icon "→"
+                                    :property (tr "workspace.animation.link-output")
+                                    :value (second output)
+                                    :on-change on-output-to}]]]
+              [:> animation-row* {:label (tr "workspace.options.interaction-easing")}
+               [:> select* {:class (stl/css :follow-leader-select)
+                            :options [{:id "linear" :label (tr "workspace.options.interaction-easing-linear")}
+                                      {:id "ease" :label (tr "workspace.options.interaction-easing-ease")}
+                                      {:id "ease-in" :label (tr "workspace.options.interaction-easing-ease-in")}
+                                      {:id "ease-out" :label (tr "workspace.options.interaction-easing-ease-out")}
+                                      {:id "ease-in-out" :label (tr "workspace.options.interaction-easing-ease-in-out")}]
+                            :default-selected (name easing)
+                            :aria-label (tr "workspace.options.interaction-easing")
+                            :on-change on-easing}]]
+              [:div {:class (stl/css :link-range)
+                     :title (tr "workspace.animation.link-clamp.hint")}
+               [:> checkbox* {:id (dm/str "link-clamp-" (name property))
+                              :label (tr "workspace.animation.link-clamp")
+                              :checked (true? clamp)
+                              :on-change on-clamp}]]]
+             [:*
+              [:> animation-row* {:label (tr "workspace.animation.link-factor")}
+               [:> numeric-input* {:text-icon "×"
+                                   :property (tr "workspace.animation.link-factor")
+                                   :step 0.1
+                                   :value factor
+                                   :on-change on-factor}]]
+              [:> animation-row* {:label (tr "workspace.animation.link-offset")}
+               [:> numeric-input* {:text-icon "+"
+                                   :property (tr "workspace.animation.link-offset")
+                                   :step 1
+                                   :value offset
+                                   :on-change on-offset}]]])
+           [:> animation-row* {:label (tr "workspace.animation.link-delay")}
+            [:> numeric-input* {:text-icon "ms"
+                                :property (tr "workspace.animation.link-delay")
+                                :min 0
+                                :step 10
+                                :value delay
+                                :on-change on-delay}]]])])]))
 
 (mf/defc links-menu*
   "The links of the properties of the selected layer, a single one in a
@@ -1502,11 +1554,16 @@
                     (when (and (= id shape-id) (not (contains? taken property)))
                       property))
         free      (first (remove taken cta/link-properties))
+        rows?     (or (seq links) (some? draft))
+        [shown? toggle-shown show] (use-section-open :links)
 
         on-add
         (mf/use-fn
-         (mf/deps shape-id free)
-         #(when (some? free) (reset! draft* [shape-id free])))
+         (mf/deps shape-id free show)
+         (fn []
+           (when (some? free)
+             (show)
+             (reset! draft* [shape-id free]))))
 
         on-draft
         (mf/use-fn
@@ -1523,31 +1580,35 @@
     (when layer?
       [:div {:class (stl/css :follow-menu)}
        [:div {:class (stl/css :animations-title)}
-        [:> title-bar* {:collapsable false
+        [:> title-bar* {:collapsable (boolean rows?)
+                        :collapsed (not shown?)
+                        :on-collapsed toggle-shown
                         :title (tr "workspace.animation.links")}
          [:> icon-button* {:variant "ghost"
                            :aria-label (tr "workspace.animation.add-link")
                            :icon i/add
                            :disabled (or (nil? free) (some? draft))
                            :on-click on-add}]]]
-       (when (or (seq links) (some? draft))
+       (when (and rows? shown?)
          [:div {:class (stl/css :follow-rows)}
-          (for [link links]
-            [:> link-item* {:key (name (:property link))
-                            :shape-id shape-id
-                            :link link
-                            :sources sources
-                            :picking picking}])
-          (when (some? draft)
-            [:> link-item* {:key "draft"
-                            :shape-id shape-id
-                            :link {:property draft}
-                            :draft? true
-                            :sources sources
-                            :picking picking
-                            :taken taken
-                            :on-draft on-draft
-                            :on-remove on-remove-draft}])])])))
+          ;; one list keyed by property, so a draft keeps its place, and
+          ;; stays open, once its layer is chosen
+          (for [link (cond-> (vec links) (some? draft) (conj {:property draft ::draft true}))]
+            (if (::draft link)
+              [:> link-item* {:key (name (:property link))
+                              :shape-id shape-id
+                              :link {:property draft}
+                              :draft? true
+                              :sources sources
+                              :picking picking
+                              :taken taken
+                              :on-draft on-draft
+                              :on-remove on-remove-draft}]
+              [:> link-item* {:key (name (:property link))
+                              :shape-id shape-id
+                              :link link
+                              :sources sources
+                              :picking picking}]))])])))
 
 (mf/defc reach-menu*
   "The goal the selected layer reaches (see `cta/ik-of`), when it ends a
@@ -1582,12 +1643,15 @@
         ;; the layer whose section the + opened
         open*     (mf/use-state nil)
         open?     (or (some? ik) (= shape-id (deref open*)))
+        [shown? toggle-shown show] (use-section-open :reach)
         picking?  (and (some? shape-id) (= picking [shape-id :goal]))
 
         on-add
         (mf/use-fn
-         (mf/deps shape-id)
-         #(reset! open* shape-id))
+         (mf/deps shape-id show)
+         (fn []
+           (show)
+           (reset! open* shape-id)))
 
         on-remove
         (mf/use-fn
@@ -1635,7 +1699,9 @@
     (when (or chain? (some? ik))
       [:div {:class (stl/css :follow-menu)}
        [:div {:class (stl/css :animations-title)}
-        [:> title-bar* {:collapsable false
+        [:> title-bar* {:collapsable open?
+                        :collapsed (not shown?)
+                        :on-collapsed toggle-shown
                         :title (tr "workspace.animation.reach")}
          (if open?
            [:> icon-button* {:variant "ghost"
@@ -1647,7 +1713,7 @@
                              :icon i/add
                              :on-click on-add}])]]
 
-       (when open?
+       (when (and open? shown?)
          [:div {:class (stl/css :follow-rows)}
           (when (some? problem)
             [:p {:class (stl/css :reach-broken)}
@@ -1730,6 +1796,7 @@
         open*      (mf/use-state false)
         open?      (deref open*)
         menu-style* (mf/use-state nil)
+        [shown? toggle-shown show] (use-section-open :animations)
 
         on-toggle-menu
         (mf/use-fn
@@ -1752,27 +1819,31 @@
 
         on-add
         (mf/use-fn
-         (mf/deps ids)
+         (mf/deps ids show)
          (fn [event]
            (let [preset (-> (dom/get-current-target event)
                             (dom/get-data "preset")
                             (keyword))]
              (reset! open* false)
+             (show)
              (st/emit! (dwa/add-animation-preset ids preset)))))
 
         on-apply-style
         (mf/use-fn
-         (mf/deps ids)
+         (mf/deps ids show)
          (fn [event]
            (let [node (dom/get-current-target event)]
              (reset! open* false)
+             (show)
              (st/emit! (dwa/apply-animation-style ids
                                                   (uuid/parse (dom/get-data node "library"))
                                                   (uuid/parse (dom/get-data node "style")))))))]
 
     [:div {:class (stl/css :animations-menu)}
      [:div {:class (stl/css :animations-title)}
-      [:> title-bar* {:collapsable false
+      [:> title-bar* {:collapsable true
+                      :collapsed (not shown?)
+                      :on-collapsed toggle-shown
                       :title (tr "workspace.animation.animations")}
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.animation.add-animation")
@@ -1814,37 +1885,39 @@
                                      :on-click on-apply-style}
              (style-label style)])])]]
 
-     (when (> (count ids) 1)
-       [:div {:class (stl/css :stagger-row)}
-        [:> animation-row* {:label (tr "workspace.animation.stagger")}
-         [:> numeric-input* {:text-icon "ms"
-                             :property (tr "workspace.animation.stagger")
-                             :min 0
-                             :step 10
-                             :value stagger
-                             :on-change on-stagger}]]])
+     (when shown?
+       [:*
+        (when (> (count ids) 1)
+          [:div {:class (stl/css :stagger-row)}
+           [:> animation-row* {:label (tr "workspace.animation.stagger")}
+            [:> numeric-input* {:text-icon "ms"
+                                :property (tr "workspace.animation.stagger")
+                                :min 0
+                                :step 10
+                                :value stagger
+                                :on-change on-stagger}]]])
 
-     (when (some? shape-id)
-       [:> copy-clock-rows* {:shape-id shape-id}])
+        (when (some? shape-id)
+          [:> copy-clock-rows* {:shape-id shape-id}])
 
-     (when (seq animations)
-       [:div {:class (stl/css :animations-list)}
-        (for [animation animations]
-          (if (cta/style-use? animation)
-            (let [library-id (:style-ref-file animation)]
-              [:> style-use-item* {:key (dm/str (:id animation))
-                                   :shape-id shape-id
-                                   :animation animation
-                                   :local? (= library-id file-id)
-                                   :library-name (when (not= library-id file-id)
-                                                   (dm/get-in files [library-id :name]))}])
-            [:> layer-animation-item* {:key (dm/str (:id animation))
-                                       :shape-id shape-id
-                                       :animation animation
-                                       :text text
-                                       :tokens tokens}]))])
+        (when (seq animations)
+          [:div {:class (stl/css :animations-list)}
+           (for [animation animations]
+             (if (cta/style-use? animation)
+               (let [library-id (:style-ref-file animation)]
+                 [:> style-use-item* {:key (dm/str (:id animation))
+                                      :shape-id shape-id
+                                      :animation animation
+                                      :local? (= library-id file-id)
+                                      :library-name (when (not= library-id file-id)
+                                                      (dm/get-in files [library-id :name]))}])
+               [:> layer-animation-item* {:key (dm/str (:id animation))
+                                          :shape-id shape-id
+                                          :animation animation
+                                          :text text
+                                          :tokens tokens}]))])
 
-     (when (some? shape-id)
-       [:> save-style* {:shape-id shape-id
-                        :track (dm/get-in timeline [:tracks shape-id])
-                        :style-count (count (dm/get-in files [file-id :data :animation-styles]))}])]))
+        (when (some? shape-id)
+          [:> save-style* {:shape-id shape-id
+                           :track (dm/get-in timeline [:tracks shape-id])
+                           :style-count (count (dm/get-in files [file-id :data :animation-styles]))}])])]))

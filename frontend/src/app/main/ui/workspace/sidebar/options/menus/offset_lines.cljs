@@ -24,6 +24,7 @@
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [use-section-open]]
    [app.main.ui.workspace.sidebar.options.menus.motion-field :refer [labelled-number*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -134,12 +135,15 @@
         id        (:id shape)
         copy?     (ctk/in-component-copy? shape)
         source?   (some? (gol/layers-of objects shape))
-        on-add    (mf/use-fn (mf/deps id) #(st/emit! (dwol/make-offset-lines id)))
+        [shown? toggle-shown show] (use-section-open :offset-lines)
+        on-add    (mf/use-fn (mf/deps id show) (fn [] (show) (st/emit! (dwol/make-offset-lines id))))
         change    (mf/use-fn (mf/deps id) (fn [k v] (st/emit! (dwol/set-offset-lines id {k v}))))
         on-update (mf/use-fn (mf/deps id) #(st/emit! (dwol/set-offset-lines id)))]
     [:section {:class (stl/css :offset-lines)
                :aria-label (tr "workspace.options.offset-lines")}
-     [:> title-bar* {:collapsable false
+     [:> title-bar* {:collapsable (some? spec)
+                     :collapsed (not shown?)
+                     :on-collapsed toggle-shown
                      :title (tr "workspace.options.offset-lines")
                      :class (stl/css :title)}
       (when (and (nil? spec) (not copy?))
@@ -148,7 +152,7 @@
                           :on-click on-add
                           :icon i/add}])]
      (cond
-       (nil? spec)
+       (or (nil? spec) (not shown?))
        nil
 
        (not source?)
