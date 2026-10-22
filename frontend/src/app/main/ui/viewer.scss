@@ -264,6 +264,28 @@
   display: none;
 }
 
+// Play, pause and sound of the board, at the bottom of the preview: shown
+// while it is paused and while the pointer is over the preview, as a
+// video player's.
+.preview-controls {
+  position: fixed;
+  inset-block-end: deprecated.$s-12;
+  inset-inline-start: 50%;
+  z-index: deprecated.$z-index-3;
+  padding: deprecated.$s-4;
+  border-radius: deprecated.$br-8;
+  background-color: var(--viewer-controls-background-color);
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 0.2s;
+}
+
+[data-playing="false"] .preview-controls,
+[data-preview="true"]:hover .preview-controls,
+.preview-controls:focus-within {
+  opacity: 1;
+}
+
 /** FULLSCREEN */
 [data-fullscreen="true"] .viewer-bottom {
   transform: translateY(deprecated.$s-40);

@@ -5,6 +5,7 @@
 // Copyright (c) KALEIDOS INC
 
 @use "ds/_sizes.scss" as *;
+@use "ds/_utils.scss" as *;
 @use "ds/_borders.scss" as *;
 @use "ds/typography.scss" as t;
 
@@ -51,6 +52,30 @@
   flex: none;
   align-items: center;
   cursor: default;
+}
+
+// The pin, pressed while the preview shows the board selected.
+.pinned {
+  color: var(--color-accent-primary);
+}
+
+// The zoom, named as it is: a click goes on to the next.
+.zoom {
+  @include t.use-typography("body-small");
+
+  min-inline-size: px2rem(40);
+  block-size: $sz-24;
+  padding-inline: var(--sp-xs);
+  border: none;
+  border-radius: $br-4;
+  background: none;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-foreground-primary);
+  }
 }
 
 .title {

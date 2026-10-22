@@ -9457,6 +9457,18 @@ msgstr "Close preview (Shift+Space)"
 msgid "workspace.preview.saving"
 msgstr "Saving…"
 
+msgid "workspace.preview.follow"
+msgstr "Show the board selected"
+
+msgid "workspace.preview.zoom"
+msgstr "Zoom: fit, fill or 100%"
+
+msgid "workspace.preview.zoom-fit"
+msgstr "Fit"
+
+msgid "workspace.preview.zoom-fill"
+msgstr "Fill"
+
 msgid "workspace.options.scene"
 msgstr "3D view"
 

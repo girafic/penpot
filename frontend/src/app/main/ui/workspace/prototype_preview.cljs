@@ -9,9 +9,11 @@
   Space, see `dwpp/toggle-preview`): the view mode of the page in a
   frame, once what is edited is saved, showing it again each time the
   workspace saves; a bar on top that moves the window, with back,
-  forth, start again, open in the view mode and close, and the corners
-  at its bottom that resize it. Where it is, as `{:x :y :w :h}` px of the browser window,
-  is kept for the next time."
+  forth, start again, a pin that makes it show the board selected in the
+  workspace, the zoom (fit, fill or 100 %), open in the view mode and
+  close, and the corners at its bottom that resize it. Where it is, as
+  `{:x :y :w :h}` px of the browser window, the pin and the zoom are
+  kept for the next time."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
@@ -56,23 +58,32 @@
                      (+ (* inner-h (/ (max 1 bw) (max 1 bh))) (* 2 border)))]
     {:x (/ (- vw w) 2) :y (/ (- vh h) 2) :w w :h h}))
 
+(def zoom-modes
+  "The zooms of the preview, in the order its button goes through them:
+  the board fitted in the window, filling it, or at its own size."
+  ["fit" "fill" "100"])
+
 (defn- preview-uri
   "The view mode of the page `page-id` of the file `file-id` as a
-  preview, from the board `frame-id` (or where it starts)."
-  [file-id page-id frame-id]
+  preview, from the board `frame-id` (or where it starts), at `zoom`
+  (see `zoom-modes`)."
+  [file-id page-id frame-id zoom]
   (rt/resolve-uri (:router @st/state) :viewer
                   (d/without-nils {:file-id (dm/str file-id)
                                    :page-id (dm/str page-id)
                                    :frame-id (some-> frame-id dm/str)
                                    :section "interactions"
-                                   :zoom "fit"
+                                   :zoom (when (contains? #{"fit" "fill"} zoom) zoom)
                                    :preview "true"})))
 
 (defn- post!
-  "Tells the view mode in `iframe` (see `viewer-content*`) `type`."
-  [iframe type]
-  (when-let [target (some-> iframe .-contentWindow)]
-    (.postMessage target #js {:type type} (.. js/window -location -origin))))
+  "Tells the view mode in `iframe` (see `viewer-content*`) `type`, with
+  the fields of `data`."
+  ([iframe type]
+   (post! iframe type nil))
+  ([iframe type data]
+   (when-let [target (some-> iframe .-contentWindow)]
+     (.postMessage target (clj->js (assoc data :type type)) (.. js/window -location -origin)))))
 
 (def ^:private corners
   "The corners that resize the window: those at its bottom, the bar and
@@ -85,7 +96,17 @@
   [{:keys [file-id preview]}]
   (let [{:keys [page-id frame-id]} preview
         objects    (mf/deref refs/workspace-page-objects)
-        board      (get objects frame-id)
+        current    (mf/deref refs/current-page-id)
+        selected   (mf/deref refs/selected-shapes)
+        ;; the board on screen, as the pin moves it
+        shown*     (mf/use-state frame-id)
+        board      (get objects (deref shown*))
+        follow*    (mf/use-state #(get storage/user ::follow true))
+        follow?    (deref follow*)
+        zoom*      (mf/use-state #(get storage/user ::zoom "fit"))
+        zoom       (deref zoom*)
+        ;; the board of the selection the preview last went to
+        sent-ref   (mf/use-ref frame-id)
         [vw vh]    (cw/use-window-size)
         stored*    (mf/use-state #(get storage/user ::frame))
         drag-frame* (mf/use-state nil)
@@ -100,8 +121,9 @@
         ready?     (deref ready*)
         ;; a new frame each time it starts again
         run*       (mf/use-state 0)
-        uri        (mf/with-memo [file-id page-id frame-id]
-                     (preview-uri file-id page-id frame-id))
+        ;; the zoom it starts at, as it starts again
+        uri        (mf/with-memo [file-id page-id frame-id (deref run*)]
+                     (preview-uri file-id page-id frame-id zoom))
 
         on-down
         (mf/use-fn
@@ -147,7 +169,28 @@
 
         on-back    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-back"))
         on-forward (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-forward"))
-        on-restart (mf/use-fn #(swap! run* inc))
+        on-restart (mf/use-fn
+                    (mf/deps frame-id)
+                    (fn []
+                      (reset! shown* frame-id)
+                      (mf/set-ref-val! sent-ref frame-id)
+                      (swap! run* inc)))
+
+        on-follow
+        (mf/use-fn
+         (mf/deps follow?)
+         (fn []
+           (reset! follow* (not follow?))
+           (swap! storage/user assoc ::follow (not follow?))))
+
+        on-zoom
+        (mf/use-fn
+         (mf/deps zoom)
+         (fn []
+           (let [next (get zoom-modes (mod (inc (d/index-of zoom-modes zoom)) (count zoom-modes)))]
+             (reset! zoom* next)
+             (swap! storage/user assoc ::zoom next)
+             (post! (mf/ref-val iframe-ref) "penpot:preview-zoom" {:mode next}))))
         on-close   (mf/use-fn #(st/emit! (dwpp/close-preview)))
 
         on-open
@@ -177,6 +220,23 @@
           (fn []
             (remove-watch refs/persistence key)
             (some-> @timer js/clearTimeout)))))
+
+    ;; a new board to start at, a new page
+    (mf/with-effect [frame-id]
+      (reset! shown* frame-id)
+      (mf/set-ref-val! sent-ref frame-id))
+
+    ;; pinned, it shows the board of the selection: on its page it goes
+    ;; there, on another it starts again there
+    (mf/with-effect [follow? ready? selected current page-id objects]
+      (when (and follow? ready?)
+        (when-let [board-id (dwpp/start-frame-id objects selected)]
+          (when (not= board-id (mf/ref-val sent-ref))
+            (mf/set-ref-val! sent-ref board-id)
+            (if (= current page-id)
+              (do (reset! shown* board-id)
+                  (post! (mf/ref-val iframe-ref) "penpot:preview-go" {:frameId (dm/str board-id)}))
+              (st/emit! (dwpp/open-preview)))))))
 
     ;; Shift + Space in the view mode closes it too
     (mf/with-effect []
@@ -222,12 +282,26 @@
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.preview.restart")
                          :icon "reload"
-                         :on-click on-restart}]]
+                         :on-click on-restart}]
+       [:> icon-button* {:variant "ghost"
+                         :aria-label (tr "workspace.preview.follow")
+                         :aria-pressed follow?
+                         :class (stl/css-case :pinned follow?)
+                         :icon "pin"
+                         :on-click on-follow}]]
       [:span {:class (stl/css :title)}
        (or (:name board) (tr "workspace.preview.title"))]
       [:div {:class (stl/css :buttons)
              :on-pointer-down dom/stop-propagation
              :on-double-click dom/stop-propagation}
+       [:button {:type "button"
+                 :class (stl/css :zoom)
+                 :title (tr "workspace.preview.zoom")
+                 :on-click on-zoom}
+        (case zoom
+          "fill" (tr "workspace.preview.zoom-fill")
+          "100"  "100%"
+          (tr "workspace.preview.zoom-fit"))]
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.preview.open")
                          :icon "open-link"

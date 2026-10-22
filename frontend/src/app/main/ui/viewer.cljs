@@ -17,6 +17,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.types.text :as txt]
+   [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
@@ -474,6 +475,8 @@
 
         fullscreen? (mf/deref header/fullscreen-ref)
         overlays    (mf/deref current-overlays-ref)
+        ;; the preview shows its controls while paused
+        playing?    (mf/deref ref:timeline-playing?)
 
         orig-frame
         (mf/with-memo [current-animations]
@@ -620,9 +623,13 @@
       (when (and preview (some? index))
         (st/emit! (dv/preview-screen index))))
 
+    ;; fitted or filled as it resizes; at 100 % as it is
     (mf/with-effect [preview (:viewport-size local) (:id frame)]
       (when (and preview (some? frame))
-        (st/emit! dv/zoom-to-fit)))
+        (case (:zoom-type local)
+          :fit  (st/emit! dv/zoom-to-fit)
+          :fill (st/emit! dv/zoom-to-fill)
+          nil)))
 
     (mf/with-effect [preview]
       (when preview
@@ -633,11 +640,22 @@
               (fn [^js event]
                 (when (and (identical? (.-source event) parent)
                            (= (.-origin event) origin))
-                  (case (some-> (.-data event) (unchecked-get "type"))
-                    "penpot:preview-refresh" (st/emit! (dv/refresh-bundle))
-                    "penpot:preview-back"    (st/emit! (dv/preview-step :back))
-                    "penpot:preview-forward" (st/emit! (dv/preview-step :forward))
-                    nil)))
+                  (let [data (.-data event)]
+                    (case (some-> data (unchecked-get "type"))
+                      "penpot:preview-refresh" (st/emit! (dv/refresh-bundle))
+                      "penpot:preview-back"    (st/emit! (dv/preview-step :back))
+                      "penpot:preview-forward" (st/emit! (dv/preview-step :forward))
+                      ;; the board selected in the workspace
+                      "penpot:preview-go"      (some->> (unchecked-get data "frameId")
+                                                        (uuid/parse*)
+                                                        (dv/go-to-frame)
+                                                        (st/emit!))
+                      "penpot:preview-zoom"    (case (unchecked-get data "mode")
+                                                 "fit"  (st/emit! dv/zoom-to-fit)
+                                                 "fill" (st/emit! dv/zoom-to-fill)
+                                                 "100"  (st/emit! dv/reset-zoom)
+                                                 nil)
+                      nil))))
 
               on-key-down
               (fn [^js event]
@@ -815,7 +833,8 @@
               :inspect-layout (= section :inspect))
       :data-fullscreen fullscreen?
       :data-force-visible (:show-thumbnails local)
-      :data-preview (true? preview)}
+      :data-preview (true? preview)
+      :data-playing playing?}
 
 
      [:div {:class (stl/css :viewer-content)}
@@ -880,6 +899,11 @@
               :index index
               :animated (some? clock)
               :sound board-sound?}]]))]]
+
+     ;; play, pause and sound of an animated board, over the preview
+     (when (and preview (some? clock) (some? frame))
+       [:div {:class (stl/css :preview-controls)}
+        [:> timeline-controls* {:board-id (:id frame) :sound? board-sound?}]])
 
      (when-not preview
        [:& header/header {:project project
