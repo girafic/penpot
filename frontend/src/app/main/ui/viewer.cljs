@@ -618,18 +618,21 @@
     ;; `app.main.ui.workspace.prototype-preview`): the board fitted in its
     ;; window as it resizes, the screens in a history of their own, and
     ;; what the workspace asks of it (to show what it saved, to go back
-    ;; or forth); Shift + Space in it closes it, as in the workspace.
-    (mf/with-effect [preview index]
+    ;; or forth, to the board selected, a zoom); it tells the workspace
+    ;; once it listens and which board it shows. Shift + Space in it
+    ;; closes it, as in the workspace.
+    (mf/with-effect [preview index (:id frame)]
       (when (and preview (some? index))
-        (st/emit! (dv/preview-screen index))))
+        (st/emit! (dv/preview-screen index))
+        (when (some? frame)
+          (.postMessage (.-parent js/window)
+                        #js {:type "penpot:preview-shown" :frameId (dm/str (:id frame))}
+                        (.. js/window -location -origin)))))
 
     ;; fitted or filled as it resizes; at 100 % as it is
     (mf/with-effect [preview (:viewport-size local) (:id frame)]
       (when (and preview (some? frame))
-        (case (:zoom-type local)
-          :fit  (st/emit! dv/zoom-to-fit)
-          :fill (st/emit! dv/zoom-to-fill)
-          nil)))
+        (st/emit! (dv/refit-preview))))
 
     (mf/with-effect [preview]
       (when preview
@@ -648,13 +651,10 @@
                       ;; the board selected in the workspace
                       "penpot:preview-go"      (some->> (unchecked-get data "frameId")
                                                         (uuid/parse*)
-                                                        (dv/go-to-frame)
+                                                        (dv/preview-go)
                                                         (st/emit!))
-                      "penpot:preview-zoom"    (case (unchecked-get data "mode")
-                                                 "fit"  (st/emit! dv/zoom-to-fit)
-                                                 "fill" (st/emit! dv/zoom-to-fill)
-                                                 "100"  (st/emit! dv/reset-zoom)
-                                                 nil)
+                      "penpot:preview-zoom"    (some-> (dv/preview-zoom (unchecked-get data "mode"))
+                                                       (st/emit!))
                       nil))))
 
               on-key-down
@@ -664,6 +664,8 @@
                   (.postMessage parent #js {:type "penpot:preview-close"} origin)))]
           (.addEventListener js/window "message" on-message)
           (.addEventListener js/window "keydown" on-key-down)
+          ;; what the workspace asked before is sent again
+          (.postMessage parent #js {:type "penpot:preview-ready"} origin)
           (fn []
             (.removeEventListener js/window "message" on-message)
             (.removeEventListener js/window "keydown" on-key-down)))))

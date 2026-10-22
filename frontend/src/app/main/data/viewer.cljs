@@ -57,6 +57,7 @@
 (declare bundle-fetched)
 (declare zoom-to-fill)
 (declare zoom-to-fit)
+(declare reset-zoom)
 
 (def ^:private
   schema:initialize
@@ -409,12 +410,72 @@
       (when-let [target (dm/get-in state [:viewer-preview :going])]
         (rx/of (go-to-frame-by-index target))))))
 
+(defn- preview-frames
+  "The boards the view mode in `state` lists on the page it shows: those
+  saved, not hidden in view mode."
+  [state]
+  (let [page-id (some-> (dm/get-in state [:route :query-params :page-id]) uuid/parse)]
+    (dm/get-in state [:viewer :pages page-id :frames])))
+
+(defn preview-go
+  "The preview to the board `frame-id`, the one selected in the workspace,
+  when the view mode lists it (see `preview-frames`); else kept, to go
+  there once a refresh brings it (see `refresh-bundle`), unless another
+  board takes its place first. A board hidden in view mode is never
+  gone to."
+  [frame-id]
+  (ptk/reify ::preview-go
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [listed? (some #(= frame-id (:id %)) (preview-frames state))]
+        (d/update-when state :viewer-preview
+                       #(if listed? (dissoc % :pending) (assoc % :pending frame-id)))))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [index   (d/index-of-pred (preview-frames state) #(= frame-id (:id %)))
+            current (some-> (rt/get-query-param (dm/get-in state [:route :query-params]) :index) parse-long)]
+        (if (and (some? index) (not= index current))
+          (rx/of (go-to-frame frame-id))
+          (rx/empty))))))
+
+(defn preview-zoom
+  "The zoom of the preview as the workspace sets it: the board fitted in
+  it (\"fit\"), filling it (\"fill\") or at its own size (\"100\"); nil
+  for another `mode`."
+  [mode]
+  (case mode
+    "fit"  zoom-to-fit
+    "fill" zoom-to-fill
+    "100"  reset-zoom
+    nil))
+
+(defn refit-preview
+  "The board of the preview fitted or filled again as it resizes, as its
+  zoom says (see `preview-zoom`); at its own size it stays."
+  []
+  (ptk/reify ::refit-preview
+    ptk/WatchEvent
+    (watch [_ state _]
+      (case (dm/get-in state [:viewer-local :zoom-type])
+        :fit  (rx/of zoom-to-fit)
+        :fill (rx/of zoom-to-fill)
+        (rx/empty)))))
+
 (defn- bundle-refreshed
+  "The view mode showing `bundle`, and going to the board the preview
+  waits for (see `preview-go`), now that it may list it."
   [bundle]
   (ptk/reify ::bundle-refreshed
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-bundle state bundle))))
+      (assoc-bundle state bundle))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if-let [pending (dm/get-in state [:viewer-preview :pending])]
+        (rx/of (preview-go pending))
+        (rx/empty)))))
 
 (defn refresh-bundle
   "The file shown fetched again, as it was saved last, the screen and the

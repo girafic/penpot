@@ -5,6 +5,7 @@
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
 @use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_borders.scss" as *;
 
 .viewer-layout {
   height: 100vh;
@@ -269,11 +270,11 @@
 // video player's.
 .preview-controls {
   position: fixed;
-  inset-block-end: deprecated.$s-12;
+  inset-block-end: var(--sp-m);
   inset-inline-start: 50%;
-  z-index: deprecated.$z-index-3;
-  padding: deprecated.$s-4;
-  border-radius: deprecated.$br-8;
+  z-index: var(--z-index-panels);
+  padding: var(--sp-xs);
+  border-radius: $br-8;
   background-color: var(--viewer-controls-background-color);
   opacity: 0;
   transform: translateX(-50%);

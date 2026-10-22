@@ -13,11 +13,14 @@
   workspace, the zoom (fit, fill or 100 %), open in the view mode and
   close, and the corners at its bottom that resize it. Where it is, as
   `{:x :y :w :h}` px of the browser window, the pin and the zoom are
-  kept for the next time."
+  kept for the next time. The view mode tells it once it listens
+  (`penpot:preview-ready`), what it asks before is sent then, and which
+  board it shows (`penpot:preview-shown`), which the bar names."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.uuid :as uuid]
    [app.main.data.common :as dcm]
    [app.main.data.persistence :as dps]
    [app.main.data.workspace.prototype-preview :as dwpp]
@@ -98,15 +101,21 @@
         objects    (mf/deref refs/workspace-page-objects)
         current    (mf/deref refs/current-page-id)
         selected   (mf/deref refs/selected-shapes)
-        ;; the board on screen, as the pin moves it
+        ;; the board on screen, as the view mode tells it
         shown*     (mf/use-state frame-id)
-        board      (get objects (deref shown*))
+        shown      (deref shown*)
+        board      (get objects shown)
+        ;; the board the view mode in the frame starts at
+        start*     (mf/use-state frame-id)
+        start      (deref start*)
         follow*    (mf/use-state #(get storage/user ::follow true))
         follow?    (deref follow*)
         zoom*      (mf/use-state #(get storage/user ::zoom "fit"))
         zoom       (deref zoom*)
-        ;; the board of the selection the preview last went to
-        sent-ref   (mf/use-ref frame-id)
+        ;; the board of the selection the pin last asked for
+        requested-ref (mf/use-ref frame-id)
+        ;; whether the view mode in the frame listens (see `post!`)
+        listening-ref (mf/use-ref false)
         [vw vh]    (cw/use-window-size)
         stored*    (mf/use-state #(get storage/user ::frame))
         drag-frame* (mf/use-state nil)
@@ -122,8 +131,8 @@
         ;; a new frame each time it starts again
         run*       (mf/use-state 0)
         ;; the zoom it starts at, as it starts again
-        uri        (mf/with-memo [file-id page-id frame-id (deref run*)]
-                     (preview-uri file-id page-id frame-id zoom))
+        uri        (mf/with-memo [file-id page-id start (deref run*)]
+                     (preview-uri file-id page-id start zoom))
 
         on-down
         (mf/use-fn
@@ -169,12 +178,14 @@
 
         on-back    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-back"))
         on-forward (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-forward"))
+        ;; pinned, at the board shown; else where it started
         on-restart (mf/use-fn
-                    (mf/deps frame-id)
+                    (mf/deps follow? shown frame-id)
                     (fn []
-                      (reset! shown* frame-id)
-                      (mf/set-ref-val! sent-ref frame-id)
-                      (swap! run* inc)))
+                      (let [start (if follow? shown frame-id)]
+                        (reset! start* start)
+                        (reset! shown* start)
+                        (swap! run* inc))))
 
         on-follow
         (mf/use-fn
@@ -195,8 +206,8 @@
 
         on-open
         (mf/use-fn
-         (mf/deps page-id frame-id)
-         #(st/emit! (dcm/go-to-viewer :page-id page-id :frame-id frame-id)))]
+         (mf/deps page-id shown)
+         #(st/emit! (dcm/go-to-viewer :page-id page-id :frame-id shown)))]
 
     ;; what is edited saved first, so it shows
     (mf/with-effect []
@@ -224,29 +235,57 @@
     ;; a new board to start at, a new page
     (mf/with-effect [frame-id]
       (reset! shown* frame-id)
-      (mf/set-ref-val! sent-ref frame-id))
+      (reset! start* frame-id)
+      (mf/set-ref-val! requested-ref frame-id))
 
-    ;; pinned, it shows the board of the selection: on its page it goes
-    ;; there, on another it starts again there
+    ;; a new view mode in the frame listens once it says so
+    (mf/with-effect [uri]
+      (mf/set-ref-val! listening-ref false))
+
+    ;; pinned, it shows the board of the selection: on another page it
+    ;; starts again there; before the frame is there it starts there;
+    ;; while the view mode listens it goes there; while it loads, it goes
+    ;; there once it listens
     (mf/with-effect [follow? ready? selected current page-id objects]
-      (when (and follow? ready?)
+      (when follow?
         (when-let [board-id (dwpp/start-frame-id objects selected)]
-          (when (not= board-id (mf/ref-val sent-ref))
-            (mf/set-ref-val! sent-ref board-id)
-            (if (= current page-id)
-              (do (reset! shown* board-id)
-                  (post! (mf/ref-val iframe-ref) "penpot:preview-go" {:frameId (dm/str board-id)}))
-              (st/emit! (dwpp/open-preview)))))))
+          (when (not= board-id (mf/ref-val requested-ref))
+            (mf/set-ref-val! requested-ref board-id)
+            (cond
+              (not= current page-id)
+              (st/emit! (dwpp/open-preview))
 
-    ;; Shift + Space in the view mode closes it too
-    (mf/with-effect []
+              (not ready?)
+              (do (reset! start* board-id)
+                  (reset! shown* board-id))
+
+              (mf/ref-val listening-ref)
+              (post! (mf/ref-val iframe-ref) "penpot:preview-go" {:frameId (dm/str board-id)}))))))
+
+    ;; what the view mode tells: it listens, the board it shows; Shift +
+    ;; Space in it closes it too
+    (mf/with-effect [follow? zoom start]
       (let [on-message
             (fn [^js event]
-              (let [iframe (mf/ref-val iframe-ref)]
+              (let [iframe (mf/ref-val iframe-ref)
+                    data   (.-data event)]
                 (when (and (some? iframe)
-                           (identical? (.-source event) (.-contentWindow iframe))
-                           (= "penpot:preview-close" (some-> (.-data event) (unchecked-get "type"))))
-                  (st/emit! (dwpp/close-preview)))))]
+                           (identical? (.-source event) (.-contentWindow iframe)))
+                  (case (some-> data (unchecked-get "type"))
+                    "penpot:preview-ready"
+                    (let [requested (mf/ref-val requested-ref)]
+                      (mf/set-ref-val! listening-ref true)
+                      (post! iframe "penpot:preview-zoom" {:mode zoom})
+                      (when (and follow? (some? requested) (not= requested start))
+                        (post! iframe "penpot:preview-go" {:frameId (dm/str requested)})))
+
+                    "penpot:preview-shown"
+                    (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))
+
+                    "penpot:preview-close"
+                    (st/emit! (dwpp/close-preview))
+
+                    nil))))]
         (.addEventListener js/window "message" on-message)
         #(.removeEventListener js/window "message" on-message)))
 
