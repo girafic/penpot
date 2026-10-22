@@ -12,6 +12,7 @@
    [frontend-tests.data.animation-follow-test]
    [frontend-tests.data.animation-ik-test]
    [frontend-tests.data.animation-morph-test]
+   [frontend-tests.data.animation-path-test]
    [frontend-tests.data.animation-playback-test]
    [frontend-tests.data.animation-styles-test]
    [frontend-tests.data.animation-tilt-test]
@@ -226,6 +227,7 @@
    'frontend-tests.data.animation-follow-test
    'frontend-tests.data.animation-ik-test
    'frontend-tests.data.animation-morph-test
+   'frontend-tests.data.animation-path-test
    'frontend-tests.data.animation-playback-test
    'frontend-tests.data.animation-styles-test
    'frontend-tests.data.animation-tilt-test

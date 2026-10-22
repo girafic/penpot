@@ -7290,7 +7290,7 @@
       (t/is (nil? (cta/path-follow-of (cta/remove-shapes timeline [road]) car))))))
 
 (t/deftest a-layer-rides-its-path
-  (let [{:keys [car timeline objects]} (road-and-car)]
+  (let [{:keys [car road timeline objects]} (road-and-car)]
     (t/is (near? (gpt/point 100 300) (pivot-at timeline objects car 0)))
     (t/is (near? (gpt/point 300 300) (pivot-at timeline objects car 500)))
     (t/is (near? (gpt/point 500 300) (pivot-at timeline objects car 1000)))
@@ -7300,9 +7300,12 @@
                        (cta/add-keyframe car {:time 1000 :property :x :value 300}))]
         (t/is (near? (gpt/point 300 300) (pivot-at moving objects car 500)))))
     (t/testing "an open path holds its ends"
-      (let [past (cta/set-path-follow timeline car {:path (:road (road-and-car)) :progress 1.5})]
-        (t/is (near? (gpt/point 300 300) (pivot-at timeline objects car 500)))
-        (t/is (some? past))))))
+      ;; at rest, without the keyframes of its progress
+      (let [still (cta/set-path-follow timeline car nil)]
+        (t/is (near? (gpt/point 500 300)
+                     (pivot-at (cta/set-path-follow still car {:path road :progress 1.5}) objects car 500)))
+        (t/is (near? (gpt/point 100 300)
+                     (pivot-at (cta/set-path-follow still car {:path road :progress -0.5}) objects car 500)))))))
 
 (t/deftest a-layer-turns-along-its-path
   (let [{:keys [car ring timeline objects]} (road-and-car)
@@ -7349,6 +7352,37 @@
       (let [live  (pivot-at tl objects car t)
             again (pivot-at baked objects car t)]
         (t/is (< (gpt/distance live again) 0.6) (str "where it rides, at " t))))))
+
+(t/deftest a-rider-shakes-around-its-path
+  (let [{:keys [car trailer timeline objects]} (road-and-car)
+        tl    (cta/set-wiggle timeline car {:property :position :frequency 4 :amplitude 10 :seed 5})
+        times (range 0 1001 25)
+        off   (mapv #(gpt/subtract (pivot-at tl objects car %) (pivot-at timeline objects car %)) times)]
+    (t/testing "a wiggle of its position shakes it around the road, within its amplitude"
+      (t/is (every? #(and (<= (mth/abs (:x %)) 10.001) (<= (mth/abs (:y %)) 10.001)) off))
+      (t/is (some #(> (mth/abs (:x %)) 1) off) "along")
+      (t/is (some #(> (mth/abs (:y %)) 1) off) "and across"))
+    (t/testing "the exports play it as the canvas"
+      (let [baked (ctaf/bake-follows tl objects)]
+        (doseq [t [0 250 500 750 1000]]
+          (t/is (< (gpt/distance (pivot-at tl objects car t) (pivot-at baked objects car t)) 0.6)
+                (str "at " t)))))
+    (t/testing "growing moves it not off the road"
+      (let [grown (-> timeline
+                      (cta/add-keyframe car {:time 0 :property :width :value 40})
+                      (cta/add-keyframe car {:time 1000 :property :width :value 120}))]
+        (doseq [t [0 500 1000]]
+          (t/is (near? (pivot-at timeline objects car t) (pivot-at grown objects car t)) (str "at " t)))))
+    (t/testing "a link sets no place for it"
+      (let [moving (-> timeline
+                       (cta/add-keyframe trailer {:time 0 :property :x :value 0})
+                       (cta/add-keyframe trailer {:time 1000 :property :x :value 200}))
+            linked (assoc-in moving [:tracks car :links] [{:property :x :source trailer :source-property :x}])]
+        (t/is (near? (pivot-at moving objects car 500) (pivot-at linked objects car 500)))
+        (t/is (empty? (cta/links-of (cta/set-path-follow (cta/set-path-follow linked car nil) car
+                                                         {:path (:path (cta/path-follow-of linked car))})
+                                    car))
+              "and goes as it starts riding")))))
 
 (t/deftest what-a-layer-can-ride
   (let [{:keys [car road ring board timeline objects]} (road-and-car)

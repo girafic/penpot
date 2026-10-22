@@ -190,7 +190,8 @@
   color: var(--color-foreground-secondary);
 }
 
-// What a layer riding a path plays no more.
+// What a layer riding a path plays no more, in its Path and Links
+// sections.
 .path-hint {
   @include t.use-typography("body-small");
 

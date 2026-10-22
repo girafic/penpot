@@ -1542,7 +1542,10 @@
         timeline  (mf/with-memo [timelines board-id]
                     (or (get timelines board-id) (cta/make-timeline {:board-id board-id})))
         links     (when layer? (cta/links-of timeline shape-id))
-        taken     (into #{} (map :property) links)
+        ;; a layer riding a path takes its place from the path
+        riding?   (and layer? (some? (cta/path-follow-of timeline shape-id)))
+        taken     (cond-> (into #{} (map :property) links)
+                    riding? (into #{:x :y}))
         sources   (mf/with-memo [objects timeline layer?]
                     (when layer?
                       (into [{:id "" :label (tr "workspace.animation.link-choose")}]
@@ -1589,6 +1592,9 @@
                            :icon i/add
                            :disabled (or (nil? free) (some? draft))
                            :on-click on-add}]]]
+       (when (and riding? shown?)
+         [:div {:class (stl/css :follow-rows)}
+          [:p {:class (stl/css :path-hint)} (tr "workspace.animation.links-ride-hint")]])
        (when (and rows? shown?)
          [:div {:class (stl/css :follow-rows)}
           ;; one list keyed by property, so a draft keeps its place, and

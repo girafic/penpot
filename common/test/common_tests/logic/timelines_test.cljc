@@ -1570,6 +1570,74 @@
   (t/is (nil? (cta/path-follow-of (get (timelines (delete (riding-file) :road)) (thi/id :board-a))
                                   (thi/id :dot)))))
 
+(t/deftest a-path-and-what-moves-with-it-lead-none-of-its-riders
+  (let [file    (riding-file)
+        objects (:objects (thf/current-page file))
+        tl      (get (timelines file) (thi/id :board-a))]
+    (t/is (not (cltl/can-follow? objects tl (thi/id :road) (thi/id :dot)))
+          "the road follows not the dot that rides it, through others neither")
+    (t/is (cltl/can-follow? objects tl (thi/id :road) (thi/id :rect)))
+    (t/is (not (cltl/can-ride-path? objects (cta/set-follow tl (thi/id :rect) {:leader (thi/id :dot)})
+                                    (thi/id :road) (thi/id :rect)))
+          "nor rides a layer that follows one of them")))
+
+(t/deftest a-rider-pasted-where-it-cannot-ride-keeps-no-progress
+  (let [file    (riding-file)
+        a       (thi/id :board-a)
+        dot     (thi/id :dot)
+        tl      (-> (get (timelines file) a)
+                    (cta/add-keyframe dot {:time 0 :property :path-progress :value 0})
+                    (cta/add-keyframe dot {:time 1000 :property :path-progress :value 1})
+                    (cta/add-keyframe dot {:time 0 :property :opacity :value 1}))
+        file    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                            (pcb/with-page (thf/current-page file))
+                                            (pcb/set-timeline a tl)))
+        page    (thf/current-page file)
+        objects (:objects page)
+        copy-id (uuid/next)
+        copy    (assoc (get objects dot) :id copy-id :parent-id (thi/id :board-b) :frame-id (thi/id :board-b))
+        changes (-> (pcb/empty-changes nil)
+                    (pcb/with-page page)
+                    (pcb/with-objects objects)
+                    (pcb/add-object copy))
+        changes (cltl/generate-copy-timelines changes page {dot copy-id}
+                                              (cltl/animation-sources page objects #{dot}))
+        pasted  (get (timelines (thf/apply-changes file changes)) (thi/id :board-b))
+        track   (get-in pasted [:tracks copy-id])]
+    (t/is (some? track) "its opacity goes with it")
+    (t/is (nil? (:path-follow track)) "the road is in another board")
+    (t/is (not-any? #(= :path-progress (:property %)) (:keyframes track)) "nor its progress along it")
+    (t/is (cta/valid-timeline? pasted))))
+
+(t/deftest a-copy-shakes-its-own-way
+  (let [file    (animated-file)
+        page    (thf/current-page file)
+        a       (thi/id :board-a)
+        rect    (thi/id :rect)
+        wiggle  {:property :rotation :frequency 2 :amplitude 10 :seed 42}
+        file    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                            (pcb/with-page page)
+                                            (pcb/set-timeline a (cta/set-wiggle (get (timelines file) a) rect wiggle))))
+        page    (thf/current-page file)
+        copy-of #(into {} (keep (fn [c] (when (= :add-obj (:type c)) [(:old-id c) (-> c :obj :id)])))
+                       (:redo-changes %))]
+    (t/testing "a duplicated layer"
+      (let [changes (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                    (:objects page) page #{rect} (gpt/point 10 0)
+                                                    {(:id file) file} (:data file) (:id file))
+            copied  (cta/wiggle-of (get (timelines (thf/apply-changes file changes)) a)
+                                   (get (copy-of changes) rect) :rotation)]
+        (t/is (not= 42 (:seed copied)))
+        (t/is (= (dissoc (cta/wiggle-of (get (timelines file) a) rect :rotation) :seed) (dissoc copied :seed)))))
+    (t/testing "a duplicated board, its layers"
+      (let [changes (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                    (:objects page) page #{a} (gpt/point 500 0)
+                                                    {(:id file) file} (:data file) (:id file))
+            ids     (copy-of changes)
+            tl      (get (timelines (thf/apply-changes file changes)) (get ids a))]
+        (t/is (not= 42 (:seed (cta/wiggle-of tl (get ids rect) :rotation))))
+        (t/is (cta/valid-timeline? tl))))))
+
 (defn- reaching-board-file
   "`animated-file` with an arm in board A (an upper arm, a forearm
   following it and a hand following that) whose hand reaches a ball."
@@ -1650,6 +1718,40 @@
     (t/is (= (copy-of objects copy :main-rect)
              (get-in tl [:tracks (copy-of objects copy :main-dot) :follow :leader]))
           "the rect of the copy, not of the main")))
+
+(defn- riding-component-file
+  "`following-component-file` whose dot rides the rect of the main in
+  place of following it."
+  []
+  (let [file (following-component-file :main-still)
+        main (thi/id :main)
+        tl   (-> (get (timelines file) main)
+                 (cta/set-follow (thi/id :main-dot) nil)
+                 (cta/set-path-follow (thi/id :main-dot) {:path (thi/id :main-rect) :orient true}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline main tl)))))
+
+(t/deftest a-copy-of-a-component-rides-the-copy-of-its-path
+  (let [{:keys [objects board copy main-page]} (component-scene (riding-component-file))
+        tl (get (cltl/instance-timelines objects board nil main-page) [:copy copy (thi/id :main)])]
+    (t/is (= {:path (copy-of objects copy :main-rect) :orient true}
+             (get-in tl [:tracks (copy-of objects copy :main-dot) :path-follow]))
+          "the rect of the copy, not of the main")))
+
+(t/deftest a-path-of-a-component-copy-is-ridden-when-the-board-animates-it
+  ;; what the copy plays of its main carries no rider of the board
+  (let [file    (-> (following-component-file :main-still)
+                    (ths/add-sample-shape :dot-b :type :rect :parent-label :board-b
+                                          :x 1300 :y 300 :width 10 :height 10))
+        objects (:objects (thf/current-page file))
+        board   (thi/id :board-b)
+        rect    (copy-of objects (thi/id :copy) :main-rect)
+        tl      (cta/make-timeline {:board-id board :duration 1000})]
+    (t/is (not (cltl/can-ride-path? objects tl (thi/id :dot-b) rect)))
+    (t/is (cltl/can-ride-path? objects (cta/add-keyframe tl rect {:time 0 :property :opacity :value 1})
+                               (thi/id :dot-b) rect)
+          "the board animates it itself")))
 
 (t/deftest a-copy-keeps-a-follow-whose-leader-plays-nothing-there
   ;; a still leader moves nothing, and a still goal or upper arm drives a

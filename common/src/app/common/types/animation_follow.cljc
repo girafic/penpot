@@ -47,18 +47,25 @@
   (let [track (dm/get-in timeline [:tracks id])]
     (keep identity [(dm/get-in track [:follow :leader]) (dm/get-in track [:path-follow :path])])))
 
-(defn- cyclic?
-  "Whether the layer `id` of `timeline` moves with itself, through the
-  leaders and the paths of the layers it moves with (see `moved-by`): a
-  cycle plays nothing."
-  [timeline id]
-  (loop [front (moved-by timeline id), seen #{}]
+(defn moves-with?
+  "Whether the layer `from` of `timeline` moves with the layer `id`: is
+  it, or moves with a layer that does, through the leaders it follows and
+  the paths it rides (see `moved-by`)."
+  [timeline from id]
+  (loop [front [from], seen #{}]
     (if-let [at (first front)]
       (cond
         (= at id)           true
         (contains? seen at) (recur (rest front) seen)
         :else               (recur (into (vec (rest front)) (moved-by timeline at)) (conj seen at)))
       false)))
+
+(defn- cyclic?
+  "Whether the layer `id` of `timeline` moves with itself, through the
+  leaders and the paths of the layers it moves with (see `moves-with?`):
+  a cycle plays nothing."
+  [timeline id]
+  (boolean (some #(moves-with? timeline % id) (moved-by timeline id))))
 
 (defn followers
   "The layers of `timeline` that follow a leader of `objects` (see
@@ -467,7 +474,10 @@
                                      (modifiers-opacity lplayed (:opacity lshape 1)))))))))))))
 
                 ;; `mods` of the layer `id` riding its path at `u`: its pivot
-                ;; at its progress along the outline as it plays then
+                ;; at its progress along the outline as it plays then, and
+                ;; as far from it as its wiggles shake its position (its own
+                ;; position keyframes and links play nothing, see
+                ;; `cta/resolve-animations`)
                 (ride [id u mods]
                   (let [{:keys [path orient turn progress]} (cta/path-follow-of timeline id)
                         pmods (played path u :all)
@@ -480,11 +490,16 @@
                             ;; round again past the end of a closed outline
                             share  (if (:closed? walk) (- p (mth/floor p)) (mth/clamp p 0 1))
                             {:keys [point angle]} ((:at walk) share)
+                            shaken (fn [property]
+                                     (if-let [value (dm/get-in values [id property])]
+                                       (- value (cta/link-rest timeline objects id property))
+                                       0))
                             mods   (or mods (ctm/empty))
-                            pivot  (gpt/transform (rested id) (matrix mods))]
+                            pivot  (gpt/transform (rested id) (matrix mods))
+                            to     (gpt/add point (gpt/point (shaken :x) (shaken :y)))]
                         (-> mods
                             (cond-> orient (ctm/add-modifiers (ctm/rotation nil pivot (+ angle turn))))
-                            (ctm/add-modifiers (ctm/move nil (gpt/subtract point pivot))))))))
+                            (ctm/add-modifiers (ctm/move nil (gpt/subtract to pivot))))))))
 
                 ;; where the layer `id` turns around at `u`, played in `mode`
                 (pivot-at [id u mode]
@@ -654,15 +669,6 @@
       ;; shrunk to nothing (a leader flipping through 0), it has no turn
       (< scale 1e-6) (assoc :rotation nil))))
 
-(defn- unridden
-  "`track` riding no path (see `cta/schema:path-follow`), and without the
-  keyframes of its progress along one, which no export plays."
-  [track]
-  (let [progress? #(= :path-progress (:property %))]
-    (cond-> (dissoc track :path-follow)
-      (some progress? (:keyframes track)) (update :keyframes (partial filterv (complement progress?)))
-      (some? (:loops track))              (update :loops disj :path-progress))))
-
 (defn- baked-track
   "The track of the follower `id` of `timeline` playing its `poses` (see
   `followed-pose`, one at each of `times`) as linear keyframes, from its
@@ -692,7 +698,7 @@
                                                 (some #(> (mth/abs (- % (get at-rest property))) tol) values)))
                                    [property (thin-samples (map vector (map first samples) values) tol)]))))
                        (keys bake-tolerances))]
-    (-> (unridden track)
+    (-> (cta/unridden track)
         (dissoc :follow :ik)
         (update :keyframes (fn [keyframes]
                              (->> (remove #(and (contains? baked (:property %)) (nil? (:index %))) keyframes)
@@ -777,7 +783,7 @@
                 (as-> tracks tracks
                   (reduce-kv (fn [tracks id track]
                                (let [track (or (get baked id)
-                                               (cond-> (unridden track) (not (keep? id)) (dissoc :follow :ik)))]
+                                               (cond-> (cta/unridden track) (not (keep? id)) (dissoc :follow :ik)))]
                                  (if (cta/empty-track? track)
                                    (dissoc tracks id)
                                    (assoc tracks id track))))

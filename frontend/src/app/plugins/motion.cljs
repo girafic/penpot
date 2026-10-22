@@ -1544,6 +1544,11 @@
                    (not= :path (:type (get (u/locate-objects file-id page-id) shape-id))))
               (u/not-valid plugin-id :addKeyframe "Only a path morphs: turn the layer into a path first")
 
+              (and (= :path-progress (:property keyframe))
+                   (nil? (cta/path-follow-of (locate) shape-id)))
+              (u/not-valid plugin-id :addKeyframe
+                           "Only a layer riding a path has a progress along it: see setPathFollow")
+
               ;; within what the row holds, in place of one at its time
               (and (= :content (:property keyframe))
                    (let [track (cta/get-track (locate) shape-id)]
@@ -1983,6 +1988,9 @@
 
                             (not (contains? linkable property))
                             (dm/str "property should be one of " names)
+
+                            (and (contains? #{:x :y} property) (some? (cta/path-follow-of timeline shape-id)))
+                            "A layer riding a path takes its place from it: wiggle its position instead"
 
                             (nil? source-id)
                             "The source should be a shape"

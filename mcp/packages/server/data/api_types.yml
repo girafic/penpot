@@ -18940,8 +18940,9 @@ Timeline:
         them). Past 1 it goes round a closed outline again; an open one holds
         its ends. With `orient` it turns as the outline goes, by `turn`
         degrees more, its own rotation on top. Its own `x` and `y` keyframes
-        do not play while it rides; the path may move, morph or follow, and
-        the shape rides it as it plays. A shape rides a path or follows a
+        and links do not play while it rides; a wiggle of its position (see
+        `wiggle`) shakes it around the path. The path may move, morph or
+        follow, and the shape rides it as it plays. A shape rides a path or follows a
         leader, not both. Every export plays it by keyframes. `null` rides
         none, and drops the keyframes of its progress.
 
@@ -18990,7 +18991,8 @@ Timeline:
         takes the place of the property's own keyframes and loops where the
         source loops; a chain of links plays through, a cycle plays nothing.
         Every export plays it as keyframes made from the source's. Linking a
-        property linked already changes that link.
+        property linked already changes that link. A layer riding a path (see
+        `setPathFollow`) takes no link on `x` or `y`: the path places it.
         With a range (`link.input`, `link.output`) the source going through
         its input takes the property through its output, along a curve, as
         an After Effects `linear()` or `ease()` expression does.
@@ -19059,7 +19061,8 @@ Timeline:
         whole of a looping timeline without a fade it ends as it starts, so
         the loop does not jump. Every export plays it as keyframes. Wiggling a
         property that wiggles already changes that wiggle, shaking as it did
-        unless given another `seed`.
+        unless given another `seed`. On a layer riding a path (see
+        `setPathFollow`), a wiggle of its position shakes it around the path.
 
         Parameters
 
@@ -20172,7 +20175,7 @@ Wiggle:
         ```
 
         What makes its shakes the ones they are: another seed shakes another
-        way.
+        way. A copy of the layer (duplicated or pasted) gets a new one.
 WiggleProps:
   overview: |-
     Interface WiggleProps

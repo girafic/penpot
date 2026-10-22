@@ -6874,7 +6874,7 @@ msgid "workspace.animation.path-follow-turn"
 msgstr "Turn"
 
 msgid "workspace.animation.path-follow-hint"
-msgstr "Its own X and Y keyframes don't play while it rides the path. Past 100% it goes round a closed path again."
+msgstr "Its own X and Y keyframes and links don't play while it rides the path; a wiggle of its position shakes it around the path. Past 100% it goes round a closed path again."
 
 msgid "workspace.animation.rides"
 msgstr "Rides %s"
@@ -6935,6 +6935,10 @@ msgstr "Link a property"
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.remove-link"
 msgstr "Remove the link"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.links-ride-hint"
+msgstr "It rides a path, which sets its X and Y: link its other properties."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.link-property"

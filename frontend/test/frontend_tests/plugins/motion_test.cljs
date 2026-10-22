@@ -362,6 +362,13 @@
         (t/is (= 2 (count (filter #(= :path-progress (:property %))
                                   (:keyframes (stored-track store context board car)))))
               "its progress takes keyframes")
+        (t/is (thrown? js/Error (.addKeyframe timeline other #js {:property "pathProgress" :time 0 :value 0}))
+              "a layer riding nothing has no progress")
+        (t/testing "the path sets its place: no link on x or y, a link on others"
+          (t/is (thrown? js/Error (.link timeline car #js {:property "x" :source other})))
+          (.link timeline car #js {:property "rotation" :source other})
+          (t/is (= 1 (count (.linksOf timeline car))))
+          (.unlink timeline car "rotation"))
         (t/testing "what cannot be ridden is refused"
           (t/is (thrown? js/Error (.setPathFollow timeline car #js {:path car})) "not itself")
           (t/is (thrown? js/Error (.setPathFollow timeline car #js {:path road :orient "yes"})))

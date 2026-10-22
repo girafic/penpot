@@ -507,7 +507,8 @@
   goes (see `app.common.math.noise`), with `:octaves` layers of finer
   shakes. It shakes from `:start` to `:end` ms (the end of the timeline
   when absent), growing and fading over `:fade` ms at both ends. One
-  octave, a start and a fade of 0 are stored as absence."
+  octave, a start and a fade of 0 are stored as absence. A copy of its
+  layer gets a seed of its own (see `reseed-wiggles`)."
   [:map {:title "AnimationWiggle"}
    [:property [::sm/one-of (set wiggle-properties)]]
    [:frequency [::sm/number {:min min-wiggle-frequency :max max-wiggle-frequency}]]
@@ -1174,6 +1175,21 @@
 
 (declare store-track)
 
+(defn unridden
+  "`track` riding no path (see `schema:path-follow`), and without the
+  keyframes of its progress along one, which play nothing then, nor
+  their flags."
+  [track]
+  (let [progress? #(= :path-progress (:property %))]
+    (if (or (some? (:path-follow track)) (some progress? (:keyframes track)))
+      (reduce (fn [track flag]
+                (let [kept (disj (get track flag #{}) :path-progress)]
+                  (if (empty? kept) (dissoc track flag) (assoc track flag kept))))
+              (-> (dissoc track :path-follow)
+                  (update :keyframes (partial filterv (complement progress?))))
+              slot-flags)
+      track)))
+
 (defn set-follow
   "`timeline` with `shape-id` following the layer `:leader` of `follow`
   (see `schema:follow`), or following none for nil; the defaults are
@@ -1187,9 +1203,7 @@
       ;; of its progress along the path go with it
       (-> (ensure-track timeline shape-id)
           (assoc-in [:tracks shape-id :follow] stored)
-          (update-in [:tracks shape-id] dissoc :path-follow)
-          (update-in [:tracks shape-id :keyframes]
-                     (partial filterv #(not= :path-progress (:property %))))))
+          (update-in [:tracks shape-id] unridden)))
     (if-let [track (get-track timeline shape-id)]
       (store-track timeline shape-id (dissoc track :follow))
       timeline)))
@@ -1307,13 +1321,20 @@
   [timeline shape-id]
   (dm/get-in timeline [:tracks shape-id :path-follow :progress] 0))
 
-(declare remove-property)
+(defn- unplaced-links
+  "`track` without its links on x and y (see `schema:link`), which set a
+  place, as a layer riding a path takes its own from the path."
+  [track]
+  (if-let [links (seq (:links track))]
+    (let [links (filterv #(not (contains? #{:x :y} (:property %))) links)]
+      (if (seq links) (assoc track :links links) (dissoc track :links)))
+    track))
 
 (defn set-path-follow
   "`timeline` with `shape-id` riding the outline of the shape `:path` of
-  `path-follow` (see `schema:path-follow`), following no leader then; or
-  riding none for nil, without the keyframes of its progress. The
-  defaults are left out."
+  `path-follow` (see `schema:path-follow`), following no leader then, nor
+  with links on x and y (see `unplaced-links`); or riding none for nil,
+  without the keyframes of its progress. The defaults are left out."
   [timeline shape-id path-follow]
   (if (some? (:path path-follow))
     (let [path-follow (select-keys path-follow [:path :orient :turn :progress])
@@ -1321,12 +1342,9 @@
                             path-follow)]
       (-> (ensure-track timeline shape-id)
           (assoc-in [:tracks shape-id :path-follow] stored)
-          (update-in [:tracks shape-id] dissoc :follow)))
-    (if (some? (get-track timeline shape-id))
-      (let [timeline (remove-property timeline shape-id :path-progress nil)]
-        (if-let [track (get-track timeline shape-id)]
-          (store-track timeline shape-id (dissoc track :path-follow))
-          timeline))
+          (update-in [:tracks shape-id] #(-> % (dissoc :follow) (unplaced-links)))))
+    (if-let [track (get-track timeline shape-id)]
+      (store-track timeline shape-id (unridden track))
       timeline)))
 
 (def ^:private wiggle-defaults
@@ -1359,6 +1377,13 @@
   way."
   []
   (random-seed))
+
+(defn reseed-wiggles
+  "`track` with each of its wiggles (see `schema:wiggle`) shaking another
+  way, a new seed each: for a copy of its layer, which shakes its own
+  way."
+  [track]
+  (d/update-when track :wiggles (partial mapv #(assoc % :seed (random-seed)))))
 
 (defn set-wiggle
   "`timeline` with `property` of `shape-id` shaking as `wiggle` says (see
@@ -3864,10 +3889,11 @@
 
 (defn- play-path-follows
   "`timeline` (with its tracks as they play) without the position
-  keyframes of the layers that ride a path of `objects` (see
-  `schema:path-follow`): the path places them (see
-  `app.common.types.animation-follow/timeline->modif-tree`); and without
-  the keyframes of a progress along a path where there is none to ride."
+  keyframes and the links on x and y of the layers that ride a path of
+  `objects` (see `schema:path-follow`): the path places them (see
+  `app.common.types.animation-follow/timeline->modif-tree`), their
+  wiggles shake them around it; and without the keyframes of a progress
+  along a path where there is none to ride."
   [timeline objects]
   (let [progress? #(= :path-progress (:property %))
         position? #(and (contains? #{:x :y} (:property %)) (nil? (:index %)))]
@@ -3880,7 +3906,8 @@
                                (contains? objects (dm/get-in track [:path-follow :path]))
                                (assoc tracks id (-> track
                                                     (update :keyframes (partial filterv (complement position?)))
-                                                    (d/update-when :loops disj :x :y)))
+                                                    (d/update-when :loops disj :x :y)
+                                                    (unplaced-links)))
 
                                (some progress? (:keyframes track))
                                (assoc tracks id (update track :keyframes (partial filterv (complement progress?))))

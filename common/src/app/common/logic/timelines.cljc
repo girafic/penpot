@@ -110,7 +110,8 @@
 
 (defn- moved-track
   "`track` for `shape-id`, its positions moved by `delta`. A copy gets
-  new keyframe and animation ids."
+  new keyframe and animation ids, and shakes its own way (see
+  `cta/reseed-wiggles`)."
   [track shape-id {dx :x dy :y} copy?]
   (let [new-id #(cond-> % copy? (assoc :id (uuid/next)))]
     (-> track
@@ -120,7 +121,8 @@
                                 (cond-> (new-id keyframe)
                                   (= :x (:property keyframe)) (update :value + dx)
                                   (= :y (:property keyframe)) (update :value + dy)))))
-        (d/update-when :animations (partial mapv new-id)))))
+        (d/update-when :animations (partial mapv new-id))
+        (cond-> copy? (cta/reseed-wiggles)))))
 
 (defn- placed-to-follow?
   "Whether the layer `id` of `objects` is where it can follow the layer
@@ -132,31 +134,14 @@
        (= board-id (cfh/get-shape-id-root-frame objects leader))
        (not (cta/nested-layers? objects id leader))))
 
-(defn- moves-with?
-  "Whether the layer `from` of `timeline` moves with the layer `id`,
-  through the leaders it follows and the paths it rides, and theirs."
-  [timeline from id]
-  (loop [front [from], seen #{}]
-    (if-let [at (first front)]
-      (cond
-        (= at id)           true
-        (contains? seen at) (recur (rest front) seen)
-        :else
-        (let [track (dm/get-in timeline [:tracks at])]
-          (recur (into (vec (rest front))
-                       (keep identity)
-                       [(dm/get-in track [:follow :leader]) (dm/get-in track [:path-follow :path])])
-                 (conj seen at))))
-      false)))
-
-(defn- leads-back?
-  "Whether `leader` follows the layer `id` in `timeline`, through others."
-  [timeline leader id]
-  (loop [at leader, seen #{}]
-    (cond (nil? at)           false
-          (= at id)           true
-          (contains? seen at) false
-          :else               (recur (dm/get-in timeline [:tracks at :follow :leader]) (conj seen at)))))
+(defn- animated-here?
+  "Whether the layer `id` of `objects` plays in the board of `timeline`
+  what the board makes it play: any layer but one of a component copy,
+  which plays what its main plays on the clock of the copy (see
+  `instance-timelines`), unless the board animates it itself."
+  [objects timeline id]
+  (or (nil? (dm/get-in objects [id :shape-ref]))
+      (contains? (:tracks timeline) id)))
 
 (defn can-follow?
   "Whether the layer `id` of the board of `timeline` (of `objects`) can
@@ -167,11 +152,8 @@
   moves no follower."
   [objects timeline id leader]
   (and (placed-to-follow? objects (:board-id timeline) id leader)
-       (not (leads-back? timeline leader id))
-       ;; nor through the paths ridden on the way
-       (not (moves-with? timeline leader id))
-       (or (nil? (dm/get-in objects [leader :shape-ref]))
-           (contains? (:tracks timeline) leader))))
+       (not (ctaf/moves-with? timeline leader id))
+       (animated-here? objects timeline leader)))
 
 (defn- placed-to-ride?
   "Whether the layer `id` of `objects` is where it can ride the outline of
@@ -235,7 +217,7 @@
       (as-> track (let [other (get ids-map path path)]
                     (if (placed-to-ride? objects new-board (:shape-id track) other)
                       (assoc-in track [:path-follow :path] other)
-                      (dissoc track :path-follow)))))))
+                      (cta/unridden track)))))))
 
 (defn- strayed-follows-dropped
   "`timelines` (of the shapes `objects`) without the follows of layers
@@ -685,7 +667,7 @@
                                         (some? path)
                                         (as-> track (if-let [path (copy path)]
                                                       (assoc-in track [:path-follow :path] path)
-                                                      (dissoc track :path-follow)))))
+                                                      (cta/unridden track)))))
                                tracks)))
                          tracks
                          tracks))))
@@ -979,10 +961,13 @@
   ride the outline of the shape `path` (see `cta/schema:path-follow`):
   another shape of the board with an outline (see `gpw/walker`), not one
   it is in or holds, nor one that moves with it, through the leaders it
-  follows and the paths it rides."
+  follows and the paths it rides; a shape of a component copy only when
+  the board animates it itself, as what it plays of its main carries no
+  rider."
   [objects timeline id path]
   (and (placed-to-ride? objects (:board-id timeline) id path)
-       (not (moves-with? timeline path id))))
+       (not (ctaf/moves-with? timeline path id))
+       (animated-here? objects timeline path)))
 
 (defn ride-paths
   "The shapes of the board of `timeline` (of `objects`) whose outlines the
