@@ -2043,7 +2043,19 @@
         axis-zoom  (if (some? axis-lock)
                      (:zoom axis-lock)
                      (content-zoom duration zoom span))
-        axis-width (lanes/axis-width view-width axis-zoom)
+        ;; the labels, as wide as the user dragged their right edge
+        {on-labels-resize-down :on-pointer-down
+         on-labels-resize-end  :on-lost-pointer-capture
+         on-labels-resize-move :on-pointer-move
+         set-label-width       :set-size
+         label-width           :size}
+        (r/use-resize-hook :timeline-labels lanes/default-label-width
+                           lanes/min-label-width lanes/max-label-width :x false nil)
+        on-labels-reset
+        (mf/use-fn
+         (mf/deps set-label-width)
+         #(set-label-width lanes/default-label-width))
+        axis-width (lanes/axis-width view-width label-width axis-zoom)
         tick       (tick-step span axis-width unit fps)
 
         tick-label
@@ -2506,7 +2518,7 @@
         ;; the timeline again.
         geo-ref    (mf/use-ref {:scroll-x 0 :scroll-y 0})
         _          (mf/set-ref-val! geo-ref (assoc (mf/ref-val geo-ref)
-                                                   :width (max 0 (- view-width lanes/label-width))
+                                                   :width (max 0 (- view-width label-width))
                                                    :height view-height
                                                    :row-height row-height
                                                    :span span
@@ -3616,7 +3628,8 @@
                                      :recording recording?
                                      :maximized maximized?)
                 :ref dock-ref
-                :style #js {"--timeline-row-height" (dm/str row-height "px")}
+                :style #js {"--timeline-row-height" (dm/str row-height "px")
+                            "--timeline-label-width" (dm/str label-width "px")}
                 :tab-index -1
                 :on-key-down on-key-down
                 :on-drag-over on-drag-over
@@ -3658,7 +3671,7 @@
                   :ref on-scroll-node
                   :on-scroll on-scroll}
             [:div {:class (stl/css :timeline-content)
-                   :style #js {"width" (dm/str (lanes/content-width axis-width) "px")
+                   :style #js {"width" (dm/str (lanes/content-width label-width axis-width) "px")
                                "height" (dm/str content-height "px")}}
              [:div {:class (stl/css :timeline-view)
                     :style #js {"width" (dm/str view-width "px")
@@ -3824,7 +3837,18 @@
                                          :hovered? hovered?
                                          :on-context-menu on-context-menu
                                          :on-select-layer on-select-keyframe-layer
-                                         :on-hover on-label-hover}])))]]]]]]]])]
+                                         :on-hover on-label-hover}])))]]
+
+              ;; The right edge of the labels: a drag makes them wider or
+              ;; narrower, a double click as wide as they start.
+              [:div {:class (stl/css :labels-resize)
+                     :role "separator"
+                     :aria-orientation "vertical"
+                     :title (tr "workspace.animation.labels-resize")
+                     :on-pointer-down on-labels-resize-down
+                     :on-lost-pointer-capture on-labels-resize-end
+                     :on-pointer-move on-labels-resize-move
+                     :on-double-click on-labels-reset}]]]]]]])]
 
      ;; Above the dock, so it is placed outside of it.
      (when (some? easing-kf)

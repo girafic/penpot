@@ -36,6 +36,10 @@ $header-height: $ruler-height + $row-height;
   // How tall the rows are, as the user made them (see `lanes/row-height`).
   --timeline-row-height: #{$row-height};
 
+  // How wide the labels are, as the user dragged them (see
+  // `lanes/default-label-width`).
+  --timeline-label-width: #{$track-label-width};
+
   grid-area: bottom-dock;
   position: relative;
   block-size: var(--workspace-bottom-dock-height);
@@ -345,7 +349,7 @@ $header-height: $ruler-height + $row-height;
 .lanes {
   position: absolute;
   inset-block-start: 0;
-  inset-inline-start: $track-label-width;
+  inset-inline-start: var(--timeline-label-width);
   display: block;
 }
 
@@ -361,7 +365,7 @@ $header-height: $ruler-height + $row-height;
 .ruler-comments {
   position: absolute;
   inset-block-start: 0;
-  inset-inline: $track-label-width 0;
+  inset-inline: var(--timeline-label-width) 0;
   block-size: $ruler-height;
   overflow: hidden;
   pointer-events: none;
@@ -379,7 +383,7 @@ $header-height: $ruler-height + $row-height;
   inset-inline-start: 0;
   display: flex;
   align-items: center;
-  inline-size: $track-label-width;
+  inline-size: var(--timeline-label-width);
   block-size: $ruler-height;
   background-color: var(--color-background-primary);
   border-bottom: 1px solid var(--panel-border-color);
@@ -648,6 +652,28 @@ $header-height: $ruler-height + $row-height;
   pointer-events: none;
 }
 
+// The right edge of the labels, over them and the lanes: a drag makes
+// the labels wider or narrower, a double click as wide as they start.
+.labels-resize {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc(var(--timeline-label-width) - #{deprecated.$s-4});
+  inline-size: deprecated.$s-8;
+  cursor: ew-resize;
+  z-index: deprecated.$z-index-3;
+  touch-action: none;
+
+  &:hover,
+  &:active {
+    background: linear-gradient(
+      to right,
+      transparent calc(50% - 1px),
+      var(--color-accent-primary) calc(50% - 1px) calc(50% + 1px),
+      transparent calc(50% + 1px)
+    );
+  }
+}
+
 .row-strip {
   position: absolute;
   inset-block-start: 0;
@@ -659,7 +685,7 @@ $header-height: $ruler-height + $row-height;
 .row {
   position: absolute;
   display: flex;
-  inline-size: $track-label-width;
+  inline-size: var(--timeline-label-width);
   block-size: var(--timeline-row-height);
   background-color: var(--color-background-primary);
   pointer-events: auto;
@@ -678,7 +704,7 @@ $header-height: $ruler-height + $row-height;
   display: flex;
   align-items: center;
   gap: deprecated.$s-4;
-  inline-size: $track-label-width;
+  inline-size: var(--timeline-label-width);
   flex: none;
   padding-inline-end: deprecated.$s-8;
   background-color: inherit;

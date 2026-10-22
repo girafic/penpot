@@ -26,9 +26,15 @@
 
 ;; METRICS, in step with timeline.scss
 
-(def label-width
-  "Width of the labels left of the lanes (`$track-label-width`)."
+(def default-label-width
+  "Width of the labels left of the lanes as they start
+  (`$track-label-width`); a drag on their right edge makes them from
+  `min-label-width` to `max-label-width` wide."
   300)
+
+(def min-label-width 240)
+
+(def max-label-width 640)
 
 (def start-gap
   "Room before 0 s, so a keyframe and the playhead pin there stay clear of
@@ -103,14 +109,15 @@
     (- (* (+ scroll-top offset) (/ height old-height)) offset)))
 
 (defn axis-width
-  "Pixels the time axis takes in a view `width` wide, labels included, at
-  `zoom` (1 fits it in the view)."
-  [width zoom]
+  "Pixels the time axis takes in a view `width` wide, its labels
+  `label-width` wide included, at `zoom` (1 fits it in the view)."
+  [width label-width zoom]
   (* (max 0 (- width label-width start-gap end-gap)) zoom))
 
 (defn content-width
-  "Width of what the view scrolls over, for a time axis `axis-width` wide."
-  [axis-width]
+  "Width of what the view scrolls over, for labels `label-width` wide and
+  a time axis `axis-width` wide."
+  [label-width axis-width]
   (+ label-width start-gap axis-width end-gap))
 
 (defn- axis-x

@@ -45,9 +45,12 @@
       (some? (:from hit))     (assoc :from (:time (:from hit))))))
 
 (t/deftest the-time-axis-scrolls-and-zooms
-  (t/is (= 1280 (lanes/axis-width 1600 1)))
-  (t/is (= 2560 (lanes/axis-width 1600 2)))
-  (t/is (= 1600 (lanes/content-width 1280)))
+  (t/is (= 1280 (lanes/axis-width 1600 300 1)))
+  (t/is (= 2560 (lanes/axis-width 1600 300 2)))
+  (t/is (= 1600 (lanes/content-width 300 1280)))
+  ;; wider labels leave the axis less room
+  (t/is (= 1080 (lanes/axis-width 1600 500 1)))
+  (t/is (= 1600 (lanes/content-width 500 1080)))
   (t/is (= 112 (lanes/time->x geo 100)))
   (t/is (= 12 (lanes/time->x (assoc geo :scroll-x 100) 100)))
   (t/is (= 100 (lanes/x->time (assoc geo :scroll-x 100) 12)))

@@ -7059,6 +7059,9 @@ msgstr "Zoom"
 msgid "workspace.animation.row-height"
 msgstr "Row height"
 
+msgid "workspace.animation.labels-resize"
+msgstr "Drag to resize the names, double-click to reset"
+
 msgid "workspace.animation.canvas-window-move"
 msgstr "Move the preview (double-click to put it back)"
 
