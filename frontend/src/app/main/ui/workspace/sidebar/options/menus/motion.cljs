@@ -1610,6 +1610,194 @@
                               :sources sources
                               :picking picking}]))])])))
 
+(defn- wiggle-unit
+  "The unit the amplitude of a wiggle of `property` shows in."
+  [property]
+  (case property
+    (:rotation :rotate-x :rotate-y) "°"
+    (:scale :scale-x :scale-y :opacity) "%"
+    "px"))
+
+(defn- amplitude->display
+  [property amplitude]
+  (if (= "%" (wiggle-unit property)) (* 100 amplitude) amplitude))
+
+(defn- display->amplitude
+  [property display]
+  (if (= "%" (wiggle-unit property)) (/ display 100) display))
+
+(defn- wiggle-summary
+  "What the `wiggle` shakes, for its closed head: how often and how much,
+  and when unless all the time."
+  [{:keys [property frequency amplitude start end]}]
+  (cond-> (dm/str (mth/precision frequency 2) "/s · ±"
+                  (mth/precision (amplitude->display property amplitude) 2) (wiggle-unit property))
+    (or (pos? start) (some? end))
+    (dm/str " · " start "–" (or end "…") " ms")))
+
+(mf/defc wiggle-item*
+  "The wiggle `wiggle` of the layer `shape-id` (see `cta/wiggles-of`):
+  its head, opened by its left button (open from the start with
+  `default-open`), then the property it shakes (one of those not `taken`
+  by another), how often and how much, how fine, and when, in a
+  timeline `duration` ms long; and a button that shakes it another way."
+  {::mf/private true}
+  [{:keys [shape-id wiggle taken duration default-open]}]
+  (let [{:keys [property frequency amplitude octaves start end fade]} wiggle
+        open*   (mf/use-state (true? default-open))
+        open?   (deref open*)
+        options (mf/with-memo [taken property]
+                  (into []
+                        (comp (filter #(or (= % property) (not (contains? taken %))))
+                              (map (fn [p] {:id (name p) :label (labels/property-label p nil)})))
+                        cta/wiggle-properties))
+        change  (mf/use-fn
+                 (mf/deps shape-id property)
+                 #(st/emit! (dwa/update-wiggle shape-id property %)))
+
+        on-toggle    (mf/use-fn #(swap! open* not))
+        on-remove    (mf/use-fn (mf/deps shape-id property) #(st/emit! (dwa/remove-wiggle shape-id property)))
+        on-shuffle   (mf/use-fn (mf/deps shape-id property) #(st/emit! (dwa/shuffle-wiggle shape-id property)))
+        on-property  (mf/use-fn
+                      (mf/deps change property amplitude)
+                      (fn [value]
+                        (let [to (keyword value)]
+                          ;; the amount of its own unit: a scale shakes by a share
+                          (change (cond-> {:property to}
+                                    (not= (wiggle-unit to) (wiggle-unit property))
+                                    (assoc :amplitude (:amplitude (dwa/new-wiggle to))))))))
+        on-frequency (mf/use-fn (mf/deps change)
+                                (number-handler #(change {:frequency (mth/clamp % 0.01 cta/max-wiggle-frequency)})))
+        on-amplitude (mf/use-fn (mf/deps change property)
+                                (number-handler #(change {:amplitude (max 0 (display->amplitude property %))})))
+        on-octaves   (mf/use-fn (mf/deps change)
+                                (number-handler #(change {:octaves (mth/clamp (mth/round %) 1 4)})))
+        on-start     (mf/use-fn (mf/deps change)
+                                (number-handler #(change {:start (max 0 (mth/round %))})))
+        ;; to the end of the timeline: as long as it lasts
+        on-end       (mf/use-fn (mf/deps change duration)
+                                (number-handler #(change {:end (when (< % duration) (max 0 (mth/round %)))})))
+        on-fade      (mf/use-fn (mf/deps change)
+                                (number-handler #(change {:fade (max 0 (mth/round %))})))]
+
+    [:div {:class (stl/css :link-item)}
+     [:> prototype-pill* {:title (labels/property-label property nil)
+                          :description (wiggle-summary wiggle)
+                          :left-button-icon-id i/hsva
+                          :left-button-tooltip (tr "labels.options")
+                          :is-left-button-active open?
+                          :on-left-button-click on-toggle
+                          :right-button-icon-id i/remove
+                          :right-button-tooltip (tr "workspace.animation.remove-wiggle")
+                          :on-right-button-click on-remove}]
+     (when open?
+       [:*
+        [:> animation-row* {:label (tr "workspace.animation.wiggle-property")}
+         [:> select* {:class (stl/css :follow-leader-select)
+                      :options options
+                      :default-selected (name property)
+                      :aria-label (tr "workspace.animation.wiggle-property")
+                      :on-change on-property}]]
+        [:> animation-row* {:label (tr "workspace.animation.wiggle-frequency")}
+         [:> numeric-input* {:text-icon "/s"
+                             :property (tr "workspace.animation.wiggle-frequency")
+                             :min 0.01
+                             :max cta/max-wiggle-frequency
+                             :step 0.5
+                             :value frequency
+                             :on-change on-frequency}]]
+        [:> animation-row* {:label (tr "workspace.animation.wiggle-amplitude")}
+         [:div {:class (stl/css :follow-leader)}
+          [:> numeric-input* {:text-icon (wiggle-unit property)
+                              :property (tr "workspace.animation.wiggle-amplitude")
+                              :min 0
+                              :step 1
+                              :value (mth/precision (amplitude->display property amplitude) 2)
+                              :on-change on-amplitude}]
+          [:> icon-button* {:variant "ghost"
+                            :aria-label (tr "workspace.animation.wiggle-shuffle")
+                            :icon i/reload
+                            :on-click on-shuffle}]]]
+        [:> animation-row* {:label (tr "workspace.animation.wiggle-detail")}
+         [:> numeric-input* {:property (tr "workspace.animation.wiggle-detail")
+                             :min 1
+                             :max 4
+                             :step 1
+                             :value octaves
+                             :on-change on-octaves}]]
+        [:> animation-row* {:label (tr "workspace.animation.wiggle-time")}
+         ;; the unit in the label: the fields are narrow
+         [:div {:class (stl/css :link-ends)}
+          [:> numeric-input* {:property (tr "workspace.animation.wiggle-start")
+                              :min 0
+                              :step 10
+                              :value start
+                              :on-change on-start}]
+          [:> numeric-input* {:property (tr "workspace.animation.wiggle-end")
+                              :min 0
+                              :step 10
+                              :value (or end duration)
+                              :on-change on-end}]]]
+        [:> animation-row* {:label (tr "workspace.animation.wiggle-fade")}
+         [:> numeric-input* {:text-icon "ms"
+                             :property (tr "workspace.animation.wiggle-fade")
+                             :min 0
+                             :step 10
+                             :value fade
+                             :on-change on-fade}]]])]))
+
+(mf/defc wiggle-menu*
+  "The wiggles of the selected layer, a single one in a board or a board
+  (see `cta/wiggles-of`): each shakes a property at random but the same
+  each time, on top of what it plays (an AE wiggle). The + of the title
+  shakes the first property not shaking yet, open to set it."
+  [{:keys [ids]}]
+  (let [shape-id  (when (= 1 (count ids)) (first ids))
+        objects   (mf/deref refs/workspace-page-objects)
+        timelines (mf/deref ref:timelines)
+        board-id  (when (some? shape-id) (cfh/get-shape-id-root-frame objects shape-id))
+        in-board? (and (some? board-id) (not= uuid/zero board-id))
+        timeline  (mf/with-memo [timelines board-id]
+                    (or (get timelines board-id) (cta/make-timeline {:board-id board-id})))
+        wiggles   (when in-board? (cta/wiggles-of timeline shape-id))
+        taken     (into #{} (map :property) wiggles)
+        free      (first (remove taken cta/wiggle-properties))
+        ;; the one the + added, open
+        fresh*    (mf/use-state nil)
+        [shown? toggle-shown show] (use-section-open :wiggle)
+
+        on-add
+        (mf/use-fn
+         (mf/deps shape-id free show)
+         (fn []
+           (when (some? free)
+             (show)
+             (reset! fresh* [shape-id free])
+             (st/emit! (dwa/set-wiggle shape-id (dwa/new-wiggle free))))))]
+
+    (when in-board?
+      [:div {:class (stl/css :follow-menu)}
+       [:div {:class (stl/css :animations-title)}
+        [:> title-bar* {:collapsable (boolean (seq wiggles))
+                        :collapsed (not shown?)
+                        :on-collapsed toggle-shown
+                        :title (tr "workspace.animation.wiggle")}
+         [:> icon-button* {:variant "ghost"
+                           :aria-label (tr "workspace.animation.add-wiggle")
+                           :icon i/add
+                           :disabled (nil? free)
+                           :on-click on-add}]]]
+       (when (and (seq wiggles) shown?)
+         [:div {:class (stl/css :follow-rows)}
+          ;; by place, so one that shakes another property stays open
+          (for [[index wiggle] (map-indexed vector wiggles)]
+            [:> wiggle-item* {:key (dm/str shape-id "-" index)
+                              :shape-id shape-id
+                              :wiggle wiggle
+                              :taken taken
+                              :duration (max 1 (or (:duration timeline) 0))
+                              :default-open (= [shape-id (:property wiggle)] (deref fresh*))}])])])))
+
 (mf/defc reach-menu*
   "The goal the selected layer reaches (see `cta/ik-of`), when it ends a
   chain of two follows (an arm: the hand follows the forearm, which

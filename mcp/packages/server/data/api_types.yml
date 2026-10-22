@@ -18396,6 +18396,9 @@ Timeline:
         linksOf(shape: Shape): Link[];
         link(shape: Shape, link: LinkProps): void;
         unlink(shape: Shape, property: LinkableProperty): void;
+        wigglesOf(shape: Shape): Wiggle[];
+        wiggle(shape: Shape, wiggle: WiggleProps): void;
+        unwiggle(shape: Shape, property: WiggleProperty): void;
         ikOf(shape: Shape): Ik | null;
         setIk(shape: Shape, ik: IkProps | null): void;
         toCSS(): string;
@@ -18973,6 +18976,71 @@ Timeline:
         * property: LinkableProperty
 
           The property linked.
+
+        Returns void
+      wigglesOf: |-
+        ```
+        wigglesOf(shape: Shape): Wiggle[]
+        ```
+
+        The wiggles of the properties of `shape`, as the Wiggle section of the
+        Motion tab sets them (see `wiggle`).
+
+        Parameters
+
+        * shape: Shape
+
+          The board or a layer inside it.
+
+        Returns Wiggle[]
+      wiggle: |-
+        ```
+        wiggle(shape: Shape, wiggle: WiggleProps): void
+        ```
+
+        Makes `wiggle.property` of `shape` shake, at random but the same each
+        time, on top of what it plays (its keyframes, a preset, a link), as
+        the wiggle expression of After Effects: about `wiggle.frequency` times
+        a second to a new value within `wiggle.amplitude` of it. It shakes
+        from `wiggle.start` to `wiggle.end` (the end of the timeline by
+        default), growing and fading over `wiggle.fade` milliseconds. Over the
+        whole of a looping timeline without a fade it ends as it starts, so
+        the loop does not jump. Every export plays it as keyframes. Wiggling a
+        property that wiggles already changes that wiggle, shaking as it did
+        unless given another `seed`.
+
+        Parameters
+
+        * shape: Shape
+
+          The board or a layer inside it.
+        * wiggle: WiggleProps
+
+          The property, how often and how much it shakes.
+
+          The dot trembles, and the card shakes for a moment as it lands:
+
+        Returns void
+
+        Example
+        ```
+        timeline.wiggle(dot, { property: 'position', frequency: 6, amplitude: 2 });timeline.wiggle(card, { property: 'rotation', frequency: 8, amplitude: 4, start: 1200, end: 1600, fade: 100 });
+        ```
+      unwiggle: |-
+        ```
+        unwiggle(shape: Shape, property: WiggleProperty): void
+        ```
+
+        Makes `property` of `shape` shake no more (see `wiggle`).
+
+        Parameters
+
+        * shape: Shape
+
+          The board or a layer inside it.
+        * property: WiggleProperty
+
+          The property that wiggles.
 
         Returns void
       ikOf: |-
@@ -19885,6 +19953,158 @@ Link:
         ```
 
         With a range: the curve it follows from one end to the other.
+Wiggle:
+  overview: |-
+    Interface Wiggle
+    ================
+
+    How a property of a layer shakes, as the Wiggle section of the Motion
+    tab sets it (see `Timeline.wiggle`).
+
+    ```
+    interface Wiggle {
+        property: WiggleProperty;
+        frequency: number;
+        amplitude: number;
+        octaves: number;
+        start: number;
+        end?: number;
+        fade: number;
+        seed: number;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      property: |-
+        ```
+        readonly property: WiggleProperty
+        ```
+
+        The property it shakes.
+      frequency: |-
+        ```
+        readonly frequency: number
+        ```
+
+        About how many times a second it goes to a new value.
+      amplitude: |-
+        ```
+        readonly amplitude: number
+        ```
+
+        How far from what the property plays it goes at most, in the unit of
+        the property: pixels, degrees, or a share for a scale or an opacity
+        (0.1 for 10 %).
+      octaves: |-
+        ```
+        readonly octaves: number
+        ```
+
+        Layers of finer shakes, each twice as fast and half as strong, 1 to 4.
+      start: |-
+        ```
+        readonly start: number
+        ```
+
+        When it starts shaking, in milliseconds.
+      end: |-
+        ```
+        readonly end?: number
+        ```
+
+        When it stops shaking, in milliseconds; the end of the timeline when
+        absent.
+      fade: |-
+        ```
+        readonly fade: number
+        ```
+
+        How many milliseconds it takes to grow at its start and to fade at
+        its end.
+      seed: |-
+        ```
+        readonly seed: number
+        ```
+
+        What makes its shakes the ones they are: another seed shakes another
+        way.
+WiggleProps:
+  overview: |-
+    Interface WiggleProps
+    =====================
+
+    A wiggle to set with `Timeline.wiggle`.
+
+    ```
+    interface WiggleProps {
+        property: WiggleProperty;
+        frequency: number;
+        amplitude: number;
+        octaves?: number;
+        start?: number;
+        end?: number;
+        fade?: number;
+        seed?: number;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      property: |-
+        ```
+        property: WiggleProperty
+        ```
+
+        The property to shake.
+      frequency: |-
+        ```
+        frequency: number
+        ```
+
+        About how many times a second it goes to a new value, above 0 and
+        below 30.
+      amplitude: |-
+        ```
+        amplitude: number
+        ```
+
+        How far it goes at most, in the unit of the property (see
+        `Wiggle.amplitude`).
+      octaves: |-
+        ```
+        octaves?: number
+        ```
+
+        Layers of finer shakes, 1 to 4; 1 by default.
+      start: |-
+        ```
+        start?: number
+        ```
+
+        When it starts shaking, in milliseconds; 0 by default.
+      end: |-
+        ```
+        end?: number
+        ```
+
+        When it stops shaking, in milliseconds, after `start`; the end of the
+        timeline by default.
+      fade: |-
+        ```
+        fade?: number
+        ```
+
+        How many milliseconds it grows and fades over; 0 by default.
+      seed: |-
+        ```
+        seed?: number
+        ```
+
+        A whole number that makes its shakes the ones they are; the one it
+        had, or a new one.
 LinkProps:
   overview: |-
     Interface LinkProps
@@ -29547,7 +29767,22 @@ LinkableProperty:
     The properties a link drives and reads (see `Timeline.link`): those of
     one number each.
 
-    Referenced by: Link, LinkProps, Timeline
+    Referenced by: Link, LinkProps, Timeline, WiggleProperty
+  members: {}
+WiggleProperty:
+  overview: |-
+    Type Alias WiggleProperty
+    =========================
+
+    ```
+    WiggleProperty: LinkableProperty | "position" | "scale"
+    ```
+
+    The properties a wiggle shakes (see `Timeline.wiggle`): those of one
+    number each, and two pairs, `position` (x and y, each its own way) and
+    `scale` (both scales together).
+
+    Referenced by: Timeline, Wiggle, WiggleProps
   members: {}
 TrimMode:
   overview: |-

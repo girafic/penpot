@@ -512,7 +512,7 @@
 (defn- animated-ids
   "Ids of the layers of `board-id` (itself included) that have keyframes,
   preset animations, a leader they follow (see `cta/follow-of`), links
-  (see `cta/links-of`) or
+  (see `cta/links-of`), wiggles (see `cta/wiggles-of`) or
   animated children, or that are component copies playing the animation
   of their mains (`copy-spans`, see `timeline-rows`)."
   ([objects board-id timeline]
@@ -524,6 +524,7 @@
                        (seq (dm/get-in timeline [:tracks id :animations]))
                        (some? (dm/get-in timeline [:tracks id :follow]))
                        (seq (dm/get-in timeline [:tracks id :links]))
+                       (seq (dm/get-in timeline [:tracks id :wiggles]))
                        (contains? copy-spans id)
                        (seq child-ids))
                  (cons id child-ids)
@@ -582,7 +583,11 @@
                       children   (when-not folded?
                                    (filter #(contains? playing %) (reverse (:shapes shape))))
                       animations (dm/get-in timeline [:tracks id :animations])
-                      slots      (track-slots (dm/get-in timeline [:tracks id :keyframes]))
+                      ;; a property a wiggle shakes has a row, keyframes or not
+                      slots      (track-slots (into (dm/get-in timeline [:tracks id :keyframes] [])
+                                                    (for [wiggle (dm/get-in timeline [:tracks id :wiggles])
+                                                          property (cta/wiggle-slots (:property wiggle))]
+                                                      {:property property})))
                       expanded?  (and (not folded?)
                                       (or (= :all expanded)
                                           (get expanded id (contains? playing id))))]
@@ -1152,7 +1157,7 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [row-index timeline shape-id property index depth looping? hidden? locked? link-name
-           value offset playhead hovered? on-context-menu on-select-layer on-hover]}]
+           wiggled? value offset playhead hovered? on-context-menu on-select-layer on-hover]}]
   (let [[on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
 
         ;; A click on the property picks its keyframes (Shift adds them to
@@ -1200,7 +1205,12 @@
        (when (some? link-name)
          [:span {:class (stl/css :linked-mark)
                  :title (tr "workspace.animation.linked-row-hint" link-name)}
-          (tr "workspace.animation.linked-row" link-name)])]
+          (tr "workspace.animation.linked-row" link-name)])
+       ;; a wiggle shakes it (see `cta/wiggles-of`), on top of what it plays
+       (when wiggled?
+         [:span {:class (stl/css :linked-mark)
+                 :title (tr "workspace.animation.wiggled-row-hint")}
+          (tr "workspace.animation.wiggled-row")])]
       [:> row-controls* {:timeline timeline
                          :shape-id shape-id
                          :property property
@@ -2690,6 +2700,14 @@
         ;; own as the view scrolls and as the playhead plays.
         linked    (mf/with-memo [timeline objects]
                     (cta/played-link-slots timeline objects))
+        ;; `#{[id property]}` of the rows a wiggle shakes
+        wiggled   (mf/with-memo [timeline]
+                    (into #{}
+                          (mapcat (fn [[id track]]
+                                    (for [wiggle (:wiggles track)
+                                          property (cta/wiggle-slots (:property wiggle))]
+                                      [id property])))
+                          (:tracks timeline)))
         scene-ref (mf/use-ref nil)
         _         (mf/set-ref-val! scene-ref {:rows rows
                                               :timeline timeline
@@ -3828,6 +3846,7 @@
                                                                :source
                                                                (get objects)
                                                                :name))
+                                         :wiggled? (and (nil? index) (contains? wiggled [id property]))
                                          :hidden? (cta/slot-flag? timeline id :hidden property index)
                                          :locked? (cta/slot-flag? timeline id :locked property index)
                                          :value (cta/value-of (get values id) property index)

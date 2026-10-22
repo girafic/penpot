@@ -298,6 +298,35 @@
         (.unlink timeline wheel "rotation")
         (t/is (= ["opacity"] (map :property (links wheel))))))))
 
+(t/deftest a-property-shakes-with-a-wiggle
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board [^js dot]] (board-with-rects context 1)
+            ^js timeline         (.addTimeline board)
+            wiggles              #(mapv (fn [^js w] (js->clj w :keywordize-keys true)) (.wigglesOf timeline %))]
+        (t/is (= [] (wiggles dot)) "none at first")
+        (.wiggle timeline dot #js {:property "rotation" :frequency 2 :amplitude 10 :seed 42})
+        (t/is (= [{:property :rotation :frequency 2 :amplitude 10 :seed 42}]
+                 (:wiggles (stored-track store context board dot)))
+              "the defaults left out")
+        (t/is (= [{:property "rotation" :frequency 2 :amplitude 10 :octaves 1 :start 0 :fade 0 :seed 42}]
+                 (wiggles dot)))
+        (.wiggle timeline dot #js {:property "rotation" :frequency 3 :amplitude 5 :end 800})
+        (t/is (= [3 5 42 800] ((juxt :frequency :amplitude :seed :end) (first (wiggles dot))))
+              "wiggling it again changes that wiggle, shaking as it did")
+        (.wiggle timeline board #js {:property "position" :frequency 1 :amplitude 4})
+        (t/is (= "position" (:property (first (wiggles board)))) "the board too, a pair of rows")
+        (t/testing "what cannot wiggle is refused"
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "fillColor" :frequency 1 :amplitude 1})))
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 0 :amplitude 1})))
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 1 :amplitude -1})))
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 1 :amplitude 1 :octaves 5})))
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 1 :amplitude 1
+                                                             :start 500 :end 400}))))
+        (.unwiggle timeline dot "rotation")
+        (t/is (= [] (wiggles dot)))))))
+
 (t/deftest a-link-maps-a-range-of-its-source
   (thw/with-wasm-mocks*
     (fn []

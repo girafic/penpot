@@ -6846,6 +6846,48 @@ msgstr "Choose a layer"
 msgid "workspace.animation.follow-pick"
 msgstr "Pick the leader on the canvas or in the layers"
 
+msgid "workspace.animation.wiggle"
+msgstr "Wiggle"
+
+msgid "workspace.animation.add-wiggle"
+msgstr "Add wiggle"
+
+msgid "workspace.animation.remove-wiggle"
+msgstr "Remove wiggle"
+
+msgid "workspace.animation.wiggle-property"
+msgstr "Shakes"
+
+msgid "workspace.animation.wiggle-frequency"
+msgstr "Frequency"
+
+msgid "workspace.animation.wiggle-amplitude"
+msgstr "Amount"
+
+msgid "workspace.animation.wiggle-shuffle"
+msgstr "Shake another way"
+
+msgid "workspace.animation.wiggle-detail"
+msgstr "Detail"
+
+msgid "workspace.animation.wiggle-time"
+msgstr "Time, ms"
+
+msgid "workspace.animation.wiggle-start"
+msgstr "Start"
+
+msgid "workspace.animation.wiggle-end"
+msgstr "End"
+
+msgid "workspace.animation.wiggle-fade"
+msgstr "Fade"
+
+msgid "workspace.animation.wiggled-row"
+msgstr "~ wiggle"
+
+msgid "workspace.animation.wiggled-row-hint"
+msgstr "A wiggle shakes it on top of what it plays (see Wiggle in the Design tab)"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.links"
 msgstr "Links"

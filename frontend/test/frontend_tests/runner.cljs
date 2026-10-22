@@ -15,6 +15,7 @@
    [frontend-tests.data.animation-playback-test]
    [frontend-tests.data.animation-styles-test]
    [frontend-tests.data.animation-tilt-test]
+   [frontend-tests.data.animation-wiggle-test]
    [frontend-tests.data.comments-filters-test]
    [frontend-tests.data.comments-moments-test]
    [frontend-tests.data.dashboard-test]
@@ -228,6 +229,7 @@
    'frontend-tests.data.animation-playback-test
    'frontend-tests.data.animation-styles-test
    'frontend-tests.data.animation-tilt-test
+   'frontend-tests.data.animation-wiggle-test
    'frontend-tests.data.export-animation-job-test
    'frontend-tests.data.export-job-workspace-test
    'frontend-tests.data.exports-animation-test

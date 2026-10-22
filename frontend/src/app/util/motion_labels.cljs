@@ -30,6 +30,9 @@
     (case property
       :x "Position X"
       :y "Position Y"
+      ;; the pairs a wiggle shakes together (see `cta/wiggle-properties`)
+      :position (tr "workspace.animation.position")
+      :scale (tr "workspace.animation.scale")
       :width "Width"
       :height "Height"
       :scale-x "Scale X"

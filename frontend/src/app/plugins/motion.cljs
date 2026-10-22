@@ -71,6 +71,16 @@
 (def ^:private properties
   (set/map-invert property-names))
 
+(def ^:private wiggle-names
+  "The properties a wiggle shakes (see `cta/wiggle-properties`), as the
+  plugin API names them: the animatable ones and two pairs."
+  (into {:position "position" :scale "scale"}
+        (map (juxt identity property-names))
+        cta/link-properties))
+
+(def ^:private wiggle-properties
+  (set/map-invert wiggle-names))
+
 (def ^:private playback-names
   #{"once" "loop" "ping-pong"})
 
@@ -1969,6 +1979,90 @@
             (if (contains? (set cta/link-properties) property)
               (write! :unlink #(cta/remove-link % shape-id property))
               (u/not-valid plugin-id :unlink "The property should be one a link can drive")))))
+
+      ;; The wiggles of a layer, as the Wiggle section of the Motion tab
+      ;; sets them
+      :wigglesOf
+      (fn [shape]
+        (when-let [shape-id (layer :wigglesOf shape)]
+          (apply array
+                 (map (fn [{:keys [property frequency amplitude seed octaves start end fade]}]
+                        (let [wiggle #js {:property (get wiggle-names property)
+                                          :frequency frequency
+                                          :amplitude amplitude
+                                          :octaves octaves
+                                          :start start
+                                          :fade fade
+                                          :seed seed}]
+                          (when (some? end)
+                            (obj/set! wiggle "end" end))
+                          wiggle))
+                      (cta/wiggles-of (locate) shape-id)))))
+
+      :wiggle
+      (fn [shape wiggle]
+        (when-let [shape-id (layer :wiggle shape)]
+          (let [prop      #(when (object? wiggle) (obj/get wiggle %))
+                property  (get wiggle-properties (prop "property"))
+                frequency (prop "frequency")
+                amplitude (prop "amplitude")
+                octaves   (prop "octaves")
+                start     (prop "start")
+                end       (prop "end")
+                fade      (prop "fade")
+                seed      (prop "seed")
+                whole?    #(and (sm/valid-safe-number? %) (== % (mth/round %)))
+                names     (str/join ", " (map #(dm/str "'" (get wiggle-names %) "'") cta/wiggle-properties))
+                error     (cond
+                            (not (object? wiggle))
+                            "The wiggle should be an object with a property, a frequency and an amplitude"
+
+                            (nil? property)
+                            (dm/str "property should be one of " names)
+
+                            (not (and (sm/valid-safe-number? frequency) (< 0 frequency cta/max-wiggle-frequency)))
+                            (dm/str "frequency should be a number of shakes a second, above 0 and below " cta/max-wiggle-frequency)
+
+                            (not (and (sm/valid-safe-number? amplitude) (>= amplitude 0)))
+                            "amplitude should be a number from 0, in the unit of the property"
+
+                            (and (some? octaves) (not (and (whole? octaves) (<= 1 octaves 4))))
+                            "octaves should be a whole number from 1 to 4"
+
+                            (and (some? start) (not (valid-time? start)))
+                            "start should be a number of milliseconds from 0"
+
+                            (and (some? end) (not (valid-time? end)))
+                            "end should be a number of milliseconds from 0"
+
+                            (and (some? end) (<= end (or start 0)))
+                            "end should come after start"
+
+                            (and (some? fade) (not (valid-time? fade)))
+                            "fade should be a number of milliseconds from 0"
+
+                            (and (some? seed) (not (and (whole? seed) (sm/valid-safe-int? seed))))
+                            "seed should be a whole number")]
+            (if (some? error)
+              (u/not-valid plugin-id :wiggle error)
+              (write! :wiggle
+                      (fn [timeline]
+                        ;; shaking as it did, unless told another seed
+                        (let [seed (or seed (:seed (cta/wiggle-of timeline shape-id property)))]
+                          (cta/set-wiggle timeline shape-id
+                                          (cond-> {:property property :frequency frequency :amplitude amplitude}
+                                            (some? seed)    (assoc :seed seed)
+                                            (some? octaves) (assoc :octaves octaves)
+                                            (some? start)   (assoc :start start)
+                                            (some? end)     (assoc :end end)
+                                            (some? fade)    (assoc :fade fade))))))))))
+
+      :unwiggle
+      (fn [shape property]
+        (when-let [shape-id (layer :unwiggle shape)]
+          (if-let [property (get wiggle-properties property)]
+            (write! :unwiggle #(cta/remove-wiggle % shape-id property))
+            (u/not-valid plugin-id :unwiggle "The property should be one a wiggle shakes"))))
 
       ;; The goal the end of a chain of two follows reaches, as the Reach
       ;; section of the Motion tab sets it

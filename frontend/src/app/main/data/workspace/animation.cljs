@@ -750,6 +750,72 @@
                  (apply-preview))
           (rx/empty))))))
 
+;; WIGGLE
+
+(def ^:private wiggle-amplitudes
+  "How much a new wiggle shakes each property, in its unit (see
+  `cta/schema:wiggle`)."
+  {:position 10 :x 10 :y 10 :width 10 :height 10 :rotation 10
+   :scale 0.1 :scale-x 0.1 :scale-y 0.1 :opacity 0.2
+   :rotate-x 10 :rotate-y 10 :translate-z 20 :blur 2})
+
+(defn new-wiggle
+  "A wiggle of `property` as it starts: twice a second, by the amount
+  `wiggle-amplitudes` gives, a seed of its own."
+  [property]
+  {:property property
+   :frequency 2
+   :amplitude (get wiggle-amplitudes property 10)
+   :seed (cta/new-wiggle-seed)})
+
+(defn set-wiggle
+  "Make `property` of the layer `shape-id` shake as `wiggle` says (see
+  `cta/set-wiggle`), in place of the wiggle of `replaced` when given, in
+  one undo step."
+  [shape-id wiggle & {:keys [replaced]}]
+  (ptk/reify ::set-wiggle
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl  (layer-board-timeline state shape-id)
+            tl' (some-> tl (cta/set-wiggle shape-id wiggle :replaced replaced))]
+        (if (and (some? tl) (not= tl tl'))
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview))
+          (rx/empty))))))
+
+(defn update-wiggle
+  "Change the wiggle of `property` of the layer `shape-id`: `changes`
+  taken into it (see `cta/wiggle-of`), such as an `:amplitude`, or
+  another `:property` it shakes in its place; nil values back to their
+  defaults."
+  [shape-id property changes]
+  (ptk/reify ::update-wiggle
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if-let [wiggle (some-> (layer-board-timeline state shape-id) (cta/wiggle-of shape-id property))]
+        (rx/of (set-wiggle shape-id (merge wiggle changes) :replaced property))
+        (rx/empty)))))
+
+(defn shuffle-wiggle
+  "Make the wiggle of `property` of the layer `shape-id` shake another
+  way: a new seed."
+  [shape-id property]
+  (update-wiggle shape-id property {:seed (cta/new-wiggle-seed)}))
+
+(defn remove-wiggle
+  "Make `property` of the layer `shape-id` shake no more (see
+  `cta/remove-wiggle`), in one undo step."
+  [shape-id property]
+  (ptk/reify ::remove-wiggle
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl  (layer-board-timeline state shape-id)
+            tl' (some-> tl (cta/remove-wiggle shape-id property))]
+        (if (and (some? tl) (not= tl tl'))
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview))
+          (rx/empty))))))
+
 (defn set-ik
   "Make the layer `shape-id`, the end of a chain of two follows, reach
   another layer of its board as `ik` says (see `cta/set-ik`), in one undo

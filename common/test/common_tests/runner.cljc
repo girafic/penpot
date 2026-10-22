@@ -82,6 +82,7 @@
    [common-tests.logic.token-test]
    [common-tests.logic.variants-switch-test]
    [common-tests.logic.variants-test]
+   [common-tests.math-noise-test]
    [common-tests.math-test]
    [common-tests.media-test]
    [common-tests.path-names-test]
@@ -197,6 +198,7 @@
    'common-tests.logic.token-test
    'common-tests.logic.variants-switch-test
    'common-tests.logic.variants-test
+   'common-tests.math-noise-test
    'common-tests.math-test
    'common-tests.media-test
    'common-tests.path-names-test

@@ -7098,3 +7098,131 @@
              "other objects resolve it anew")
        (t/is (not (identical? once (cta/resolve-animations (assoc tl :duration 2000) objects)))
              "and so does another timeline"))))
+
+;; WIGGLES (Penpot Motion)
+
+(defn- shaken
+  "The values of `property` of `id` in `timeline` over `objects` at each
+  of `times`."
+  [timeline objects id property times]
+  (let [resolved (cta/resolve-animations timeline objects)]
+    (mapv #(get-in (cta/values-at resolved %) [id property]) times)))
+
+(t/deftest a-wiggle-is-stored-with-its-seed-and-without-defaults
+  (let [{:keys [wheel timeline]} (car-and-wheel)
+        tl (cta/set-wiggle timeline wheel {:property :rotation :frequency 2 :amplitude 10
+                                           :octaves 1 :start 0 :fade 0})]
+    (t/is (cta/valid-timeline? tl))
+    (t/is (= #{:property :frequency :amplitude :seed}
+             (set (keys (first (get-in tl [:tracks wheel :wiggles])))))
+          "a new seed; one octave, a start and a fade of 0 as absence")
+    (t/is (= {:property :rotation :frequency 2 :amplitude 10 :octaves 1 :start 0 :fade 0
+              :seed (:seed (cta/wiggle-of tl wheel :rotation))}
+             (cta/wiggle-of tl wheel :rotation)))
+    (t/testing "setting it again keeps one wiggle of the property, and its seed"
+      (let [again (cta/set-wiggle tl wheel (assoc (cta/wiggle-of tl wheel :rotation) :amplitude 20))]
+        (t/is (= 1 (count (cta/wiggles-of again wheel))))
+        (t/is (= (:seed (cta/wiggle-of tl wheel :rotation)) (:seed (cta/wiggle-of again wheel :rotation))))))
+    (t/testing "removing it leaves no track of a layer with nothing else"
+      (t/is (nil? (get-in (cta/remove-wiggle tl wheel :rotation) [:tracks wheel]))))))
+
+(t/deftest a-wiggle-shakes-what-a-property-plays
+  (let [{:keys [car wheel timeline objects]} (car-and-wheel)
+        wiggle {:property :rotation :frequency 4 :amplitude 10 :seed 42}
+        tl     (cta/set-wiggle timeline wheel wiggle)
+        times  (range 0 1001 10)
+        rot    (shaken tl objects wheel :rotation times)]
+    (t/testing "within its amplitude of where it rests (10 degrees), and moving"
+      (t/is (every? #(<= 0 % 20.0001) rot))
+      (t/is (< 2 (- (reduce max rot) (reduce min rot)))))
+    (t/testing "the same each time for its seed, another way for another"
+      (t/is (= rot (shaken (cta/set-wiggle timeline wheel wiggle) objects wheel :rotation times)))
+      (t/is (not= rot (shaken (cta/set-wiggle timeline wheel (assoc wiggle :seed 43)) objects wheel :rotation times))))
+    (t/testing "on top of the keyframes of a moving layer"
+      (let [moving (cta/set-wiggle timeline car {:property :x :frequency 3 :amplitude 5 :seed 7})
+            plain  (shaken timeline objects car :x times)
+            shook  (shaken moving objects car :x times)]
+        (t/is (every? #(<= (mth/abs %) 5.0001) (map - shook plain)))
+        (t/is (some #(> (mth/abs %) 1) (map - shook plain)))))
+    (t/testing "an opacity stays within 0 and 1"
+      (let [faded (cta/set-wiggle timeline wheel {:property :opacity :frequency 5 :amplitude 0.8 :seed 3})]
+        (t/is (every? #(<= 0 % 1) (shaken faded objects wheel :opacity times)))))
+    (t/testing "a position shakes x and y each its own way, a scale both together"
+      (let [moved  (cta/set-wiggle timeline wheel {:property :position :frequency 3 :amplitude 8 :seed 9})
+            scaled (cta/set-wiggle timeline wheel {:property :scale :frequency 3 :amplitude 0.2 :seed 9})
+            xs     (shaken moved objects wheel :x times)
+            ys     (shaken moved objects wheel :y times)]
+        (t/is (not= (map #(- % (first xs)) xs) (map #(- % (first ys)) ys)))
+        (t/is (= (shaken scaled objects wheel :scale-x times) (shaken scaled objects wheel :scale-y times)))))))
+
+(t/deftest a-wiggle-shakes-within-its-span
+  (let [{:keys [car timeline objects]} (car-and-wheel)
+        tl     (cta/set-wiggle timeline car {:property :x :frequency 4 :amplitude 6 :seed 11
+                                             :start 300 :end 700 :fade 100})
+        plain  (fn [t] (first (shaken timeline objects car :x [t])))
+        shook  (fn [t] (first (shaken tl objects car :x [t])))]
+    (t/testing "the eased keyframes play as they were outside its span"
+      (doseq [t [0 100 250 300 700 800 1000]]
+        (t/is (mth/close? (plain t) (shook t) 0.01) (str "at " t))))
+    (t/testing "and it shakes in it, growing over its fade"
+      (t/is (some #(> (mth/abs (- (shook %) (plain %))) 0.5) (range 400 601 10)))
+      (t/is (< (mth/abs (- (shook 310) (plain 310))) (* 6 0.11))))
+    (t/testing "a span outside the timeline shakes nothing"
+      (t/is (= (cta/resolve-animations timeline objects)
+               (update (cta/resolve-animations (cta/set-wiggle timeline car {:property :x :frequency 4 :amplitude 6
+                                                                             :seed 11 :start 2000})
+                                               objects)
+                       :tracks update car dissoc :wiggles))))))
+
+(t/deftest a-wiggle-over-a-whole-loop-does-not-jump
+  (let [{:keys [wheel timeline objects]} (car-and-wheel)
+        looping (assoc timeline :playback :loop)
+        tl      (cta/set-wiggle looping wheel {:property :rotation :frequency 3.3 :amplitude 10 :seed 5})
+        [a b]   (shaken tl objects wheel :rotation [0 1000])]
+    (t/is (mth/close? a b 0.001) "the same at the end as at the start")
+    (t/is (> (mth/abs (- a 10)) 0.001) "and shaking from the start")))
+
+(t/deftest a-wiggle-unrolls-a-looping-row
+  (let [{:keys [car timeline objects]} (car-and-wheel)
+        tl       (-> timeline
+                     (cta/remove-property car :x nil)
+                     (cta/add-keyframe car {:time 0 :property :x :value 50 :easing :linear})
+                     (cta/add-keyframe car {:time 250 :property :x :value 150})
+                     (cta/toggle-slot-flag car :loops :x nil)
+                     (assoc :duration 1000))
+        shook    (cta/set-wiggle tl car {:property :x :frequency 2 :amplitude 4 :seed 2 :start 600 :end 900})
+        resolved (cta/resolve-animations shook objects)
+        plain    (fn [t] (get-in (cta/values-at (cta/resolve-animations tl objects) t) [car :x]))]
+    (t/is (not (contains? (get-in resolved [:tracks car :loops] #{}) :x)) "it loops no more")
+    ;; each repeat 1 ms after the one before, as the exports unroll it
+    (t/is (mth/close? (plain 400) (get-in (cta/values-at resolved 400) [car :x]) 0.5)
+          "and plays its repeats where it does not shake")))
+
+(t/deftest the-exports-play-a-wiggle
+  (let [{:keys [wheel timeline objects]} (car-and-wheel)
+        tl     (cta/set-wiggle timeline wheel {:property :rotation :frequency 4 :amplitude 10 :seed 42})
+        lottie (alottie/timeline->lottie tl objects)
+        layer  (d/seek #(= 1 (get-in % [:ks :r :a])) (:layers lottie))
+        css    (acss/timeline->css tl objects)]
+    (t/is (some? layer) "a layer of the Lottie turns")
+    (t/is (< 8 (count (get-in layer [:ks :r :k]))) "through the shakes of the wiggle")
+    (t/is (str/includes? css "rotate") "and so does the CSS")))
+
+(t/deftest a-pasted-track-brings-its-wiggles
+  (let [{:keys [car wheel timeline]} (car-and-wheel)
+        wiggle {:property :rotation :frequency 3 :amplitude 12 :seed 21}
+        track  (get-in (cta/set-wiggle timeline wheel wiggle) [:tracks wheel])
+        pasted (:timeline (cta/paste-track (cta/set-wiggle timeline car (assoc wiggle :amplitude 1))
+                                           car (assoc track :shape-id car) :merge))]
+    (t/is (= [(merge {:octaves 1 :start 0 :fade 0} wiggle)] (cta/wiggles-of pasted car))
+          "in place of the wiggle of the same property")))
+
+(t/deftest a-wiggle-shakes-once-however-often-resolved
+  ;; the exports resolve a resolved timeline again
+  (let [{:keys [wheel timeline objects]} (car-and-wheel)
+        tl    (cta/set-wiggle timeline wheel {:property :rotation :frequency 4 :amplitude 10 :seed 42})
+        once  (cta/resolve-animations tl objects)
+        twice (cta/resolve-animations once objects)]
+    (t/is (nil? (get-in once [:tracks wheel :wiggles])))
+    (t/is (= (map #(get-in (cta/values-at once %) [wheel :rotation]) (range 0 1001 50))
+             (map #(get-in (cta/values-at twice %) [wheel :rotation]) (range 0 1001 50))))))

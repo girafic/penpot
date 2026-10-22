@@ -29,6 +29,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
+   [app.common.math.noise :as noise]
    [app.common.schema :as sm]
    [app.common.types.animation-outline :as ctao]
    [app.common.types.audio-clip :as ctau]
@@ -457,6 +458,35 @@
    [:clamp {:optional true} :boolean]
    [:easing {:optional true} [::sm/one-of link-easings]]])
 
+(def wiggle-properties
+  "The properties a wiggle shakes (see `schema:wiggle`): those of one
+  number each, and two pairs, `:position` (x and y, each its own way) and
+  `:scale` (both scales together)."
+  (into [:position :scale] link-properties))
+
+(def max-wiggle-frequency
+  "The most shakes a second a wiggle makes."
+  30)
+
+(def schema:wiggle
+  "How a property of a layer shakes, at random but the same each time,
+  on top of what it plays (an AE `wiggle(frequency, amplitude)`): about
+  `:frequency` times a second to a new value within `:amplitude` of it,
+  in its unit (px, degrees, a scale, an opacity), as the noise of `:seed`
+  goes (see `app.common.math.noise`), with `:octaves` layers of finer
+  shakes. It shakes from `:start` to `:end` ms (the end of the timeline
+  when absent), growing and fading over `:fade` ms at both ends. One
+  octave, a start and a fade of 0 are stored as absence."
+  [:map {:title "AnimationWiggle"}
+   [:property [::sm/one-of (set wiggle-properties)]]
+   [:frequency [::sm/number {:min 0.01 :max max-wiggle-frequency}]]
+   [:amplitude [::sm/number {:min 0 :max 100000}]]
+   [:seed ::sm/safe-int]
+   [:octaves {:optional true} [::sm/int {:min 1 :max 4}]]
+   [:start {:optional true} [::sm/int {:min 0}]]
+   [:end {:optional true} [::sm/int {:min 0}]]
+   [:fade {:optional true} [::sm/int {:min 0}]]])
+
 (def schema:track
   [:map {:title "AnimationTrack"}
    [:shape-id ::sm/uuid]
@@ -481,6 +511,8 @@
    [:ik {:optional true} schema:ik]
    ;; its properties that play others (see `schema:link`), one each
    [:links {:optional true} [:vector {:gen/max 2} schema:link]]
+   ;; its properties that shake (see `schema:wiggle`), one each
+   [:wiggles {:optional true} [:vector {:gen/max 2} schema:wiggle]]
    ;; How the trim of a group draws the layers in it (see
    ;; `play-group-trims`): all at once, the default, or one after another
    [:trim-mode {:optional true} [::sm/one-of #{:together :in-turn}]]
@@ -1070,7 +1102,7 @@
 
 (defn empty-track?
   "A track with nothing left: no keyframes, animations, origin, follow,
-  goal to reach, links nor guide flag."
+  goal to reach, links, wiggles nor guide flag."
   [track]
   (and (empty? (:keyframes track))
        (empty? (:animations track))
@@ -1078,6 +1110,7 @@
        (nil? (:follow track))
        (nil? (:ik track))
        (empty? (:links track))
+       (empty? (:wiggles track))
        (not (:guide track))))
 
 (defn set-track-origin
@@ -1213,6 +1246,73 @@
   (if-let [track (get-track timeline shape-id)]
     (let [links (filterv #(not= property (:property %)) (:links track))]
       (store-track timeline shape-id (if (seq links) (assoc track :links links) (dissoc track :links))))
+    timeline))
+
+(def ^:private wiggle-defaults
+  {:octaves 1 :start 0 :fade 0})
+
+(defn wiggles-of
+  "The wiggles of the properties of `shape-id` in `timeline` (see
+  `schema:wiggle`), with the defaults, in their order."
+  [timeline shape-id]
+  (mapv #(merge wiggle-defaults %) (dm/get-in timeline [:tracks shape-id :wiggles])))
+
+(defn wiggle-of
+  "The wiggle of `property` of `shape-id` (see `wiggles-of`), or nil."
+  [timeline shape-id property]
+  (d/seek #(= property (:property %)) (wiggles-of timeline shape-id)))
+
+(defn wiggle-slots
+  "The rows the wiggle of `property` shakes: x and y for `:position`, both
+  scales for `:scale`, the property itself else."
+  [property]
+  (case property
+    :position [:x :y]
+    :scale    [:scale-x :scale-y]
+    [property]))
+
+(declare random-seed)
+
+(defn new-wiggle-seed
+  "A seed for a new wiggle (see `schema:wiggle`), or to shake one another
+  way."
+  []
+  (random-seed))
+
+(defn set-wiggle
+  "`timeline` with `property` of `shape-id` shaking as `wiggle` says (see
+  `schema:wiggle`), in place of the wiggle it had, or of the one of
+  `replaced` (another property it shakes now instead): a new seed
+  without one, the times in whole ms, the defaults left out."
+  [timeline shape-id {:keys [property] :as wiggle} & {:keys [replaced]}]
+  (let [round   #(int (mth/round %))
+        wiggle  (-> (select-keys wiggle [:property :frequency :amplitude :seed :octaves :start :end :fade])
+                    (d/update-when :octaves round)
+                    (d/update-when :start round)
+                    (d/update-when :end round)
+                    (d/update-when :fade round))
+        wiggle  (cond-> wiggle
+                  (nil? (:seed wiggle)) (assoc :seed (random-seed)))
+        stored  (into {} (remove (fn [[k v]] (or (nil? v) (= v (get wiggle-defaults k ::none))))) wiggle)
+        wiggles (dm/get-in timeline [:tracks shape-id :wiggles] [])
+        at      (d/index-of-pred wiggles #(= (or replaced property) (:property %)))
+        wiggles (cond-> wiggles
+                  ;; one of the property it shakes now
+                  (some? replaced)
+                  (->> (map-indexed vector)
+                       (remove (fn [[i w]] (and (not= i at) (= property (:property w)))))
+                       (mapv second)))
+        at      (d/index-of-pred wiggles #(= (or replaced property) (:property %)))]
+    (-> (ensure-track timeline shape-id)
+        (assoc-in [:tracks shape-id :wiggles] (if (some? at) (assoc wiggles at stored) (conj wiggles stored))))))
+
+(defn remove-wiggle
+  "`timeline` without the wiggle of `property` of `shape-id` (see
+  `set-wiggle`)."
+  [timeline shape-id property]
+  (if-let [track (get-track timeline shape-id)]
+    (let [wiggles (filterv #(not= property (:property %)) (:wiggles track))]
+      (store-track timeline shape-id (if (seq wiggles) (assoc track :wiggles wiggles) (dissoc track :wiggles))))
     timeline))
 
 (defn drop-guides
@@ -3575,6 +3675,158 @@
             (:tracks timeline)
             (played-links timeline objects)))))
 
+(defn- wiggle-step
+  "How often, ms, a wiggle takes a value (see `wiggled-row`): ten times
+  each of its fastest shakes (those of its last octave), 30 to 120 times a
+  second."
+  [{:keys [frequency octaves]}]
+  (let [fastest (* frequency (mth/pow 2 (dec octaves)))]
+    (mth/clamp (/ 1000 (* 10 fastest)) (/ 1000 120) (/ 1000 30))))
+
+(defn- wiggle-span
+  "`[start end]`, ms, that `wiggle` shakes of a timeline `duration` ms
+  long; nil when none of it."
+  [{:keys [start end]} duration]
+  (let [s (mth/clamp start 0 duration)
+        e (mth/clamp (or end duration) 0 duration)]
+    (when (< s e) [s e])))
+
+(defn- wiggle-noise
+  "The shake of `wiggle` at `time` ms of a timeline `duration` ms long, in
+  [-1, 1], as the noise of `seed` goes: repeating over the duration when
+  `periodic?`, in a whole number of shakes then."
+  [{:keys [frequency octaves]} seed time duration periodic?]
+  (if periodic?
+    (let [cycles (max 1 (mth/round (* frequency (/ duration 1000))))]
+      (noise/fractal seed (* cycles (/ time duration)) octaves cycles))
+    (noise/fractal seed (* frequency (/ time 1000)) octaves)))
+
+(defn- wiggle-envelope
+  "How much of its shake a wiggle over `[s e]` plays at `time`: none at
+  either end and outside, all once `ramp` ms in and until `ramp` ms
+  before the end."
+  [s e ramp time]
+  (if (or (<= time s) (>= time e))
+    0
+    (min 1 (/ (- time s) ramp) (/ (- e time) ramp))))
+
+(defn- wiggled-value
+  "`value` of `property` kept to what the property can be."
+  [property value]
+  (case property
+    :opacity (mth/clamp value 0 1)
+    (:blur :width :height) (max 0 value)
+    value))
+
+(defn- wiggled-row
+  "The keyframes of `property` shaken by `wiggle` (with the defaults, see
+  `wiggles-of`) as the noise of `seed` goes, over its own (time-sorted,
+  unrolled) keyframes `row`, or over `at-rest` without any: those keyframes
+  before and after the span of the wiggle; between them, from the
+  keyframe before its start to the one after its end, a value every
+  `wiggle-step` and at its keyframes, the row's value and the shake,
+  thinned to linear keyframes within a hundredth of the amplitude (60
+  times a second within a thousandth around the span). The
+  keyframes that open and close it keep the curves on their other side.
+  Over the whole of a looping timeline without a fade it shakes the same
+  at the end as at the start, so the loop does not jump. Nil when it
+  shakes nothing of the timeline, `duration` ms long."
+  [row at-rest property wiggle seed duration loop?]
+  (when-let [[s e] (some->> (wiggle-span wiggle duration)
+                            (mapv #(mth/round %)))]
+    (let [{:keys [amplitude fade]} wiggle
+          step      (wiggle-step wiggle)
+          periodic? (and loop? (zero? s) (= e duration) (zero? fade))
+          times     (map :time row)
+          lo        (if periodic? 0 (or (some->> times (filter #(<= % s)) seq (reduce max)) s))
+          hi        (if periodic? duration (or (some->> times (filter #(>= % e)) seq (reduce min)) e))
+          ramp      (max fade step)
+          base      (if (seq row) #(property-value-at row %) (constantly at-rest))
+          shake     (fn [t] (if periodic? 1 (wiggle-envelope s e ramp t)))
+          value     (fn [t]
+                      (wiggled-value property
+                                     (+ (base t) (* (shake t) amplitude (wiggle-noise wiggle seed t duration periodic?)))))
+          ;; around the span, the row as it was, finer: 60 times a second
+          ;; and a thousandth of a unit
+          part      (fn [from to step tol]
+                      (-> (into (sorted-set from to)
+                                (comp (map #(mth/round (+ from (* % step)))) (take-while #(< % to)))
+                                (range))
+                          (into (filter #(< from % to)) times)
+                          (->> (mapv (fn [t] [t (value t)])))
+                          (thinned tol)))
+          samples   (cond-> []
+                      (< lo s) (into (butlast (part lo s ranged-link-step 1e-3)))
+                      :always  (into (part s e step (max 1e-4 (* 0.01 amplitude))))
+                      (< e hi) (into (rest (part e hi ranged-link-step 1e-3))))
+          own-at    (fn [t] (when-not periodic? (d/seek #(= t (:time %)) row)))
+          sampled   (mapv (fn [[t v]]
+                            (let [own (own-at t)]
+                              (cond
+                                ;; the curve coming into the span stays, the
+                                ;; shake goes on linear
+                                (and (some? own) (= t lo) (not= lo hi))
+                                (-> own
+                                    (assoc :easing :linear)
+                                    (dissoc :path-out :interpolation :applied-tokens))
+
+                                ;; and the one going out of it
+                                (and (some? own) (= t hi))
+                                (dissoc own :path-in)
+
+                                :else
+                                (make-keyframe {:time t :property property :value v :easing :linear}))))
+                          samples)]
+      (-> (if periodic? [] (filterv #(< (:time %) lo) row))
+          (into sampled)
+          (into (if periodic? [] (filterv #(> (:time %) hi) row)))))))
+
+(defn- play-wiggles
+  "`timeline` (with its tracks as they play) with each wiggled row shaken
+  (see `schema:wiggle`, `wiggled-row`): on top of what it plays, its own
+  keyframes, a preset or a link, or of where it rests; a looping row
+  unrolled through the duration first, and looping no more. The two rows
+  of a position shake each their own way, those of a scale together. The
+  wiggles go from the tracks once played, so that the timeline resolved
+  again plays them once."
+  [timeline objects]
+  (if-not (some (comp seq :wiggles) (vals (:tracks timeline)))
+    timeline
+    (let [duration (max 1 (or (:duration timeline) 0))
+          loop?    (= :loop (playback-mode timeline))
+
+          shake-slot
+          (fn [id wiggle track [k property]]
+            (let [own?  #(and (= property (:property %)) (nil? (:index %)))
+                  row   (sort-keyframes (filterv own? (:keyframes track)))
+                  row   (cond-> row
+                          (and (seq row) (contains? (get track :loops #{}) property))
+                          (expand-property-loop duration))
+                  seed  (+ (:seed wiggle) (if (= :position (:property wiggle)) k 0))
+                  shook (wiggled-row row (link-rest timeline objects id property) property wiggle seed duration loop?)]
+              (if (some? shook)
+                (-> track
+                    (assoc :keyframes (sort-keyframes (into (filterv (complement own?) (:keyframes track)) shook)))
+                    (update :loops (fnil disj #{}) property))
+                track)))]
+      (assoc timeline :tracks
+             (reduce-kv
+              (fn [tracks id track]
+                (if (and (seq (:wiggles track)) (contains? objects id))
+                  (assoc tracks id
+                         ;; played into its keyframes, so that resolving it
+                         ;; again (the exports do) shakes it no more
+                         (dissoc (reduce (fn [track wiggle]
+                                           (reduce (partial shake-slot id wiggle)
+                                                   track
+                                                   (map-indexed vector (wiggle-slots (:property wiggle)))))
+                                         track
+                                         (map #(merge wiggle-defaults %) (:wiggles track)))
+                                 :wiggles))
+                  tracks))
+              (:tracks timeline)
+              (:tracks timeline))))))
+
 (def ^:private cast-shadow-step
   "How often, ms, the shadows a turning light casts take a value (see
   `play-cast-shadows`)."
@@ -3822,23 +4074,25 @@
   (match-outlines
    (play-cast-shadows
     (play-group-trims
-     (play-links
-      (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
-        (update timeline :tracks
-                (fn [tracks]
-                  (reduce-kv (fn [tracks shape-id track]
-                               (let [track (resolve-track timeline objects shape-id (visible-track track))]
-                                 ;; Nothing left to play once all of it is hidden;
-                                 ;; a track that follows, reaches or holds the
-                                 ;; pivot others turn around plays still.
-                                 (if (and (empty? (:keyframes track)) (empty? (:animations track))
-                                          (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
-                                          (empty? (:links track)))
-                                   (dissoc tracks shape-id)
-                                   (assoc tracks shape-id track))))
-                             tracks
-                             tracks)))
-        timeline)
+     (play-wiggles
+      (play-links
+       (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
+         (update timeline :tracks
+                 (fn [tracks]
+                   (reduce-kv (fn [tracks shape-id track]
+                                (let [track (resolve-track timeline objects shape-id (visible-track track))]
+                                  ;; Nothing left to play once all of it is hidden;
+                                  ;; a track that follows, reaches or holds the
+                                  ;; pivot others turn around plays still.
+                                  (if (and (empty? (:keyframes track)) (empty? (:animations track))
+                                           (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track))
+                                           (empty? (:links track)) (empty? (:wiggles track)))
+                                    (dissoc tracks shape-id)
+                                    (assoc tracks shape-id track))))
+                              tracks
+                              tracks)))
+         timeline)
+       objects)
       objects)
      objects)
     objects)))
@@ -4362,7 +4616,8 @@
   `:replace` first removes the unlocked keyframes of the rows `track` has
   keyframes of and, when it has presets or style uses, the unlocked
   presets and uses of `shape-id`; `:merge` removes nothing. Either way a
-  keyframe takes the place of the one of its row at the same time, and a
+  keyframe takes the place of the one of its row at the same time, a
+  wiggle the one of its property, and a
   preset the one of the same type and direction starting at the same
   time (a use, the one of the same style; see `merge-animation`), so
   pasting twice at the same time leaves no doubles. Locked rows and
@@ -4407,6 +4662,8 @@
             (and (nil? (dm/get-in $ [:tracks shape-id :outline-box])) (some? (:outline-box track)))
             (assoc-in [:tracks shape-id :outline-box] (:outline-box track)))
           (reduce #(merge-animation %1 shape-id %2) $ (:animations track))
+          ;; its wiggles, each in place of the one of its property
+          (reduce #(set-wiggle %1 shape-id %2) $ (:wiggles track))
           (reduce #(d/update-in-when %1 [:tracks shape-id] update-slot-flag :loops conj %2)
                   $
                   (remove locked (:loops track)))
