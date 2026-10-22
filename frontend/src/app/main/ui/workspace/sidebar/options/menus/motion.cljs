@@ -1626,6 +1626,12 @@
   [property display]
   (if (= "%" (wiggle-unit property)) (/ display 100) display))
 
+(defn- wiggle-time
+  "The time, ms, a field of a wiggle takes for `value` (see
+  `cta/schema:wiggle`)."
+  [value]
+  (mth/clamp (mth/round value) 0 cta/max-wiggle-time))
+
 (defn- wiggle-summary
   "What the `wiggle` shakes, for its closed head: how often and how much,
   and when unless all the time."
@@ -1667,18 +1673,20 @@
                                     (not= (wiggle-unit to) (wiggle-unit property))
                                     (assoc :amplitude (:amplitude (dwa/new-wiggle to))))))))
         on-frequency (mf/use-fn (mf/deps change)
-                                (number-handler #(change {:frequency (mth/clamp % 0.01 cta/max-wiggle-frequency)})))
+                                (number-handler #(change {:frequency (mth/clamp % cta/min-wiggle-frequency
+                                                                                cta/max-wiggle-frequency)})))
         on-amplitude (mf/use-fn (mf/deps change property)
-                                (number-handler #(change {:amplitude (max 0 (display->amplitude property %))})))
+                                (number-handler #(change {:amplitude (mth/clamp (display->amplitude property %)
+                                                                                0 cta/max-wiggle-amplitude)})))
         on-octaves   (mf/use-fn (mf/deps change)
                                 (number-handler #(change {:octaves (mth/clamp (mth/round %) 1 4)})))
         on-start     (mf/use-fn (mf/deps change)
-                                (number-handler #(change {:start (max 0 (mth/round %))})))
+                                (number-handler #(change {:start (wiggle-time %)})))
         ;; to the end of the timeline: as long as it lasts
         on-end       (mf/use-fn (mf/deps change duration)
-                                (number-handler #(change {:end (when (< % duration) (max 0 (mth/round %)))})))
+                                (number-handler #(change {:end (when (< % duration) (wiggle-time %))})))
         on-fade      (mf/use-fn (mf/deps change)
-                                (number-handler #(change {:fade (max 0 (mth/round %))})))]
+                                (number-handler #(change {:fade (wiggle-time %)})))]
 
     [:div {:class (stl/css :link-item)}
      [:> prototype-pill* {:title (labels/property-label property nil)
@@ -1701,7 +1709,7 @@
         [:> animation-row* {:label (tr "workspace.animation.wiggle-frequency")}
          [:> numeric-input* {:text-icon "/s"
                              :property (tr "workspace.animation.wiggle-frequency")
-                             :min 0.01
+                             :min cta/min-wiggle-frequency
                              :max cta/max-wiggle-frequency
                              :step 0.5
                              :value frequency

@@ -7125,7 +7125,18 @@
         (t/is (= 1 (count (cta/wiggles-of again wheel))))
         (t/is (= (:seed (cta/wiggle-of tl wheel :rotation)) (:seed (cta/wiggle-of again wheel :rotation))))))
     (t/testing "removing it leaves no track of a layer with nothing else"
-      (t/is (nil? (get-in (cta/remove-wiggle tl wheel :rotation) [:tracks wheel]))))))
+      (t/is (nil? (get-in (cta/remove-wiggle tl wheel :rotation) [:tracks wheel]))))
+    (t/testing "within its limits"
+      (t/is (cta/valid-wiggle? {:property :x :frequency cta/max-wiggle-frequency
+                                :amplitude cta/max-wiggle-amplitude :seed 1}))
+      (t/is (cta/valid-wiggle? {:property :x :frequency cta/min-wiggle-frequency :amplitude 0 :seed 1}))
+      (t/is (not (cta/valid-wiggle? {:property :x :frequency 0.005 :amplitude 1 :seed 1})))
+      (t/is (not (cta/valid-wiggle? {:property :x :frequency 1 :amplitude 100001 :seed 1})))
+      (t/is (not (cta/valid-wiggle? {:property :x :frequency 1 :amplitude 1 :seed 1 :start 3000000000})))
+      (t/is (= 2000000000 (:start (cta/wiggle-of (cta/set-wiggle timeline wheel {:property :x :frequency 1 :amplitude 1
+                                                                                 :start 2000000000.4})
+                                                 wheel :x)))
+            "a time rounded, whole"))))
 
 (t/deftest a-wiggle-shakes-what-a-property-plays
   (let [{:keys [car wheel timeline objects]} (car-and-wheel)
@@ -7154,6 +7165,8 @@
             xs     (shaken moved objects wheel :x times)
             ys     (shaken moved objects wheel :y times)]
         (t/is (not= (map #(- % (first xs)) xs) (map #(- % (first ys)) ys)))
+        ;; not along one line: how far y is from x changes, by whole pixels
+        (t/is (< 4 (count (into #{} (map #(mth/round (- %2 %1)) xs ys)))))
         (t/is (= (shaken scaled objects wheel :scale-x times) (shaken scaled objects wheel :scale-y times)))))))
 
 (t/deftest a-wiggle-shakes-within-its-span

@@ -6,33 +6,42 @@
 
 (ns app.common.math.noise
   "Smooth pseudo-random values in [-1, 1] along a line, the same for a
-  seed on every runtime (no `rand`, integer steps a double holds
-  exactly): value noise, a random value at each whole `x` and a smooth
-  curve through them (Catmull–Rom), as the wiggle of After Effects moves
-  to a new random value about once per unit. With a `period`, the values
-  repeat every `period` units, so a loop ends where it starts."
+  seed on every runtime (no `rand`, a 32-bit integer hash, exact in both):
+  value noise, a random value at each whole `x` and a smooth curve
+  through them (Catmull–Rom), as the wiggle of After Effects moves to a
+  new random value about once per unit. Neighbouring seeds and whole
+  numbers give unrelated values. With a `period`, the values repeat
+  every `period` units, so a loop ends where it starts."
   (:require
    [app.common.math :as mth]))
 
-(def ^:private modulus
-  "The modulus of the Park–Miller generator: its states are 1 to it, less
-  one."
-  2147483647)
+(defn- u32
+  "`x` as an unsigned 32-bit integer: its low 32 bits."
+  [x]
+  #?(:clj  (bit-and (long x) 0xffffffff)
+     :cljs (unsigned-bit-shift-right x 0)))
 
-(defn- step
-  "The next state of the Park–Miller generator after `state`, in 1 to
-  `modulus` − 1: `state` × 48271 stays below 2^53, so a double holds it
-  exactly."
-  [state]
-  (mod (* state 48271) modulus))
+(defn- mul32
+  "The low 32 bits of `a` × `b`, two unsigned 32-bit integers."
+  [a b]
+  #?(:clj  (bit-and (unchecked-multiply (long a) (long b)) 0xffffffff)
+     :cljs (unsigned-bit-shift-right (js/Math.imul a b) 0)))
+
+(defn- hash32
+  "The unsigned 32-bit integer `x` mixed (lowbias32, C. Wellons): each bit
+  of it flips about half the bits of the result."
+  [x]
+  (let [x (u32 (bit-xor x (unsigned-bit-shift-right x 16)))
+        x (mul32 x 0x7feb352d)
+        x (u32 (bit-xor x (unsigned-bit-shift-right x 15)))
+        x (mul32 x 0x846ca68b)]
+    (u32 (bit-xor x (unsigned-bit-shift-right x 16)))))
 
 (defn- lattice
   "The random value of `seed` at the whole number `i`, in [-1, 1]."
   [seed i]
-  (let [state (mod (+ (* (mod seed modulus) 31) (* (mod i 1000003) 1000033) 12345) modulus)
-        state (if (zero? state) 1 state)
-        state (-> state step step step)]
-    (- (* 2 (/ (double (dec state)) (- modulus 2))) 1)))
+  (let [h (hash32 (u32 (bit-xor (hash32 (u32 seed)) (u32 i))))]
+    (- (* 2 (/ h 4294967295.0)) 1)))
 
 (defn- cell
   "The whole number `i` within the `period` (none: as it is)."

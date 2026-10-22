@@ -2071,11 +2071,14 @@
                             (nil? property)
                             (dm/str "property should be one of " names)
 
-                            (not (and (sm/valid-safe-number? frequency) (< 0 frequency cta/max-wiggle-frequency)))
-                            (dm/str "frequency should be a number of shakes a second, above 0 and below " cta/max-wiggle-frequency)
+                            (not (and (sm/valid-safe-number? frequency)
+                                      (<= cta/min-wiggle-frequency frequency cta/max-wiggle-frequency)))
+                            (dm/str "frequency should be a number of shakes a second, from "
+                                    cta/min-wiggle-frequency " to " cta/max-wiggle-frequency)
 
-                            (not (and (sm/valid-safe-number? amplitude) (>= amplitude 0)))
-                            "amplitude should be a number from 0, in the unit of the property"
+                            (not (and (sm/valid-safe-number? amplitude) (<= 0 amplitude cta/max-wiggle-amplitude)))
+                            (dm/str "amplitude should be a number from 0 to " cta/max-wiggle-amplitude
+                                    ", in the unit of the property")
 
                             (and (some? octaves) (not (and (whole? octaves) (<= 1 octaves 4))))
                             "octaves should be a whole number from 1 to 4"
@@ -2093,7 +2096,17 @@
                             "fade should be a number of milliseconds from 0"
 
                             (and (some? seed) (not (and (whole? seed) (sm/valid-safe-int? seed))))
-                            "seed should be a whole number")]
+                            "seed should be a whole number"
+
+                            ;; as the timeline stores it, whatever the checks
+                            ;; above leave
+                            (not (cta/valid-wiggle? (cond-> {:property property :frequency frequency
+                                                             :amplitude amplitude :seed (or seed 1)}
+                                                      (some? octaves) (assoc :octaves octaves)
+                                                      (some? start)   (assoc :start (mth/round start))
+                                                      (some? end)     (assoc :end (mth/round end))
+                                                      (some? fade)    (assoc :fade (mth/round fade)))))
+                            "The wiggle is not one a timeline can hold")]
             (if (some? error)
               (u/not-valid plugin-id :wiggle error)
               (write! :wiggle

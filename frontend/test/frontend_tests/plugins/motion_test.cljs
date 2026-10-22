@@ -320,10 +320,22 @@
         (t/testing "what cannot wiggle is refused"
           (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "fillColor" :frequency 1 :amplitude 1})))
           (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 0 :amplitude 1})))
+          ;; within what a timeline holds (see `cta/schema:wiggle`)
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 0.005 :amplitude 1})))
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 31 :amplitude 1})))
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 1 :amplitude 100001})))
+          (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 1 :amplitude 1 :start 3e9})))
           (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 1 :amplitude -1})))
           (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 1 :amplitude 1 :octaves 5})))
           (t/is (thrown? js/Error (.wiggle timeline dot #js {:property "x" :frequency 1 :amplitude 1
                                                              :start 500 :end 400}))))
+        (t/testing "its limits are taken"
+          (.wiggle timeline dot #js {:property "x" :frequency 30 :amplitude 100000})
+          (.wiggle timeline dot #js {:property "y" :frequency 0.01 :amplitude 0})
+          (t/is (= [[30 100000] [0.01 0]]
+                   (mapv (juxt :frequency :amplitude) (rest (wiggles dot))))))
+        (.unwiggle timeline dot "x")
+        (.unwiggle timeline dot "y")
         (.unwiggle timeline dot "rotation")
         (t/is (= [] (wiggles dot)))))))
 

@@ -483,9 +483,21 @@
   `:scale` (both scales together)."
   (into [:position :scale] link-properties))
 
+(def min-wiggle-frequency
+  "The fewest shakes a second a wiggle makes."
+  0.01)
+
 (def max-wiggle-frequency
   "The most shakes a second a wiggle makes."
   30)
+
+(def max-wiggle-amplitude
+  "The most a wiggle shakes, in the unit of its property."
+  100000)
+
+(def max-wiggle-time
+  "The latest time, ms, a wiggle starts or ends at, and its longest fade."
+  sm/max-safe-int)
 
 (def schema:wiggle
   "How a property of a layer shakes, at random but the same each time,
@@ -498,13 +510,17 @@
   octave, a start and a fade of 0 are stored as absence."
   [:map {:title "AnimationWiggle"}
    [:property [::sm/one-of (set wiggle-properties)]]
-   [:frequency [::sm/number {:min 0.01 :max max-wiggle-frequency}]]
-   [:amplitude [::sm/number {:min 0 :max 100000}]]
+   [:frequency [::sm/number {:min min-wiggle-frequency :max max-wiggle-frequency}]]
+   [:amplitude [::sm/number {:min 0 :max max-wiggle-amplitude}]]
    [:seed ::sm/safe-int]
    [:octaves {:optional true} [::sm/int {:min 1 :max 4}]]
-   [:start {:optional true} [::sm/int {:min 0}]]
-   [:end {:optional true} [::sm/int {:min 0}]]
-   [:fade {:optional true} [::sm/int {:min 0}]]])
+   [:start {:optional true} [::sm/int {:min 0 :max max-wiggle-time}]]
+   [:end {:optional true} [::sm/int {:min 0 :max max-wiggle-time}]]
+   [:fade {:optional true} [::sm/int {:min 0 :max max-wiggle-time}]]])
+
+(def valid-wiggle?
+  "Whether a wiggle is one a timeline stores (see `schema:wiggle`)."
+  (sm/lazy-validator schema:wiggle))
 
 (def schema:track
   [:map {:title "AnimationTrack"}
@@ -1165,7 +1181,7 @@
   [timeline shape-id follow]
   (if (some? (:leader follow))
     (let [follow (-> (select-keys follow [:leader :from :position :rotation :scale :tilt :opacity :delay])
-                     (d/update-when :delay #(int (mth/round %))))
+                     (d/update-when :delay mth/round))
           stored (into {} (remove (fn [[k v]] (= v (get follow-defaults k ::none)))) follow)]
       ;; a layer follows a leader or rides a path, not both: the keyframes
       ;; of its progress along the path go with it
@@ -1255,7 +1271,7 @@
   [timeline shape-id {:keys [property] :as link}]
   (let [link   (-> (select-keys link [:property :source :source-property :factor :offset :delay
                                       :input :output :clamp :easing])
-                   (d/update-when :delay #(int (mth/round %))))
+                   (d/update-when :delay mth/round))
         ;; a range takes both ends of both, or none
         link   (cond-> link
                  (not (ranged-link? link))
@@ -1350,7 +1366,7 @@
   `replaced` (another property it shakes now instead): a new seed
   without one, the times in whole ms, the defaults left out."
   [timeline shape-id {:keys [property] :as wiggle} & {:keys [replaced]}]
-  (let [round   #(int (mth/round %))
+  (let [round   mth/round
         wiggle  (-> (select-keys wiggle [:property :frequency :amplitude :seed :octaves :start :end :fade])
                     (d/update-when :octaves round)
                     (d/update-when :start round)

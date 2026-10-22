@@ -5676,14 +5676,14 @@ export interface WiggleProps {
   property: WiggleProperty;
 
   /**
-   * About how many times a second it goes to a new value, above 0 and
-   * below 30.
+   * About how many times a second it goes to a new value, from 0.01 to
+   * 30.
    */
   frequency: number;
 
   /**
    * How far it goes at most, in the unit of the property (see
-   * `Wiggle.amplitude`).
+   * `Wiggle.amplitude`), from 0 to 100000.
    */
   amplitude: number;
 
