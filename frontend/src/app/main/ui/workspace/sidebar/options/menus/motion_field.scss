@@ -5,6 +5,7 @@
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
 @use "ds/typography.scss" as t;
+@use "ds/_utils.scss" as *;
 
 // the input placeholder of the field
 @use "refactor/common-refactor.scss" as deprecated;
@@ -28,12 +29,31 @@
   white-space: nowrap;
 }
 
+// as wide as it is, right after the number, not centred in the 20px of
+// an icon
 .field .unit {
-  padding-inline-end: var(--sp-s);
+  inline-size: auto;
+  padding-inline: var(--sp-xxs) var(--sp-s);
   color: var(--input-foreground-color);
   text-transform: none;
+
+  // the diamond after it keeps its own room
+  &:not(:last-child) {
+    padding-inline-end: var(--sp-xs);
+  }
+}
+
+// the diamond of the field, which the input would squeeze
+.field > button {
+  flex: none;
+  inline-size: px2rem(20);
 }
 
 .input {
   min-inline-size: 0;
+}
+
+// right after its word, which keeps the room between them
+.field .input {
+  padding-inline-start: 0;
 }

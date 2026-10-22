@@ -305,6 +305,46 @@
   grid-column: 1/-1;
 }
 
+// its rows as far apart as those of the fields above
+.perspective {
+  row-gap: var(--sp-xs);
+}
+
+// The heading of the 3D view of a board, whose arrow folds it.
+.scene-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  min-block-size: var(--sp-xxxl);
+}
+
+.scene-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--title-foreground-color);
+  cursor: pointer;
+
+  &:hover .scene-arrow {
+    color: var(--title-foreground-color-hover);
+  }
+}
+
+.scene-arrow {
+  color: var(--icon-foreground);
+}
+
+.scene-hint {
+  @include deprecated.body-small-typography;
+
+  grid-column: 1 / span 2;
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
+
 .rotate-axis,
 .perspective-input,
 .perspective-field,
@@ -337,52 +377,62 @@
   display: flex;
   align-items: center;
   min-inline-size: 0;
+  min-block-size: px2rem(32);
   color: var(--color-foreground-secondary);
 }
 
 // Whether a board sees its tilted layers without perspective.
+// a row as tall as a field, so the checks keep the rhythm of the fields
 .orthographic {
   @include deprecated.body-small-typography;
 
   grid-column: 1 / -1;
-  grid-row: 3;
   display: flex;
   align-items: center;
+  min-block-size: px2rem(32);
   color: var(--color-foreground-secondary);
 }
 
 // The vanishing point of a board, X and Y in a row under its perspective.
 .vanishing-axis {
-  grid-row: 2;
-}
-
-.perspective-input-tokens {
-  grid-column: 1 / span 2;
-  grid-row: 1;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--sp-s);
-  min-inline-size: 0;
-}
-
-.perspective-label {
-  @include deprecated.body-small-typography;
-
-  color: var(--color-foreground-secondary);
-}
-
-.perspective-input {
-  grid-column: 1 / span 2;
-  grid-row: 1;
+  grid-column: 1;
 
   .icon-text {
-    inline-size: auto;
-    padding-inline-end: var(--sp-s);
-    white-space: nowrap;
+    color: var(--color-foreground-secondary);
   }
 }
 
+.vanishing-y {
+  grid-column: 2;
+}
+
+// as wide as the two fields under it, its name in it
+.perspective-tokens,
+.perspective-input {
+  grid-column: 1 / span 2;
+  min-inline-size: 0;
+}
+
+// the box of the input of the design system, hovered, focused or
+// disabled (orthographic) too: this field draws it round its name too
+.perspective-tokens .perspective-number > div,
+.perspective-tokens .perspective-number > div:hover,
+.perspective-tokens .perspective-number > div:has(:disabled) {
+  --input-bg-color: transparent;
+  --input-outline-color: none;
+}
+
+// its name as the names of the fields of the light and the depth cues
+.perspective-input .icon-text,
+.perspective-tokens .icon-text {
+  @include deprecated.body-small-typography;
+
+  inline-size: auto;
+  padding-inline-end: var(--sp-xs);
+  white-space: nowrap;
+  color: var(--color-foreground-secondary);
+  text-transform: none;
+}
 
 .lock-size-btn {
   @extend %button-tertiary;

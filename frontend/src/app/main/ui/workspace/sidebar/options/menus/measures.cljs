@@ -40,7 +40,7 @@
    [app.main.ui.workspace.sidebar.options.menus.audio :refer [audio-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.border-radius :refer  [border-radius-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* follow-menu* keyframe-diamond* links-menu* outline-row* reach-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* follow-menu* keyframe-diamond* links-menu* outline-row* reach-menu* use-section-open]]
    [app.main.ui.workspace.sidebar.options.menus.scene :refer [scene-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.tilt-tool :refer [tilt-tool*]]
    [app.util.dom :as dom]
@@ -764,6 +764,7 @@
         camera-keys?
         (and (some? motion-id) (not orthographic?))
 
+
         holds-tilt?
         (mf/with-memo [board-ids]
           (let [objects (deref refs/workspace-page-objects)]
@@ -774,6 +775,21 @@
                               (and (= id (:frame-id shape)) (gtl/three-d? shape)))
                            (cfh/get-children-ids objects id)))
                    board-ids))))
+
+        ;; the 3D view of the boards, folded by the arrow of its heading:
+        ;; closed, until opened, while they see nothing in 3D
+        [scene-open? toggle-scene _]  (use-section-open :scene)
+        [idle-open? toggle-idle-scene _] (use-section-open :scene-unused false)
+
+        scene-used?
+        (or holds-tilt?
+            camera-animated?
+            orthographic?
+            (some #(number? (get values %)) cta/camera-properties)
+            (some #(some? (get values %)) [:light :depth-fade :depth-blur]))
+
+        scene-shown?
+        (if scene-used? scene-open? idle-open?)
 
         on-camera-change
         (mf/use-fn
@@ -1229,89 +1245,6 @@
                             :checked (true? (get values :preserve-depth))
                             :on-change on-preserve-check}]])]))
 
-     (when (and (options :perspective)
-                (or holds-tilt?
-                    camera-animated?
-                    orthographic?
-                    (some #(number? (get values %)) cta/camera-properties)
-                    (some #(some? (get values %)) [:light :depth-fade :depth-blur])))
-       [:div {:class (stl/css :perspective)}
-        (if token-numeric-inputs
-          [:div {:class (stl/css :perspective-input-tokens)}
-           [:span {:class (stl/css :perspective-label)} (tr "workspace.options.perspective")]
-           ;; a field with its diamond, as the rotation is, in motion mode
-           [:div {:class (stl/css-case :perspective-field (some? motion-id)
-                                       :with-keyframe (some? motion-id))}
-            [:> numeric-input-wrapper*
-             {:on-change on-perspective-change
-              :on-detach on-detach-token
-              :text-icon "px"
-              :min gtl/min-perspective
-              :max gtl/max-perspective
-              :attr :perspective
-              :disabled orthographic?
-              :property (tr "workspace.options.perspective")
-              :applied-token (get applied-tokens :perspective)
-              :placeholder (if (= :multiple (:perspective values))
-                             (tr "settings.multiple")
-                             (str gtl/default-perspective))
-              ;; the distance it sees from, the default without one of its own
-              :value (let [v (:perspective values)] (cond (number? v) v (not= :multiple v) gtl/default-perspective))}]
-            (when camera-keys?
-              [:> keyframe-diamond* {:properties [:perspective]}])]]
-          [:div {:class (stl/css-case :perspective-input true
-                                      :with-keyframe (some? motion-id))
-                 :title (tr "workspace.options.perspective")}
-           [:span {:class (stl/css :icon-text)} (tr "workspace.options.perspective")]
-           [:> deprecated-input/numeric-input*
-            {:no-validate true
-             :min gtl/min-perspective
-             :max gtl/max-perspective
-             :placeholder (if (= :multiple (:perspective values))
-                            (tr "settings.multiple")
-                            (str gtl/default-perspective))
-             :on-change on-perspective-change
-             :is-disabled orthographic?
-             :class (stl/css :numeric-input)
-             :value (when (number? (:perspective values)) (:perspective values))}]
-           (when camera-keys?
-             [:> keyframe-diamond* {:properties [:perspective]}])])
-
-        ;; the vanishing point, in percent of the board
-        (for [[attr label icon on-change] [[:perspective-x (tr "workspace.options.vanishing-point-x") "X" on-vanishing-x-change]
-                                           [:perspective-y (tr "workspace.options.vanishing-point-y") "Y" on-vanishing-y-change]]]
-          (let [value (get values attr)]
-            [:div {:key (name attr)
-                   :class (stl/css-case :vanishing-axis true
-                                        :with-keyframe (some? motion-id))
-                   :title label}
-             [:span {:class (stl/css :icon-text)} icon]
-             [:> deprecated-input/numeric-input*
-              {:no-validate true
-               :is-nillable true
-               :min -1000
-               :max 1000
-               :aria-label label
-               :placeholder (if (= :multiple value) (tr "settings.multiple") "50")
-               :on-change on-change
-               :is-disabled orthographic?
-               :class (stl/css :numeric-input)
-               :value (when (number? value) (mth/precision (* 100 value) 2))}]
-             [:span {:class (stl/css :origin-unit)} "%"]
-             (when camera-keys?
-               [:> keyframe-diamond* {:properties [attr]}])]))
-
-        ;; seen without perspective, as from afar: isometric drawings
-        [:div {:class (stl/css :orthographic)
-               :title (tr "workspace.options.orthographic.hint")}
-         [:> checkbox* {:id "orthographic"
-                        :label (tr "workspace.options.orthographic")
-                        :checked orthographic?
-                        :on-change on-orthographic-change}]]
-
-        ;; the light of its layers in 3D and their depth cues
-        [:> scene-menu* {:ids board-ids :values values}]])
-
      (when (or (options :clip-content) (options :show-in-viewer))
        [:div {:class (stl/css :clip-show)}
         (when (options :clip-content)
@@ -1342,7 +1275,101 @@
                     :title (tr "workspace.options.show-in-viewer")
                     :class (stl/css-case  :clip-content-label true
                                           :selected (not (:hide-in-viewer values)))}
-            [:> icon* {:icon-id i/play}]]])])]))
+            [:> icon* {:icon-id i/play}]]])])
+
+     ;; every board, closed while it sees nothing in 3D
+     (when (and (options :perspective) (seq board-ids))
+       [:div {:class (stl/css :perspective)}
+        [:div {:class (stl/css :scene-header)}
+         [:button {:type "button"
+                   :class (stl/css :scene-toggle)
+                   :aria-expanded scene-shown?
+                   :on-click (if scene-used? toggle-scene toggle-idle-scene)}
+          [:> icon* {:icon-id (if scene-shown? i/arrow-down i/arrow-right)
+                     :size "s"
+                     :class (stl/css :scene-arrow)}]
+          [:span {:class (stl/css :transform-title)} (tr "workspace.options.scene")]]]
+        (when scene-shown?
+          [:*
+           ;; until a layer of it leaves the plane
+           (when-not holds-tilt?
+             [:p {:class (stl/css :scene-hint)} (tr "workspace.options.scene.hint")])
+           (if token-numeric-inputs
+             ;; one field: its name, as wide as it is (the text icon of the
+             ;; input squeezes it), the input and, in motion mode, the
+             ;; diamond
+             [:div {:class (stl/css :perspective-tokens :perspective-field :with-keyframe)}
+              [:span {:class (stl/css :icon-text)} (tr "workspace.options.perspective")]
+              [:> numeric-input-wrapper*
+               {:class (stl/css :perspective-number)
+                :on-change on-perspective-change
+                :on-detach on-detach-token
+                :min gtl/min-perspective
+                :max gtl/max-perspective
+                :attr :perspective
+                :disabled orthographic?
+                :property (tr "workspace.options.perspective")
+                :applied-token (get applied-tokens :perspective)
+                :placeholder (if (= :multiple (:perspective values))
+                               (tr "settings.multiple")
+                               (str gtl/default-perspective))
+                ;; the distance it sees from, the default without one of its own
+                :value (let [v (:perspective values)] (cond (number? v) v (not= :multiple v) gtl/default-perspective))}]
+              (when camera-keys?
+                [:> keyframe-diamond* {:properties [:perspective]}])]
+             [:div {:class (stl/css-case :perspective-input true
+                                         :with-keyframe (some? motion-id))
+                    :title (tr "workspace.options.perspective")}
+              [:span {:class (stl/css :icon-text)} (tr "workspace.options.perspective")]
+              [:> deprecated-input/numeric-input*
+               {:no-validate true
+                :min gtl/min-perspective
+                :max gtl/max-perspective
+                :placeholder (if (= :multiple (:perspective values))
+                               (tr "settings.multiple")
+                               (str gtl/default-perspective))
+                :on-change on-perspective-change
+                :is-disabled orthographic?
+                :class (stl/css :numeric-input)
+                :value (when (number? (:perspective values)) (:perspective values))}]
+              (when camera-keys?
+                [:> keyframe-diamond* {:properties [:perspective]}])])
+
+           ;; the vanishing point, in percent of the board
+           (for [[attr label icon on-change] [[:perspective-x (tr "workspace.options.vanishing-point-x") "X" on-vanishing-x-change]
+                                              [:perspective-y (tr "workspace.options.vanishing-point-y") "Y" on-vanishing-y-change]]]
+             (let [value (get values attr)]
+               [:div {:key (name attr)
+                      :class (stl/css-case :vanishing-axis true
+                                           :vanishing-y (= :perspective-y attr)
+                                           :with-keyframe (some? motion-id))
+                      :title label}
+                [:span {:class (stl/css :icon-text)} icon]
+                [:> deprecated-input/numeric-input*
+                 {:no-validate true
+                  :is-nillable true
+                  :min -1000
+                  :max 1000
+                  :aria-label label
+                  :placeholder (if (= :multiple value) (tr "settings.multiple") "50")
+                  :on-change on-change
+                  :is-disabled orthographic?
+                  :class (stl/css :numeric-input)
+                  :value (when (number? value) (mth/precision (* 100 value) 2))}]
+                [:span {:class (stl/css :origin-unit)} "%"]
+                (when camera-keys?
+                  [:> keyframe-diamond* {:properties [attr]}])]))
+
+           ;; seen without perspective, as from afar: isometric drawings
+           [:div {:class (stl/css :orthographic)
+                  :title (tr "workspace.options.orthographic.hint")}
+            [:> checkbox* {:id "orthographic"
+                           :label (tr "workspace.options.orthographic")
+                           :checked orthographic?
+                           :on-change on-orthographic-change}]]
+
+           ;; the light of its layers in 3D and their depth cues
+           [:> scene-menu* {:ids board-ids :values values}]])])]))
 
 (mf/defc measures-menu*
   "The measures of the selected shapes and, in motion mode, their

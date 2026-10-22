@@ -9346,6 +9346,12 @@ msgstr "Hide the back face"
 msgid "workspace.options.perspective"
 msgstr "Perspective"
 
+msgid "workspace.options.scene"
+msgstr "3D view"
+
+msgid "workspace.options.scene.hint"
+msgstr "Tilt a layer of this board (X°, Y°) or move it in Z to see it in 3D."
+
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.depth"
 msgstr "Depth: how far the layer comes towards the viewer"

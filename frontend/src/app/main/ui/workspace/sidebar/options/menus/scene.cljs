@@ -6,8 +6,8 @@
 
 (ns app.main.ui.workspace.sidebar.options.menus.scene
   "The light of the layers in 3D of a board and their depth cues (Penpot
-  Motion, see `app.common.geom.tilt/scene-effects`): rows of the
-  perspective section of the Design tab."
+  Motion, see `app.common.geom.tilt/scene-effects`): rows of the 3D view
+  of a board in the Design tab."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.geom.tilt :as gtl]
@@ -39,8 +39,7 @@
 (mf/defc scene-menu*
   "The light and the depth cues of the boards `ids`, as `values` (their
   values, `:multiple` where they differ) has them: a switch for each,
-  with its fields while it is on (the ambient light and the focus beside
-  it)."
+  with its fields under it while it is on, two by two."
   [{:keys [ids values]}]
   (let [motion-id (mf/use-ctx ctx/motion-shape-id)
         light  (:light values)
@@ -123,13 +122,6 @@
                      :on-change on-light-check}]]
      (when lit?
        [:*
-        [:div {:class (stl/css :scene-row :light-ambient)}
-         [:> labelled-number* {:label (tr "workspace.options.scene.ambient")
-                               :hint (tr "workspace.options.scene.ambient.hint")
-                               :unit "%" :scale 100 :min 0 :max 100
-                               :keyframes (when motion-id :light-ambient)
-                               :value (light-of :ambient)
-                               :on-change on-ambient}]]
         [:div {:class (stl/css :scene-row :light-angle)}
          [:> labelled-number* {:label (tr "workspace.options.scene.angle")
                                :hint (tr "workspace.options.scene.angle.hint")
@@ -144,6 +136,13 @@
                                :keyframes (when motion-id :light-height)
                                :value (light-of :height)
                                :on-change on-height}]]
+        [:div {:class (stl/css :scene-row :light-ambient)}
+         [:> labelled-number* {:label (tr "workspace.options.scene.ambient")
+                               :hint (tr "workspace.options.scene.ambient.hint")
+                               :unit "%" :scale 100 :min 0 :max 100
+                               :keyframes (when motion-id :light-ambient)
+                               :value (light-of :ambient)
+                               :on-change on-ambient}]]
         [:div {:class (stl/css :scene-check :shadows-check)
                :title (tr "workspace.options.scene.shadows.hint")}
          [:> checkbox* {:id "scene-shadows"

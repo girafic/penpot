@@ -5,16 +5,21 @@
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
 @use "ds/typography.scss" as t;
+@use "ds/_utils.scss" as *;
 
 // The light and the depth cues of a board (Penpot Motion): rows of the
-// grid of its perspective section, placed in the order they come.
+// grid of its 3D view, placed in the order they come, each switch on a
+// row of its own, its fields two by two under it.
 .scene-check {
   @include t.use-typography("body-small");
 
-  grid-column: 1;
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   min-inline-size: 0;
+
+  // as tall as a field, so the checks keep the rhythm of the fields
+  min-block-size: px2rem(32);
   color: var(--color-foreground-secondary);
 }
 
@@ -22,16 +27,16 @@
   min-inline-size: 0;
 }
 
-// a switch, then beside it the ambient light or the focus, under it the
-// rest of its fields
 .light-angle,
-.depth-fade {
+.light-ambient,
+.depth-focus,
+.depth-blur {
   grid-column: 1;
 }
 
-.light-ambient,
+// the cast shadows beside the ambient light, as both are of the light
 .light-height,
-.depth-focus,
-.depth-blur {
+.shadows-check,
+.depth-fade {
   grid-column: 2;
 }
