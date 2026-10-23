@@ -9478,16 +9478,25 @@ msgid "workspace.preview.saving"
 msgstr "Saving…"
 
 msgid "workspace.preview.follow"
-msgstr "Show the board selected"
+msgstr "Follow the selection"
 
-msgid "workspace.preview.zoom"
-msgstr "Zoom: fit, fill or 100%"
+msgid "workspace.preview.options"
+msgstr "Preview options"
 
 msgid "workspace.preview.zoom-fit"
 msgstr "Fit"
 
 msgid "workspace.preview.zoom-fill"
 msgstr "Fill"
+
+msgid "workspace.preview.zoom-100"
+msgstr "Actual size (100%)"
+
+msgid "workspace.preview.window-actual"
+msgstr "Resize window to 100%"
+
+msgid "workspace.preview.window-fit"
+msgstr "Fit window to the board"
 
 msgid "workspace.options.scene"
 msgstr "3D view"

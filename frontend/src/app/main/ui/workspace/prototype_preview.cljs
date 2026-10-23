@@ -11,7 +11,8 @@
   workspace saves; a bar on top that moves the window, with back,
   forth, start again, a pin that makes it show the board selected in the
   workspace, the zoom (fit, fill or 100 %), open in the view mode and
-  close, and the corners at its bottom that resize it. Where it is, as
+  close, and the corners at its bottom that resize it; the zoom, the pin
+  and the size of the window in the menu of its settings button. Where it is, as
   `{:x :y :w :h}` px of the browser window, the pin and the zoom are
   kept for the next time. The view mode tells it once it listens
   (`penpot:preview-ready`), what it asks before is sent then, and which
@@ -27,7 +28,9 @@
    [app.main.refs :as refs]
    [app.main.router :as rt]
    [app.main.store :as st]
+   [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.workspace.canvas-window :as cw]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -41,7 +44,7 @@
 
 (def bar-height
   "The bar on top of the window, which moves it, with its buttons."
-  32)
+  40)
 
 (def ^:private border 1)
 
@@ -60,6 +63,32 @@
         w       (min (* 0.8 vw)
                      (+ (* inner-h (/ (max 1 bw) (max 1 bh))) (* 2 border)))]
     {:x (/ (- vw w) 2) :y (/ (- vh h) 2) :w w :h h}))
+
+(defn actual-frame
+  "`frame` resized about its middle so that the board `bw` × `bh` shows
+  at its own size under the bar, kept in a browser window `vw` × `vh` px
+  (see `cw/clamp-frame`)."
+  [{:keys [x y w h]} vw vh bw bh]
+  (let [w' (+ bw (* 2 border))
+        h' (+ bh bar-height (* 2 border))]
+    (cw/clamp-frame {:x (- (+ x (/ w 2)) (/ w' 2))
+                     :y (- (+ y (/ h 2)) (/ h' 2))
+                     :w w'
+                     :h h'}
+                    vw vh)))
+
+(defn fitted-frame
+  "`frame` as high as the board `bw` × `bh` then is for its width, its top
+  left kept: no black above or below the board fitted in it. Narrower
+  when that is higher than a browser window `vw` × `vh` px takes."
+  [{:keys [x y w]} vw vh bw bh]
+  (let [ratio  (/ (max 1 bw) (max 1 bh))
+        high   (fn [w] (+ (/ (- w (* 2 border)) ratio) bar-height (* 2 border)))
+        wide   (fn [h] (+ (* (- h bar-height (* 2 border)) ratio) (* 2 border)))
+        frame  (cw/clamp-frame {:x x :y y :w w :h (high w)} vw vh)]
+    (if (< (:h frame) (high (:w frame)))
+      (cw/clamp-frame (assoc frame :w (wide (:h frame))) vw vh)
+      frame)))
 
 (def zoom-modes
   "The zooms of the preview, in the order its button goes through them:
@@ -94,6 +123,24 @@
   [["bottom-left" (stl/css :corner :bottom-left)]
    ["bottom-right" (stl/css :corner :bottom-right)]])
 
+(mf/defc menu-item*
+  "An entry of the menu of the preview: ticked while `selected` is true
+  (an entry that is on or off), an action when it is nil."
+  {::mf/private true}
+  [{:keys [label icon value selected on-click]}]
+  [:li {:class (stl/css :menu-item)
+        :role (if (some? selected) "menuitemcheckbox" "menuitem")
+        :aria-checked selected
+        :data-value value
+        :on-click on-click}
+   [:span {:class (stl/css :menu-check)}
+    (when ^boolean selected
+      [:> icon* {:icon-id i/tick :size "s"}])]
+   (when (some? icon)
+     [:span {:class (stl/css :menu-icon)}
+      [:> icon* {:icon-id icon :size "s"}]])
+   [:span {:class (stl/css :menu-label)} label]])
+
 (mf/defc preview-window*
   {::mf/private true}
   [{:keys [file-id preview]}]
@@ -112,6 +159,8 @@
         follow?    (deref follow*)
         zoom*      (mf/use-state #(get storage/user ::zoom "fit"))
         zoom       (deref zoom*)
+        menu*      (mf/use-state false)
+        menu?      (deref menu*)
         ;; the board of the selection the pin last asked for
         requested-ref (mf/use-ref frame-id)
         ;; the board it asked for while the view mode could not hear it
@@ -190,21 +239,50 @@
                         (reset! shown* start)
                         (swap! run* inc))))
 
+        toggle-menu
+        (mf/use-fn
+         (fn [event]
+           (dom/stop-propagation event)
+           (swap! menu* not)))
+
+        close-menu
+        (mf/use-fn #(reset! menu* false))
+
         on-follow
         (mf/use-fn
          (mf/deps follow?)
          (fn []
+           (reset! menu* false)
            (reset! follow* (not follow?))
            (swap! storage/user assoc ::follow (not follow?))))
 
         on-zoom
         (mf/use-fn
-         (mf/deps zoom)
-         (fn []
-           (let [next (get zoom-modes (mod (inc (d/index-of zoom-modes zoom)) (count zoom-modes)))]
-             (reset! zoom* next)
-             (swap! storage/user assoc ::zoom next)
-             (post! (mf/ref-val iframe-ref) "penpot:preview-zoom" {:mode next}))))
+         (fn [event]
+           (let [mode (dom/get-data (dom/get-current-target event) "value")]
+             (when (d/index-of zoom-modes mode)
+               (reset! menu* false)
+               (reset! zoom* mode)
+               (swap! storage/user assoc ::zoom mode)
+               (post! (mf/ref-val iframe-ref) "penpot:preview-zoom" {:mode mode})))))
+
+        ;; the window as large as the board is, or as high as it then
+        ;; needs, kept for the next time
+        resize-to
+        (mf/use-fn
+         (mf/deps frame vw vh board)
+         (fn [size]
+           (let [bw    (:width board 16)
+                 bh    (:height board 9)
+                 frame (if (= size :actual)
+                         (actual-frame frame vw vh bw bh)
+                         (fitted-frame frame vw vh bw bh))]
+             (reset! menu* false)
+             (reset! stored* frame)
+             (swap! storage/user assoc ::frame frame))))
+
+        on-actual-size (mf/use-fn (mf/deps resize-to) #(resize-to :actual))
+        on-fit-window  (mf/use-fn (mf/deps resize-to) #(resize-to :fitted))
         on-close   (mf/use-fn #(st/emit! (dwpp/close-preview)))
 
         on-open
@@ -328,26 +406,19 @@
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.preview.restart")
                          :icon "reload"
-                         :on-click on-restart}]
-       [:> icon-button* {:variant "ghost"
-                         :aria-label (tr "workspace.preview.follow")
-                         :aria-pressed follow?
-                         :class (stl/css-case :pinned follow?)
-                         :icon "pin"
-                         :on-click on-follow}]]
+                         :on-click on-restart}]]
       [:span {:class (stl/css :title)}
        (or (:name board) (tr "workspace.preview.title"))]
       [:div {:class (stl/css :buttons)
              :on-pointer-down dom/stop-propagation
              :on-double-click dom/stop-propagation}
-       [:button {:type "button"
-                 :class (stl/css :zoom)
-                 :title (tr "workspace.preview.zoom")
-                 :on-click on-zoom}
-        (case zoom
-          "fill" (tr "workspace.preview.zoom-fill")
-          "100"  "100%"
-          (tr "workspace.preview.zoom-fit"))]
+       [:> icon-button* {:variant "ghost"
+                         :aria-label (tr "workspace.preview.options")
+                         :aria-haspopup "menu"
+                         :aria-expanded menu?
+                         :class (stl/css-case :menu-open menu?)
+                         :icon "settings"
+                         :on-click toggle-menu}]
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.preview.open")
                          :icon "open-link"
@@ -356,6 +427,36 @@
                          :aria-label (tr "workspace.preview.close")
                          :icon "close"
                          :on-click on-close}]]]
+     [:& dropdown {:show menu? :on-close close-menu}
+      [:ul {:class (stl/css :menu)
+            :role "menu"
+            :aria-label (tr "workspace.preview.options")
+            :style #js {"top" (dm/str (+ (:y frame) bar-height) "px")
+                        "right" (dm/str (- vw (:x frame) (:w frame) -8) "px")}}
+       [:> menu-item* {:label (tr "workspace.preview.zoom-fit")
+                       :icon i/fit-content
+                       :value "fit"
+                       :selected (= zoom "fit")
+                       :on-click on-zoom}]
+       [:> menu-item* {:label (tr "workspace.preview.zoom-fill")
+                       :icon i/fill-content
+                       :value "fill"
+                       :selected (= zoom "fill")
+                       :on-click on-zoom}]
+       [:> menu-item* {:label (tr "workspace.preview.zoom-100")
+                       :icon i/percentage
+                       :value "100"
+                       :selected (= zoom "100")
+                       :on-click on-zoom}]
+       [:li {:class (stl/css :menu-separator)
+             :role "separator"}]
+       [:> menu-item* {:label (tr "workspace.preview.follow")
+                       :selected follow?
+                       :on-click on-follow}]
+       [:> menu-item* {:label (tr "workspace.preview.window-actual")
+                       :on-click on-actual-size}]
+       [:> menu-item* {:label (tr "workspace.preview.window-fit")
+                       :on-click on-fit-window}]]]
      [:div {:class (stl/css :content)}
       (if ready?
         [:iframe {:key (deref run*)
