@@ -13,6 +13,7 @@
    [app.main.data.viewer :as dv]
    [app.main.data.workspace.prototype-preview :as dwpp]
    [app.main.router :as rt]
+   [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.async :as async]
@@ -189,3 +190,19 @@
       (t/is (not (contains? (types listed) ::dv/preview-go))))
     (t/testing "the view mode outside a preview goes as it did"
       (t/is (contains? (types viewer) ::dv/go-to-frame)))))
+
+(t/deftest the-play-button-keeps-what-it-opens
+  (let [before (get @storage/user ::dwpp/play-mode)]
+    (try
+      (swap! storage/user dissoc ::dwpp/play-mode)
+      (t/is (= :view-mode (dwpp/play-mode)) "the view mode until a pick")
+      (dwpp/set-play-mode! :preview)
+      (t/is (= :preview (dwpp/play-mode)) "the preview once picked")
+      (dwpp/set-play-mode! :present)
+      (t/is (= :preview (dwpp/play-mode)) "an unknown mode is not kept")
+      (swap! storage/user assoc ::dwpp/play-mode "preview")
+      (t/is (= :view-mode (dwpp/play-mode)) "nor read back")
+      (finally
+        (if (some? before)
+          (swap! storage/user assoc ::dwpp/play-mode before)
+          (swap! storage/user dissoc ::dwpp/play-mode))))))

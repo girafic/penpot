@@ -14,6 +14,7 @@
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.drawing.common :as dwc]
    [app.main.data.workspace.history :as dwh]
+   [app.main.data.workspace.prototype-preview :as dwpp]
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -21,7 +22,7 @@
    [app.main.ui.context :as ctx]
    [app.main.ui.dashboard.team]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
-   [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.exports.assets :refer [progress-widget]]
    [app.main.ui.formats :as fmt]
    [app.main.ui.icons :as deprecated-icon]
@@ -108,6 +109,105 @@
          (for [sc (scd/split-sc (get-tt :zoom-selected))]
            [:span {:class (stl/css :shortcut-key)
                    :key (str "zoom-selected-" sc)} sc])]]]]]))
+
+;; --- Play Button
+
+(mf/defc play-option*
+  {::mf/private true}
+  [{:keys [mode label shortcut selected on-pick]}]
+  [:li {:class (stl/css :play-option)
+        :role "menuitemradio"
+        :aria-checked selected
+        :data-mode (name mode)
+        :on-click on-pick}
+   [:span {:class (stl/css :play-option-check)}
+    (when ^boolean selected
+      [:> icon* {:icon-id i/tick :size "s"}])]
+   [:span {:class (stl/css :play-option-label)} label]
+   [:span {:class (stl/css :shortcuts)}
+    (for [sc (scd/split-sc shortcut)]
+      [:span {:class (stl/css :shortcut-key)
+              :key (str (name mode) "-" sc)} sc])]])
+
+(mf/defc play-button*
+  "The play button of the header and the menu of its arrow: it opens the
+  view mode or the preview of the prototype, as picked last in the menu
+  (see `dwpp/play-mode`)."
+  {::mf/private true}
+  [{:keys [on-view-mode]}]
+  (let [mode*            (mf/use-state (dwpp/play-mode))
+        mode             (deref mode*)
+        preview?         (= mode :preview)
+
+        open*            (mf/use-state false)
+        open?            (deref open*)
+
+        custom-shortcuts (mf/deref refs/custom-shortcuts)
+        get-tt           #(sc/get-effective-tooltip % custom-shortcuts)
+
+        on-play
+        (mf/use-fn
+         (mf/deps preview? on-view-mode)
+         (fn []
+           (if ^boolean preview?
+             (st/emit! (dwpp/toggle-preview))
+             (on-view-mode))))
+
+        toggle-menu
+        (mf/use-fn
+         (fn [event]
+           (dom/stop-propagation event)
+           (swap! open* not)))
+
+        close-menu
+        (mf/use-fn
+         (fn [event]
+           (dom/stop-propagation event)
+           (reset! open* false)))
+
+        on-pick
+        (mf/use-fn
+         (mf/deps on-view-mode)
+         (fn [event]
+           (let [mode (-> (dom/get-current-target event)
+                          (dom/get-data "mode")
+                          (keyword))]
+             (dom/stop-propagation event)
+             (reset! open* false)
+             (reset! mode* mode)
+             (dwpp/set-play-mode! mode)
+             (if (= mode :preview)
+               (st/emit! (dwpp/open-preview))
+               (on-view-mode)))))]
+
+    [:div {:class (stl/css :play-section)}
+     [:button {:class (stl/css :viewer-btn)
+               :title (if ^boolean preview?
+                        (tr "workspace.header.preview" (get-tt :toggle-prototype-preview))
+                        (tr "workspace.header.viewer" (get-tt :open-viewer)))
+               :on-click on-play}
+      deprecated-icon/play]
+     [:button {:class (stl/css-case :play-options true
+                                    :selected open?)
+               :title (tr "workspace.header.play-options")
+               :aria-label (tr "workspace.header.play-options")
+               :aria-haspopup "menu"
+               :aria-expanded open?
+               :on-click toggle-menu}
+      [:> icon* {:icon-id i/arrow-down :size "s"}]]
+     [:& dropdown {:show open? :on-close close-menu}
+      [:ul {:class (stl/css :play-dropdown)
+            :role "menu"}
+       [:> play-option* {:mode :view-mode
+                         :label (tr "workspace.header.play.view-mode")
+                         :shortcut (get-tt :open-viewer)
+                         :selected (not preview?)
+                         :on-pick on-pick}]
+       [:> play-option* {:mode :preview
+                         :label (tr "workspace.header.play.preview")
+                         :shortcut (get-tt :toggle-prototype-preview)
+                         :selected preview?
+                         :on-pick on-pick}]]]]))
 
 ;; --- Header Component
 
@@ -242,8 +342,5 @@
             :on-click open-share-dialog}
         deprecated-icon/share])
 
-     [:a {:class (stl/css :viewer-btn)
-          :title (tr "workspace.header.viewer" (get-tt :open-viewer))
-          :on-click nav-to-viewer}
-      deprecated-icon/play]]))
+     [:> play-button* {:on-view-mode nav-to-viewer}]]))
 

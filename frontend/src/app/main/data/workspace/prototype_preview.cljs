@@ -14,8 +14,27 @@
    [app.common.files.helpers :as cfh]
    [app.common.uuid :as uuid]
    [app.main.data.helpers :as dsh]
+   [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
+
+(def play-modes
+  "What the play button of the workspace header can do: open the view
+  mode, or this preview."
+  #{:view-mode :preview})
+
+(defn play-mode
+  "What the play button does, as picked last in its menu (kept in the
+  browser): `:view-mode` until then."
+  []
+  (let [mode (get @storage/user ::play-mode)]
+    (if (contains? play-modes mode) mode :view-mode)))
+
+(defn set-play-mode!
+  "Keep `mode` (one of `play-modes`) as what the play button does."
+  [mode]
+  (when (contains? play-modes mode)
+    (swap! storage/user assoc ::play-mode mode)))
 
 (defn preview
   "The preview open in `state`, `{:page-id :frame-id}`; nil while it is

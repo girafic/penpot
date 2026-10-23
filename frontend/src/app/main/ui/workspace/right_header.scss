@@ -5,6 +5,8 @@
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
 @use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_sizes.scss" as *;
+@use "ds/_borders.scss" as *;
 
 .workspace-header-right {
   display: flex;
@@ -256,4 +258,81 @@
   background: var(--color-foreground-error);
   top: 6px;
   right: 6px;
+}
+
+// The play button with the arrow of its menu, which picks what the button
+// opens: the view mode or the preview of the prototype.
+.play-section {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.play-options {
+  @extend %button-tertiary;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: $sz-16;
+  block-size: $sz-28;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: $br-6;
+  color: var(--icon-foreground);
+
+  &:hover {
+    background-color: transparent;
+    border: none;
+    color: var(--button-tertiary-foreground-color-focus);
+  }
+
+  &.selected {
+    color: var(--button-tertiary-foreground-color-focus);
+  }
+}
+
+.play-dropdown {
+  @extend %menu-dropdown;
+
+  inset-block-start: calc(100% + var(--sp-s));
+  inset-inline-end: 0;
+  inline-size: $sz-224;
+}
+
+.play-option {
+  @extend %menu-item-base;
+
+  justify-content: flex-start;
+  gap: var(--sp-s);
+
+  .shortcuts {
+    @extend %shortcut-base;
+
+    margin-inline-start: auto;
+
+    .shortcut-key {
+      @extend %shortcut-key-base;
+    }
+  }
+
+  &:hover {
+    color: var(--menu-foreground-color-hover);
+
+    .shortcuts {
+      .shortcut-key {
+        color: var(--menu-foreground-color-hover);
+      }
+    }
+  }
+}
+
+.play-option-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: $sz-16;
+  color: var(--menu-foreground-color-hover);
 }
