@@ -435,10 +435,15 @@
           "from 500 ms, at twice its pace")))
 
 (t/deftest a-copy-animated-in-its-board-keeps-that-animation
-  (let [{:keys [objects board copy-rect main-page]} (component-scene)
-        own (-> (cta/make-timeline {:board-id board})
-                (cta/add-keyframe copy-rect {:time 0 :property :opacity :value 1}))]
-    (t/is (empty? (cltl/instance-timelines objects board own main-page)))
+  (let [{:keys [objects board copy copy-rect main-page]} (component-scene)
+        own   (-> (cta/make-timeline {:board-id board})
+                  (cta/add-keyframe copy-rect {:time 0 :property :opacity :value 1}))
+        moved (-> (cta/make-timeline {:board-id board})
+                  (cta/add-keyframe copy-rect {:time 0 :property :x :value 1}))
+        track #(get-in (cltl/instance-timelines objects board % main-page) [[:copy copy (thi/id :main)] :tracks copy-rect])]
+    (t/is (= #{:x} (into #{} (map :property) (:keyframes (track own))))
+          "its opacity the board's, and beside it the move of its main")
+    (t/is (nil? (track moved)) "the board moves it: nothing of its main")
     (t/is (empty? (cltl/instance-timelines objects (thi/id :main) nil main-page))
           "a main plays its own timeline")))
 
@@ -1818,6 +1823,87 @@
           tl      (get (cltl/instance-timelines objects board nil main-page) [:copy copy main])]
       (t/is (nil? (cta/link-of tl (copy-of objects copy :main-dot) :opacity))
             "a source the copy lacks links nothing"))))
+
+(defn- moved-copy
+  "`objects` with the copy `copy` and its layers moved by `dx`, `dy`."
+  [objects copy dx dy]
+  (reduce (fn [objects id]
+            (update objects id gsh/transform-shape (ctm/move-modifiers (gpt/point dx dy))))
+          objects
+          (cfh/get-children-ids-with-self objects copy)))
+
+(t/deftest a-copy-of-a-component-links-through-ranges-where-it-is
+  ;; a slider of the main turns a needle and moves a dot through ranges
+  ;; of its x: in a copy somewhere else, the ranges of positions go along
+  (let [file    (following-component-file :main-rect)
+        page    (thf/current-page file)
+        main    (thi/id :main)
+        tl      (-> (get (:timelines page) main)
+                    (cta/set-follow (thi/id :main-dot) nil)
+                    (cta/set-link (thi/id :main-still) {:property :rotation :source (thi/id :main-rect)
+                                                        :source-property :x :input [10 60] :output [-70 70]})
+                    (cta/set-link (thi/id :main-dot) {:property :x :source (thi/id :main-rect)
+                                                      :source-property :x :input [10 60] :output [100 150]}))
+        file    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                            (pcb/with-page page)
+                                            (pcb/set-timeline main tl)))
+        {:keys [objects board copy main-page]} (component-scene file)
+        objects (moved-copy objects copy 150 40)
+        rect    (copy-of objects copy :main-rect)
+        still   (copy-of objects copy :main-still)
+        dot     (copy-of objects copy :main-dot)
+        ;; how far the copy moved its layers in B from where the main has them
+        dx      (- (get-in objects [rect :selrect :x]) (get-in objects [board :selrect :x]) 10)
+        copies  (cltl/instance-timelines objects board nil main-page)
+        tl      (get copies [:copy copy main])]
+    (t/is (not (mth/close? 0 dx)) "the copy is elsewhere")
+    (t/is (= [(+ 10 dx) (+ 60 dx)] (:input (cta/link-of tl still :rotation))) "where the rect of the copy goes")
+    (t/is (= [-70 70] (:output (cta/link-of tl still :rotation))) "a turn stays a turn")
+    (t/is (= [(+ 100 dx) (+ 150 dx)] (:output (cta/link-of tl dot :x))) "a position goes along")
+    (t/is (mth/close? 0 (:rotation (shown-by (cltl/animation-tree copies objects 500) objects still)))
+          "halfway, as its main is then")))
+
+(defn- lit-component-file
+  "`following-component-file` whose main board turns its light, and whose
+  copy in board B fades in as B plays it itself."
+  []
+  (let [file  (following-component-file :main-still)
+        page  (thf/current-page file)
+        main  (thi/id :main)
+        copy  (thi/id :copy)
+        light {:angle 0 :height 35 :ambient 0.3}
+        tl    (-> (get (:timelines page) main)
+                  (cta/add-keyframe main {:time 0 :property :light-angle :value 0 :easing :linear})
+                  (cta/add-keyframe main {:time 1000 :property :light-angle :value 360})
+                  (cta/add-keyframe main {:time 0 :property :opacity :value 0.2}))
+        own   (-> (cta/make-timeline {:board-id (thi/id :board-b) :duration 1000})
+                  (cta/add-keyframe copy {:time 0 :property :opacity :value 0 :easing :linear})
+                  (cta/add-keyframe copy {:time 1000 :property :opacity :value 1}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page page)
+                                (pcb/with-objects (:objects page))
+                                (pcb/update-shapes [main copy] #(assoc % :light light))
+                                (pcb/set-timeline main tl)
+                                (pcb/set-timeline (thi/id :board-b) own)))))
+
+(t/deftest a-copy-the-board-animates-still-plays-the-rest-of-its-main
+  (let [{:keys [objects timelines board copy main-page]} (component-scene (lit-component-file))
+        own    (get timelines board)
+        copies (cltl/instance-timelines objects board own main-page)
+        track  (get-in copies [[:copy copy (thi/id :main)] :tracks copy])]
+    (t/is (= #{:light-angle} (into #{} (map :property) (:keyframes track)))
+          "its light turns; its opacity stays the board's")
+    (t/testing "the exports read both"
+      (let [tl (cltl/with-instance-tracks own (vals copies) objects)]
+        (t/is (= #{:opacity :light-angle}
+                 (into #{} (map :property) (get-in tl [:tracks copy :keyframes]))))
+        (t/is (contains? (get-in tl [:tracks copy :loops]) :light-angle) "looping as its main does")
+        (t/is (not (contains? (get-in tl [:tracks copy :loops] #{}) :opacity)) "the board's once")))
+    (t/testing "the canvas and the view mode play both"
+      (let [tree  (cltl/animation-tree (assoc copies board own) objects 500)
+            props (into #{} (map :property) (get-in tree [copy :modifiers :structure-parent]))]
+        (t/is (contains? props :opacity))
+        (t/is (contains? props :light))))))
 
 (t/deftest the-code-plays-a-follow-by-keyframes
   (let [file (following-file)
