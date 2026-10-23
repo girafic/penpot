@@ -475,8 +475,9 @@
 
         fullscreen? (mf/deref header/fullscreen-ref)
         overlays    (mf/deref current-overlays-ref)
-        ;; the preview shows its controls while paused
+        ;; the preview shows in its bar whether it plays (see below)
         playing?    (mf/deref ref:timeline-playing?)
+        muted?      (mf/deref ref:audio-muted?)
 
         orig-frame
         (mf/with-memo [current-animations]
@@ -628,6 +629,40 @@
           (.postMessage (.-parent js/window)
                         #js {:type "penpot:preview-shown" :frameId (dm/str (:id frame))}
                         (.. js/window -location -origin)))))
+
+    ;; the bar of the preview plays, pauses and stops the animation of the
+    ;; board it shows, and turns its sound on and off: it is told whether
+    ;; the board animates and sounds, and whether it plays, and asks for
+    ;; it here
+    (mf/with-effect [preview (:id frame) (some? clock) playing? board-sound? muted?]
+      (when (and preview (some? frame))
+        (.postMessage (.-parent js/window)
+                      #js {:type "penpot:preview-playback"
+                           :animated (some? clock)
+                           :playing (boolean playing?)
+                           :sound (boolean board-sound?)
+                           :muted (boolean muted?)}
+                      (.. js/window -location -origin))))
+
+    (mf/with-effect [preview (:id frame)]
+      (when (and preview (some? frame))
+        (let [board-id (:id frame)
+              parent   (.-parent js/window)
+              origin   (.. js/window -location -origin)
+
+              on-message
+              (fn [^js event]
+                (when (and (identical? (.-source event) parent)
+                           (= (.-origin event) origin))
+                  (case (some-> (.-data event) (unchecked-get "type"))
+                    "penpot:preview-play"  (do (audio/unlock!)
+                                               (st/emit! (dv/toggle-play-timeline board-id)))
+                    "penpot:preview-stop"  (st/emit! (dv/stop-timeline))
+                    "penpot:preview-sound" (do (audio/unlock!)
+                                               (st/emit! (dv/toggle-audio-muted)))
+                    nil)))]
+          (.addEventListener js/window "message" on-message)
+          #(.removeEventListener js/window "message" on-message))))
 
     ;; fitted or filled as it resizes; at 100 % as it is
     (mf/with-effect [preview (:viewport-size local) (:id frame)]
@@ -835,8 +870,7 @@
               :inspect-layout (= section :inspect))
       :data-fullscreen fullscreen?
       :data-force-visible (:show-thumbnails local)
-      :data-preview (true? preview)
-      :data-playing playing?}
+      :data-preview (true? preview)}
 
 
      [:div {:class (stl/css :viewer-content)}
@@ -901,11 +935,6 @@
               :index index
               :animated (some? clock)
               :sound board-sound?}]]))]]
-
-     ;; play, pause and sound of an animated board, over the preview
-     (when (and preview (some? clock) (some? frame))
-       [:div {:class (stl/css :preview-controls)}
-        [:> timeline-controls* {:board-id (:id frame) :sound? board-sound?}]])
 
      (when-not preview
        [:& header/header {:project project

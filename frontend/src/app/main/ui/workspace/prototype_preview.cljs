@@ -31,7 +31,7 @@
    [app.main.ui.components.check-menu-item :refer [check-menu-item*]]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
-   [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.workspace.canvas-window :as cw]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -145,6 +145,10 @@
         zoom       (deref zoom*)
         menu*      (mf/use-state false)
         menu?      (deref menu*)
+        ;; whether the board shown animates, plays, sounds and is muted,
+        ;; as the view mode tells (`penpot:preview-playback`)
+        playback*  (mf/use-state nil)
+        {:keys [animated playing sound muted]} (deref playback*)
         ;; the board of the selection the pin last asked for
         requested-ref (mf/use-ref frame-id)
         ;; the board it asked for while the view mode could not hear it
@@ -192,6 +196,9 @@
            (swap! storage/user dissoc ::frame)))
 
         on-back    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-back"))
+        on-play    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-play"))
+        on-stop    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-stop"))
+        on-sound   (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-sound"))
         on-forward (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-forward"))
         ;; pinned, at the board shown; else where it started
         on-restart (mf/use-fn
@@ -339,6 +346,12 @@
                     "penpot:preview-shown"
                     (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))
 
+                    "penpot:preview-playback"
+                    (reset! playback* {:animated (true? (unchecked-get data "animated"))
+                                       :playing (true? (unchecked-get data "playing"))
+                                       :sound (true? (unchecked-get data "sound"))
+                                       :muted (true? (unchecked-get data "muted"))})
+
                     "penpot:preview-close"
                     (st/emit! (dwpp/close-preview))
 
@@ -378,7 +391,34 @@
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.preview.restart")
                          :icon "reload"
-                         :on-click on-restart}]]
+                         :on-click on-restart}]
+       ;; the animation of the board shown, in the bar: over the view
+       ;; mode they hid what it shows
+       (when ^boolean animated
+         [:*
+          [:button {:type "button"
+                    :class (stl/css :playback-button)
+                    :title (tr "workspace.animation.play")
+                    :aria-label (tr "workspace.animation.play")
+                    :aria-pressed playing
+                    :on-click on-play}
+           (if ^boolean playing
+             [:span {:class (stl/css :pause-icon)}]
+             [:> icon* {:icon-id i/play :size "s"}])]
+          [:button {:type "button"
+                    :class (stl/css :playback-button)
+                    :title (tr "workspace.animation.rewind")
+                    :aria-label (tr "workspace.animation.rewind")
+                    :on-click on-stop}
+           [:span {:class (stl/css :stop-icon)}]]
+          (when ^boolean sound
+            [:> icon-button* {:variant "ghost"
+                              :aria-label (if ^boolean muted
+                                            (tr "workspace.animation.unmute")
+                                            (tr "workspace.animation.mute"))
+                              :aria-pressed (not muted)
+                              :icon (if ^boolean muted "volume-off" "volume")
+                              :on-click on-sound}])])]
       [:span {:class (stl/css :title)}
        (or (:name board) (tr "workspace.preview.title"))]
       [:div {:class (stl/css :buttons)

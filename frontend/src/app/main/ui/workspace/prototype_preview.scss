@@ -54,6 +54,44 @@
   cursor: default;
 }
 
+// Play or pause, and stop, the animation of the board shown, as the
+// ghost buttons beside them look; pause and stop are drawn.
+.playback-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: $sz-32;
+  block-size: $sz-32;
+  padding: 0;
+  border: none;
+  border-radius: $br-8;
+  background: none;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-foreground-primary);
+  }
+
+  &:focus-visible {
+    outline: $b-1 solid var(--color-accent-primary);
+  }
+}
+
+.pause-icon {
+  inline-size: px2rem(10);
+  block-size: px2rem(12);
+  border-inline: px2rem(3) solid currentcolor;
+}
+
+.stop-icon {
+  inline-size: px2rem(10);
+  block-size: px2rem(10);
+  border-radius: $b-1;
+  background-color: currentcolor;
+}
+
 // The settings button, while its menu is open.
 .menu-open {
   color: var(--color-accent-primary);
