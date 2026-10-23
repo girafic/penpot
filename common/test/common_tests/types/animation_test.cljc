@@ -7399,3 +7399,19 @@
     (t/is (not (cltl/can-ride-path? objs (cta/set-path-follow timeline road {:path car}) car road))
           "nor a path riding it")
     (t/is (= #{road ring} (into #{} (filter #{road ring}) (cltl/ride-paths objs timeline car))))))
+
+(t/deftest properties-that-go-together-share-an-area
+  (t/is (every? #(keyword? (cta/property-area %)) cta/animatable-properties)
+        "every animatable property has one")
+  (t/is (= #{:geometry} (into #{} (map cta/property-area)
+                              [:x :y :width :height :rotation :scale-x :scale-y
+                               :rotate-x :rotate-y :translate-z :path-progress :content]))
+        "what moves, turns and sizes a layer about its pivot")
+  (t/is (= #{:light} (into #{} (map cta/property-area) [:light-angle :light-height :light-ambient])))
+  (t/is (= #{:camera} (into #{} (map cta/property-area) [:perspective :perspective-x :perspective-y])))
+  (t/is (= [:fill :fill :stroke :stroke :stroke :trim :radius :shadow]
+           (mapv cta/property-area [:fill-color :fill-opacity :stroke-color :stroke-opacity
+                                    :stroke-width :trim-end :r3 :shadow-blur])))
+  (t/is (= [:opacity :blur :background-blur :unknown]
+           (mapv cta/property-area [:opacity :blur :background-blur :unknown]))
+        "the others are areas of their own"))

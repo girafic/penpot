@@ -618,54 +618,43 @@
   `ref-ids`) says, so that a copy links as its main does wherever it is.
   A link with a source that has no copy stays (`copy-follows` drops it)."
   [track ref-id main-objects main-board shape-id objects board-id {:keys [sx sy ox oy]} refs]
-  (let [from (origin main-objects ref-id main-board)
-        to   (origin objects shape-id board-id)
-        bx   (- (+ ox (* sx (:x from))) (:x to))
-        by   (- (+ oy (* sy (:y from))) (:y to))
-        move (fn [keyframe scale offset]
-               (-> keyframe
-                   (update :value #(+ offset (* scale %)))
-                   (d/update-when :path-in * scale)
-                   (d/update-when :path-out * scale)))
-        ;; how much the copy scales `property`
+  (let [;; how much the copy scales `property`
         scale (fn [property]
                 (case property
                   (:x :width)  sx
                   (:y :height) sy
                   1))
         ;; a value `v` of `property` of the main shape `main-id` as its
-        ;; copy `copy-id` has it
+        ;; copy `copy-id` has it: keyframes and the ranges of links alike
         place (fn [main-id copy-id property v]
                 (let [from (origin main-objects main-id main-board)
                       to   (origin objects copy-id board-id)]
                   (case property
-                    :x      (+ (- (+ ox (* sx (:x from))) (:x to)) (* sx v))
-                    :y      (+ (- (+ oy (* sy (:y from))) (:y to)) (* sy v))
-                    :width  (* sx v)
-                    :height (* sy v)
-                    v)))
-        link (fn [{:keys [source property source-property input output factor] :as link}]
-               (if-let [copy (get @refs source)]
-                 (let [factor (* (or factor 1) (/ (scale property) (scale source-property)))]
-                   (cond-> (-> link
-                               (d/update-when :offset * (scale property))
-                               (d/update-when :input (partial mapv #(place source copy source-property %)))
-                               (d/update-when :output (partial mapv #(place ref-id shape-id property %))))
-                     (and (nil? input) (nil? output) (not (mth/close? factor 1)))
-                     (assoc :factor factor)
-                     (and (nil? input) (nil? output) (mth/close? factor 1))
-                     (dissoc :factor)))
-                 link))]
+                    :x (+ (- (+ ox (* sx (:x from))) (:x to)) (* sx v))
+                    :y (+ (- (+ oy (* sy (:y from))) (:y to)) (* sy v))
+                    (* (scale property) v))))
+        move  (fn [{:keys [property] :as keyframe}]
+                (if (contains? #{:x :y :width :height} property)
+                  (-> keyframe
+                      (update :value #(place ref-id shape-id property %))
+                      (d/update-when :path-in * (scale property))
+                      (d/update-when :path-out * (scale property)))
+                  keyframe))
+        link  (fn [{:keys [source property source-property input output factor] :as link}]
+                (if-let [copy (get @refs source)]
+                  (let [factor (* (or factor 1) (/ (scale property) (scale source-property)))]
+                    (cond-> (-> link
+                                (d/update-when :offset * (scale property))
+                                (d/update-when :input (partial mapv #(place source copy source-property %)))
+                                (d/update-when :output (partial mapv #(place ref-id shape-id property %))))
+                      (and (nil? input) (nil? output) (not (mth/close? factor 1)))
+                      (assoc :factor factor)
+                      (and (nil? input) (nil? output) (mth/close? factor 1))
+                      (dissoc :factor)))
+                  link))]
     (-> track
         (assoc :shape-id shape-id)
-        (update :keyframes
-                (partial mapv (fn [keyframe]
-                                (case (:property keyframe)
-                                  :x      (move keyframe sx bx)
-                                  :y      (move keyframe sy by)
-                                  :width  (update keyframe :value * sx)
-                                  :height (update keyframe :value * sy)
-                                  keyframe))))
+        (update :keyframes (partial mapv move))
         (d/update-when :links (partial mapv link)))))
 
 (defn- copy-follows
@@ -714,40 +703,62 @@
    result
    result))
 
-(defn- played-properties
-  "The properties the track `track` of the layer `id` plays in `timeline`
-  (with the shapes `objects`): those of its keyframes, of its presets and
-  of the uses of animation styles on it (see `cta/resolve-animations`),
-  of its links and of its wiggles. Nil, all of them, when it follows,
-  reaches or rides another layer, which moves it as a whole."
+(defn- resolved-alone
+  "The track `track` of the layer `id` of `objects` as it plays alone in
+  `timeline` (its settings): its presets and the uses of animation styles
+  on it played as keyframes, those that play the units of a text left as
+  its `:animations` (see `cta/resolve-animations`); its links and wiggles,
+  which other layers or the modifiers play, left out."
+  [timeline objects id track]
+  (let [alone (-> (assoc track :shape-id id)
+                  (dissoc :links :wiggles))]
+    (dm/get-in (cta/resolve-animations (assoc timeline :tracks {id alone}) objects) [:tracks id])))
+
+(defn- played-areas
+  "The areas (see `cta/property-area`) the track `track` of the layer `id`
+  plays in `timeline` (with the shapes `objects`): those of its keyframes,
+  presets and uses of animation styles (see `resolved-alone`), links and
+  wiggles, and `:text-units` for the animations that play the units of a
+  text. Nil, all of them, when it follows, reaches or rides another layer,
+  which moves it as a whole."
   [timeline objects id track]
   (when-not (or (some? (:follow track)) (some? (:ik track)) (some? (:path-follow track)))
-    (let [alone    (-> (assoc track :shape-id id)
-                       (dissoc :links :wiggles))
-          resolved (cta/resolve-animations (assoc timeline :tracks {id alone}) objects)]
-      (-> #{}
-          (into (map :property) (dm/get-in resolved [:tracks id :keyframes]))
-          (into (map :property) (:links track))
-          (into (mapcat (fn [{:keys [property]}]
-                          (case property
-                            :position [:x :y]
-                            :scale    [:scale-x :scale-y]
-                            [property])))
-                (:wiggles track))))))
+    (let [resolved (resolved-alone timeline objects id track)
+          area     (comp cta/property-area :property)]
+      (cond-> (-> #{}
+                  (into (map area) (:keyframes resolved))
+                  (into (map area) (:links track))
+                  (into (comp (mapcat (comp cta/wiggle-slots :property)) (map cta/property-area))
+                        (:wiggles track)))
+        (seq (:animations resolved)) (conj :text-units)))))
 
 (defn- beside-own
   "`track`, of the copy `id` from its main (see `mapped-track`), as it
   plays beside `own`, the track the board's `timeline` gives that copy:
-  only the keyframes of the properties `own` does not play (see
-  `played-properties`), the light of a board copy that enters it say.
-  Nil when that leaves nothing."
-  [track own timeline objects id]
-  (when-let [taken (played-properties timeline objects id own)]
-    (let [keyframes (filterv #(not (contains? taken (:property %))) (:keyframes track))]
-      (when (seq keyframes)
-        (-> track
-            (dissoc :animations :links :wiggles :follow :ik :path-follow)
-            (assoc :keyframes keyframes))))))
+  only what plays the areas `own` leaves alone (see `played-areas`), so
+  that one of them plays each area, the geometry of the layer about one
+  pivot, and the groups written as one value whole. Its presets and uses
+  of styles play as keyframes on its main's `main` timeline (see
+  `resolved-alone`), its links and wiggles stay by the areas they play.
+  The light of a board copy entering its board stays, say. Nil when that
+  leaves nothing."
+  [track own timeline main objects id]
+  (when-let [taken (played-areas timeline objects id own)]
+    (let [free?     #(not (contains? taken (cta/property-area %)))
+          resolved  (resolved-alone main objects id track)
+          keyframes (filterv (comp free? :property) (:keyframes resolved))
+          links     (filterv (comp free? :property) (:links track))
+          wiggles   (filterv #(every? free? (cta/wiggle-slots (:property %))) (:wiggles track))
+          units     (when-not (contains? taken :text-units) (not-empty (:animations resolved)))
+          slot-free? #(free? (if (vector? %) (first %) %))]
+      (when (or (seq keyframes) (seq links) (seq wiggles) (seq units))
+        (cond-> (-> resolved
+                    (dissoc :animations :links :wiggles :follow :ik :path-follow)
+                    (assoc :keyframes keyframes)
+                    (d/update-when :loops #(into #{} (filter slot-free?) %)))
+          (seq links)   (assoc :links links)
+          (seq wiggles) (assoc :wiggles wiggles)
+          (seq units)   (assoc :animations units))))))
 
 (defn instance-timelines
   "The timelines playing, in the board `board-id` of `objects`, the
@@ -762,9 +773,9 @@
   a copy gives it its audio clips too, an entry of their own when it
   animates nothing (see `with-instance-clips`). A shape `timeline`, the
   one of the board, animates itself keeps that animation, and plays
-  beside it what its main plays of its other properties (see
-  `beside-own`): a copy that enters the board still plays inside. Each plays on
-  the clock `timeline` gives the copy (see `cta/copy-clock`), as
+  beside it what its main plays of the areas it leaves alone (see
+  `beside-own`): a copy that enters the board still lights up. Each plays
+  on the clock `timeline` gives the copy (see `cta/copy-clock`), as
   `:clock-start` and `:clock-speed` when they are not the defaults. A
   follower there follows the copy of its leader (see `cta/follow-of`)."
   [objects board-id timeline main-page]
@@ -792,7 +803,7 @@
                               track (when (some? track)
                                       (cond-> (mapped-track track ref-id mobjs board id objects board-id cmap refs)
                                         (contains? own id)
-                                        (beside-own (get own id) timeline objects id)))]
+                                        (beside-own (get own id) timeline main objects id)))]
                           (if (some? track)
                             (let [k [:copy head-id board]]
                               (-> result
@@ -869,58 +880,84 @@
              :duration (if stored? (max longest (:duration timeline)) longest)
              :playback (if (every? #(= :once (cta/playback-mode %)) copies) :once :loop)))))
 
+(defn- on-board-clock
+  "The tracks of the timeline `copy` of a component copy (see
+  `instance-timelines`) as they play on the clock of its board, for a
+  timeline that holds them beside the board's own (the exports, the code):
+  played (see `cta/resolve-animations`), from the start of the copy's clock
+  at its speed (see `cta/retime-track`), over and over when it loops (see
+  `cta/loop-track`), ping-pong as a loop of there and back; the split
+  animations of a text with the clock of the copy, `:split-clock` (see
+  `cta/text-unit-entries`), or, with `text-split` `:whole`, as animations of
+  the whole text (see `cta/flatten-splits`). The layers that follow others
+  play keyframes (see `ctaf/bake-follows`). `{:tracks :cycle}`, `:cycle` the
+  cycle (ms) of a copy that loops."
+  [copy objects & {:keys [text-split]}]
+  (let [clock  (select-keys copy [:duration :playback :loop :clock-start :clock-speed])
+        start  (:clock-start copy 0)
+        speed  (:clock-speed copy 1)
+        copy   (-> (cond-> copy (= :whole text-split) cta/flatten-splits)
+                   (ctaf/bake-follows objects)
+                   (cta/resolve-animations objects)
+                   (cta/expand-loops))
+        ;; ping-pong turns into a loop of there and back
+        copy   (cond-> copy
+                 (= :ping-pong (cta/playback-mode copy))
+                 (-> cta/expand-paths cta/expand-springs cta/expand-ping-pong))
+        loop?  (= :loop (cta/playback-mode copy))
+        period (:duration copy)]
+    {:tracks (d/update-vals (:tracks copy)
+                            #(cond-> %
+                               loop?                 (cta/loop-track period)
+                               :always               (cta/retime-track start speed)
+                               (seq (:animations %)) (assoc :split-clock clock)))
+     :cycle  (when loop? (if (= 1 speed) period (/ period (double speed))))}))
+
+(defn- folded-track
+  "`own`, the track the board gives a layer of a component copy, with
+  `track`, what its main plays beside it on the board's clock (see
+  `beside-own` and `on-board-clock`): its keyframes and loops, its split
+  animations with their clock, and its pivot when it plays the geometry
+  of the layer, which `own` leaves alone then."
+  [own track]
+  (let [geometry? (some #(= :geometry (cta/property-area (:property %))) (:keyframes track))]
+    (cond-> (update own :keyframes (fnil into []) (:keyframes track))
+      (seq (:loops track))
+      (update :loops (fnil into #{}) (:loops track))
+
+      (seq (:animations track))
+      (-> (update :animations (fnil into []) (:animations track))
+          (assoc :split-clock (:split-clock track)))
+
+      geometry?
+      (as-> own (if-let [origin (:origin track)]
+                  (assoc own :origin origin)
+                  (dissoc own :origin))))))
+
 (defn with-instance-tracks
   "`timeline`, of a board, with the animations of the component copies
   in it, `copies` (see `instance-timelines`), for the exports, which read
-  one timeline: each as it plays on its own clock, over and over when it
-  loops (see `cta/loop-track`). The split animations of a text of a copy
-  stay on its track with the clock of the copy, `:split-clock` (see
-  `cta/text-unit-entries`), or, with `text-split` `:whole`, play as
-  animations of the whole text, as the markup exports play them (see
-  `cta/flatten-splits`). A shape `timeline` animates itself keeps that
-  animation, with the keyframes its main plays of its other properties
-  (see `beside-own`). The layers of copies that follow others play keyframes
-  (see `ctaf/bake-follows`): a follow plays on the clock of its copy,
-  which the retiming, looping and ping-pong here cannot carry.
+  one timeline: each as it plays on its own clock (see `on-board-clock`,
+  which takes `text-split`). A shape `timeline` animates itself keeps that
+  animation, with what its main plays beside it (see `folded-track`).
   `:copy-loops` holds the cycles (ms) of the copies that loop, whose
   clock the exports bind to the board's (see
   `app.main.data.exports.animation/export-issues`)."
   [timeline copies objects & {:keys [text-split]}]
   (reduce
    (fn [timeline copy]
-     (let [clock  (select-keys copy [:duration :playback :loop :clock-start :clock-speed])
-           start  (:clock-start copy 0)
-           speed  (:clock-speed copy 1)
-           copy   (-> (cond-> copy (= :whole text-split) cta/flatten-splits)
-                      (ctaf/bake-follows objects)
-                      (cta/resolve-animations objects)
-                      (cta/expand-loops))
-           ;; ping-pong turns into a loop of there and back
-           copy   (cond-> copy
-                    (= :ping-pong (cta/playback-mode copy))
-                    (-> cta/expand-paths cta/expand-springs cta/expand-ping-pong))
-           loop?  (= :loop (cta/playback-mode copy))
-           period (:duration copy)]
+     (let [{:keys [tracks cycle]} (on-board-clock copy objects :text-split text-split)]
        (cond-> timeline
-         loop? (update :copy-loops (fnil conj []) (if (= 1 speed) period (/ period (double speed))))
+         (some? cycle) (update :copy-loops (fnil conj []) cycle)
          :always
          (update :tracks
-                 (fn [tracks]
-                   (reduce-kv (fn [tracks id track]
-                                (let [track (cond-> track
-                                              loop?                     (cta/loop-track period)
-                                              :always                   (cta/retime-track start speed)
-                                              (seq (:animations track)) (assoc :split-clock clock))]
-                                  (if (contains? tracks id)
-                                    ;; what its main plays beside what the
-                                    ;; board plays on it (see `beside-own`)
-                                    (-> tracks
-                                        (update-in [id :keyframes] (fnil into []) (:keyframes track))
-                                        (cond-> (seq (:loops track))
-                                          (update-in [id :loops] (fnil into #{}) (:loops track))))
-                                    (assoc tracks id track))))
-                              tracks
-                              (:tracks copy)))))))
+                 (fn [own]
+                   (reduce-kv (fn [own id track]
+                                (if (contains? own id)
+                                  (update own id folded-track track)
+                                  (assoc own id track)))
+                              own
+                              tracks))))))
    timeline
    copies))
 
@@ -1114,6 +1151,27 @@
           {}
           timelines))
 
+(defn- fold-shared
+  "`[own copies]`: `own`, the timeline of a board, with the tracks of
+  `copies` (`{:head-id :timeline}`) of the layers it animates itself
+  folded into theirs on its clock (see `folded-track`), as the exports
+  play them, and `copies` without those tracks."
+  [own copies objects]
+  (reduce (fn [[own copies] {:keys [timeline] :as copy}]
+            (let [shared (filterv #(contains? (:tracks own) %) (keys (:tracks timeline)))]
+              (if (empty? shared)
+                [own (conj copies copy)]
+                (let [tracks (:tracks (on-board-clock timeline objects))]
+                  [(reduce (fn [own id]
+                             (cond-> own
+                               (contains? tracks id)
+                               (update-in [:tracks id] folded-track (get tracks id))))
+                           own
+                           shared)
+                   (conj copies (update-in copy [:timeline :tracks] #(apply dissoc % shared)))]))))
+          [own []]
+          copies))
+
 (defn code-timelines
   "What the code of the animation of the board `board-id` of `page`
   shows (the Inspect, the plugin API; `files` holds the files of the
@@ -1126,7 +1184,10 @@
   but those by characters or words of the texts `units?` (a function of
   a text) is true of, which the code plays by units (see
   `cta/unit-timelines`); and `:splits`, the texts the design plays by
-  units, with their kind. The layers that follow others play keyframes
+  units, with their kind. A layer of a copy the board animates itself has
+  one track, the board's, with what its main plays beside it on the
+  board's clock (see `fold-shared`), as the exports play it, so the code
+  gives it one animation. The layers that follow others play keyframes
   (see `ctaf/bake-follows`); helper layers play nothing (see
   `cta/drop-guides`). Nil when the board plays nothing."
   [page files board-id & {:keys [units?] :or {units? (constantly false)}}]
@@ -1146,17 +1207,22 @@
             flat   #(-> (ctaf/bake-follows % objects)
                         (cta/drop-guides)
                         (cta/flatten-splits #{:char :word} (fn [id] (units? (get objects id)))))
-            copies (mapv #(update % :timeline flat) copies)]
+            ;; one animation for each layer: what the main of a copy
+            ;; the board animates itself plays beside it goes into the
+            ;; board's track of it, on the board's clock
+            [own copies] (fold-shared (flat own) (mapv #(update % :timeline flat) copies) objects)]
         {:board-id board-id
-         :timeline (-> (flat own)
-                       (with-copies-clock (map :timeline copies) (some? stored)))
+         :timeline (with-copies-clock own (map :timeline copies) (some? stored))
          :copies   copies
          :splits   splits}))))
 
 (defn- merge-modif-trees
   "The modif-tree `a` with the entries of `b`: a layer in both gets the
   modifiers of `a`, then those of `b` (a board copy entering the board
-  that lights it as its main does, see `beside-own`)."
+  that lights it as its main does, see `beside-own`). They never play
+  one area of it both (see `cta/property-area`): its geometry comes from
+  one of them, built in its order about its pivot, so their order does
+  not matter."
   [a b]
   (merge-with (fn [x y] (update x :modifiers ctm/add-modifiers (:modifiers y))) a b))
 

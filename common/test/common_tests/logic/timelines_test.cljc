@@ -23,6 +23,7 @@
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-code :as ctac]
    [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-outline :as ctao]
    [app.common.types.animation-style :as ctas]
@@ -1904,6 +1905,220 @@
             props (into #{} (map :property) (get-in tree [copy :modifiers :structure-parent]))]
         (t/is (contains? props :opacity))
         (t/is (contains? props :light))))))
+
+(defn- shared-scene
+  "`following-component-file` without the follow of its dot: its main's
+  timeline given by `main` (of the timeline, then the ids of the main),
+  and board B's by `own` (of an empty one of 1 s, then the copies of
+  `:main-rect`, `:main-still` and `:main-dot`, the copy itself, `:board`
+  and `:objects`)."
+  [main own]
+  (let [file    (following-component-file :main-still)
+        page    (thf/current-page file)
+        objects (:objects page)
+        copy    (thi/id :copy)
+        board   (thi/id :board-b)
+        ids     {:rect (copy-of objects copy :main-rect) :still (copy-of objects copy :main-still)
+                 :dot (copy-of objects copy :main-dot) :copy copy}
+        mtl     (-> (get (:timelines page) (thi/id :main))
+                    (cta/set-follow (thi/id :main-dot) nil)
+                    (main {:rect (thi/id :main-rect) :still (thi/id :main-still) :dot (thi/id :main-dot)}))
+        file    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                            (pcb/with-page page)
+                                            (pcb/set-timeline (thi/id :main) mtl)
+                                            (pcb/set-timeline board (own (cta/make-timeline {:board-id board :duration 1000})
+                                                                         (assoc ids :board board :objects objects)))))
+        page    (thf/current-page file)
+        objects (:objects page)
+        own     (get (:timelines page) board)]
+    (assoc ids
+           :file file :page page :objects objects :board board :own own
+           :files {(:id file) file}
+           :copies (cltl/instance-timelines objects board own
+                                            (constantly {:objects objects :timelines (:timelines page)})))))
+
+(defn- middle
+  "The middle of the shape `id` of `objects` as the modif-tree `tree` shows it."
+  [tree objects id]
+  (let [{:keys [x y width height]} (:selrect (shown-by tree objects id))]
+    [(+ x (/ width 2)) (+ y (/ height 2))]))
+
+(defn- close-points?
+  [[ax ay] [bx by]]
+  (and (mth/close? ax bx 0.01) (mth/close? ay by 0.01)))
+
+(defn- x-in-board
+  "Where the shape `id` of `objects` is in the board `board`, along x."
+  [objects id board]
+  (- (get-in objects [id :selrect :x]) (get-in objects [board :selrect :x])))
+
+(t/deftest a-copy-the-board-moves-takes-no-turn-of-its-main
+  ;; the geometry of a layer comes from one of them: in any order the
+  ;; canvas, the view mode and the exports show the same
+  (let [{:keys [objects board still copies own page files copy]}
+        (shared-scene (fn [tl {:keys [still]}]
+                        (-> tl
+                            (cta/add-keyframe still {:time 0 :property :rotation :value 0 :easing :linear})
+                            (cta/add-keyframe still {:time 1000 :property :rotation :value 90})))
+                      ;; B moves the copy of the still square 200 px along x
+                      (fn [tl {:keys [still board objects]}]
+                        (let [rest-x (x-in-board objects still board)]
+                          (-> tl
+                              (cta/add-keyframe still {:time 0 :property :x :value rest-x :easing :linear})
+                              (cta/add-keyframe still {:time 1000 :property :x :value (+ rest-x 200)})))))
+        [cx cy] (middle {} objects still)
+        to      [(+ cx 100) cy]]
+    (t/is (nil? (get-in copies [[:copy copy (thi/id :main)] :tracks still])) "nothing of its main's geometry")
+    (t/is (close-points? to (middle (cltl/animation-tree (merge {board own} copies) objects 500) objects still)))
+    (t/is (close-points? to (middle (cltl/animation-tree (merge copies {board own}) objects 500) objects still)))
+    (t/is (close-points? to (middle (cltl/view-animation-tree page files board 500 500) objects still))
+          "the view mode")
+    (t/is (close-points? to (middle (ctaf/timeline->modif-tree (cltl/with-instance-tracks own (vals copies) objects)
+                                                               objects 500)
+                                    objects still))
+          "the exports")))
+
+(t/deftest a-copy-the-board-fades-turns-about-its-main-pivot-everywhere
+  (let [{:keys [objects board still copies own copy]}
+        (shared-scene (fn [tl {:keys [still]}]
+                        (-> tl
+                            (cta/add-keyframe still {:time 0 :property :rotation :value 0 :easing :linear})
+                            (cta/add-keyframe still {:time 1000 :property :rotation :value 90})
+                            (cta/set-track-origin still 0 0)))
+                      (fn [tl {:keys [still]}]
+                        (-> tl
+                            (cta/add-keyframe still {:time 0 :property :opacity :value 0 :easing :linear})
+                            (cta/add-keyframe still {:time 1000 :property :opacity :value 1}))))
+        track  (get-in copies [[:copy copy (thi/id :main)] :tracks still])
+        canvas (middle (cltl/animation-tree (merge {board own} copies) objects 500) objects still)
+        export (middle (ctaf/timeline->modif-tree (cltl/with-instance-tracks own (vals copies) objects)
+                                                  objects 500)
+                       objects still)]
+    (t/is (= #{:rotation} (into #{} (map :property) (:keyframes track))) "its turn, not its opacity")
+    (t/is (= {:x 0.0 :y 0.0} (:origin track)))
+    (t/is (not (close-points? canvas (middle {} objects still))) "it turns about its corner")
+    (t/is (close-points? canvas export) "the exports turn it about the same corner")))
+
+(t/deftest a-light-the-board-plays-a-part-of-is-the-board-s
+  ;; the light is written as one value: its parts go together
+  (let [file    (lit-component-file)
+        page    (thf/current-page file)
+        objects (:objects page)
+        board   (thi/id :board-b)
+        copy    (thi/id :copy)
+        own     (-> (cta/make-timeline {:board-id board :duration 1000})
+                    (cta/add-keyframe copy {:time 0 :property :light-height :value 10 :easing :linear})
+                    (cta/add-keyframe copy {:time 1000 :property :light-height :value 80}))
+        copies  (cltl/instance-timelines objects board own
+                                         (constantly {:objects objects :timelines (:timelines page)}))
+        track   (get-in copies [[:copy copy (thi/id :main)] :tracks copy])
+        light   (fn [tree] (some #(when (= :light (:property %)) (:value %))
+                                 (get-in tree [copy :modifiers :structure-parent])))
+        canvas  (light (cltl/animation-tree (merge {board own} copies) objects 500))
+        export  (light (ctaf/timeline->modif-tree (cltl/with-instance-tracks own (vals copies) objects)
+                                                  objects 500))]
+    (t/is (= #{:opacity} (into #{} (map :property) (:keyframes track)))
+          "its main's opacity, not its main's turn of the light")
+    (t/is (mth/close? 45 (:height canvas)))
+    (t/is (mth/close? 0 (:angle canvas)) "the angle at rest")
+    (t/is (= canvas export))))
+
+(t/deftest a-copy-the-board-plays-keeps-its-main-s-links-wiggles-and-presets-elsewhere
+  (let [{:keys [rect still dot copies copy]}
+        (shared-scene (fn [tl {:keys [rect still dot]}]
+                        (-> tl
+                            (cta/set-link still {:property :rotation :source rect :source-property :x})
+                            (cta/set-wiggle dot {:property :scale :frequency 2 :amplitude 0.2 :seed 7})
+                            (cta/add-animation dot {:type :scale :start 0 :duration 400})))
+                      (fn [tl {:keys [still dot]}]
+                        (-> tl
+                            (cta/add-keyframe still {:time 0 :property :opacity :value 0})
+                            (cta/add-keyframe still {:time 400 :property :opacity :value 1})
+                            (cta/add-keyframe dot {:time 0 :property :opacity :value 0})
+                            (cta/add-keyframe dot {:time 400 :property :opacity :value 1}))))
+        tl (get copies [:copy copy (thi/id :main)])]
+    (t/is (= rect (:source (cta/link-of tl still :rotation))) "the needle still turns as the rect goes")
+    (t/is (some? (cta/wiggle-of tl dot :scale)) "the dot still pulses")
+    (t/is (seq (cta/property-keyframes tl dot :scale-x)) "its scale preset, played as keyframes")))
+
+(t/deftest what-the-board-plays-of-a-copy-takes-the-areas-it-plays
+  (let [main  (fn [tl {:keys [still]}]
+                (-> tl
+                    (cta/add-keyframe still {:time 0 :property :rotation :value 0})
+                    (cta/add-keyframe still {:time 1000 :property :rotation :value 90})
+                    (cta/add-keyframe still {:time 0 :property :opacity :value 0.5})
+                    (cta/add-keyframe still {:time 1000 :property :opacity :value 1})))
+        kept  (fn [own]
+                (let [{:keys [copies still copy]} (shared-scene main own)]
+                  (into #{} (map :property)
+                        (get-in copies [[:copy copy (thi/id :main)] :tracks still :keyframes]))))
+        style (ctas/make-use (ctas/make-animation-style
+                              {:entries [{:type :keys :property :y :start 0 :duration 400
+                                          :keyframes [{:time 0 :value 0} {:time 400 :value 40}]}]})
+                             (uuid/next) 0)]
+    (t/is (= #{:rotation} (kept (fn [tl {:keys [still]}] (cta/add-animation tl still {:type :fade :start 0 :duration 400}))))
+          "a fade preset takes the opacity")
+    (t/is (= #{:opacity} (kept (fn [tl {:keys [still]}] (assoc-in tl [:tracks still] {:shape-id still :keyframes [] :animations [style]}))))
+          "a style use moving it takes the geometry")
+    (t/is (= #{:opacity} (kept (fn [tl {:keys [still rect]}] (cta/set-link tl still {:property :x :source rect :source-property :x}))))
+          "a link of its x takes the geometry")
+    (t/is (= #{:opacity} (kept (fn [tl {:keys [still]}] (cta/set-wiggle tl still {:property :position :frequency 2 :amplitude 4 :seed 3}))))
+          "a wiggle of its position takes the geometry")
+    (t/is (= #{} (kept (fn [tl {:keys [still rect]}] (cta/set-follow tl still {:leader rect}))))
+          "a follow takes it all")))
+
+(t/deftest the-code-of-a-copy-the-board-plays-holds-its-main-s-light
+  (let [file    (lit-component-file)
+        page    (thf/current-page file)
+        objects (:objects page)
+        copy    (thi/id :copy)
+        code    (cltl/code-timelines page {(:id file) file} (thi/id :board-b))
+        track   (get-in code [:timeline :tracks copy])]
+    (t/is (= #{:opacity :light-angle} (into #{} (map :property) (:keyframes track)))
+          "the board's fade and its main's light, on one track")
+    (t/is (contains? (:loops track) :light-angle) "looping as its main does")
+    (t/is (not-any? #(contains? (get-in % [:timeline :tracks]) copy) (:copies code))
+          "not again on the clock of the copy")
+    (t/is (= 1 (count (filter #(= copy (:id %)) (ctac/code-layers code objects))))
+          "one layer of the code")))
+
+(t/deftest a-copy-twice-as-wide-links-twice-as-far
+  (let [file    (following-component-file :main-still)
+        page    (thf/current-page file)
+        main    (thi/id :main)
+        rect    (thi/id :main-rect)
+        tl      (-> (get (:timelines page) main)
+                    (cta/set-follow (thi/id :main-dot) nil)
+                    (cta/set-link (thi/id :main-still) {:property :rotation :source rect
+                                                        :source-property :x :factor 2})
+                    (cta/set-link (thi/id :main-dot) {:property :x :source rect
+                                                      :source-property :x :offset 10})
+                    (cta/set-link (thi/id :main-dot) {:property :y :source rect :source-property :x
+                                                      :input [10 60] :output [0 40]}))
+        file    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                            (pcb/with-page page)
+                                            (pcb/set-timeline main tl)))
+        {:keys [objects board copy main-page]} (component-scene file)
+        ;; the copy twice as wide, from its left
+        from    (gpt/point (get-in objects [copy :selrect :x]) (get-in objects [copy :selrect :y]))
+        objects (reduce (fn [objects id]
+                          (update objects id gsh/transform-shape (ctm/resize-modifiers (gpt/point 2 1) from)))
+                        objects
+                        (cfh/get-children-ids-with-self objects copy))
+        tl      (get (cltl/instance-timelines objects board nil main-page) [:copy copy main])
+        still   (copy-of objects copy :main-still)
+        dot     (copy-of objects copy :main-dot)
+        rect-x  (x-values tl (copy-of objects copy :main-rect))
+        stored  (fn [id property] (d/seek #(= property (:property %)) (get-in tl [:tracks id :links])))]
+    (t/is (= 2 (count rect-x)) "the rect of the copy moves")
+    (t/is (not (contains? (stored still :rotation) :factor))
+          "a degree a main pixel is a degree two pixels of the copy: factor 2 × 1/2, stored as absence")
+    (t/is (mth/close? 20 (:offset (cta/link-of tl dot :x))) "a position offset twice as far")
+    (t/is (not (contains? (stored dot :x) :factor)))
+    (t/is (= rect-x (:input (cta/link-of tl dot :y)))
+          "the range where the rect of the copy goes, as its keyframes are")
+    (t/is (every? true? (map mth/close? [0 40] (:output (cta/link-of tl dot :y))))
+          "the height of the copy is its main's")))
 
 (t/deftest the-code-plays-a-follow-by-keyframes
   (let [file (following-file)

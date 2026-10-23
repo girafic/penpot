@@ -111,6 +111,32 @@
   it from all round. Only boards with a light have them."
   {:light-angle :angle :light-height :height :light-ambient :ambient})
 
+(def property-areas
+  "The area of the properties that go together (see `property-area`): the
+  geometry of a layer, which its modifiers build in one order about one
+  pivot (see `shape->modifiers`), and the groups they write as one value,
+  the parts that do not play at rest."
+  (merge (zipmap [:x :y :width :height :rotation :scale-x :scale-y
+                  :rotate-x :rotate-y :translate-z :path-progress :content]
+                 (repeat :geometry))
+         (zipmap (keys light-properties) (repeat :light))
+         (zipmap camera-properties (repeat :camera))
+         (zipmap [:fill-color :fill-opacity] (repeat :fill))
+         (zipmap [:stroke-color :stroke-opacity :stroke-width] (repeat :stroke))
+         (zipmap [:shadow-offset-x :shadow-offset-y :shadow-blur
+                  :shadow-spread :shadow-color :shadow-opacity]
+                 (repeat :shadow))
+         (zipmap [:trim-start :trim-end :trim-offset] (repeat :trim))
+         (zipmap [:r1 :r2 :r3 :r4] (repeat :radius))))
+
+(defn property-area
+  "The area `property` belongs to (see `property-areas`): two animations of
+  one layer share it only whole, as a component copy and the board it is
+  in do (see `app.common.logic.timelines/beside-own`). The property itself
+  for the others, as the opacity."
+  [property]
+  (get property-areas property property))
+
 (defn light-rest
   "The value of the light property `property` of `board` without
   keyframes."
