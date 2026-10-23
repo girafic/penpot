@@ -66,6 +66,16 @@
    [:share-id {:optional true} [:maybe ::sm/uuid]]
    [:page-id {:optional true} ::sm/uuid]])
 
+(defn name-window!
+  "Name the window `viewer-<file-id>`, for inter-tab navigation: a tab
+  opened with that name, when one is open already, is that one, focused,
+  not a new one. Only a view mode that has the window to itself takes it:
+  framed, as the preview of the prototype in the workspace, it would take
+  the tab its \"open in the view mode\" opens for itself."
+  [file-id]
+  (when (identical? ug/global (unchecked-get ug/global "top"))
+    (unchecked-set ug/global "name" (str "viewer-" file-id))))
+
 (defn initialize
   [{:keys [file-id share-id] :as params}]
   (dm/assert!
@@ -96,13 +106,7 @@
                (rx/of (ev/event {::ev/name "shared-prototipe-visited"})))))
     ptk/EffectEvent
     (effect [_ _ _]
-      ;; Set the window name, the window name is used on inter-tab
-      ;; navigation; in other words: when a user opens a tab with a
-      ;; name, if there are already opened tab with that name, the
-      ;; browser just focus the opened tab instead of creating new
-      ;; tab.
-      (let [name (str "viewer-" file-id)]
-        (unchecked-set ug/global "name" name))
+      (name-window! file-id)
       ;; Make every `cf/resolve-file-media` call (inspector, code panel,
       ;; image previews, ...) share-link aware for the lifetime of this
       ;; viewer. Cleared by `finalize` below.

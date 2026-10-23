@@ -206,3 +206,23 @@
         (if (some? before)
           (swap! storage/user assoc ::dwpp/play-mode before)
           (swap! storage/user dissoc ::dwpp/play-mode))))))
+
+(t/deftest a-framed-view-mode-leaves-the-tab-of-the-view-mode-alone
+  ;; the preview frames the view mode: named as its tab, it took the tab
+  ;; "open in the view mode" opens, and nothing opened
+  (let [global js/globalThis
+        name   (unchecked-get global "name")
+        top    (unchecked-get global "top")
+        id     (uuid/custom 2 9)]
+    (try
+      (unchecked-set global "name" "")
+      (unchecked-set global "top" #js {})
+      (dv/name-window! id)
+      (t/is (= "" (unchecked-get global "name")) "framed: no name")
+      (unchecked-set global "top" global)
+      (dv/name-window! id)
+      (t/is (= (str "viewer-" id) (unchecked-get global "name")) "the whole window: its tab")
+      (finally
+        (unchecked-set global "name" name)
+        (unchecked-set global "top" top)))))
+
