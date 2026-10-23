@@ -34,6 +34,31 @@
               frame-id)))
         selected))
 
+(defn pin-step
+  "What the pin of the preview does for `board`, the board of the
+  selection (see `start-frame-id`): nil, nothing, for none or the one it
+  asked for already (`requested`); `:open`, start the preview again on
+  the page shown (`current-page`), not the one of the preview (`page`);
+  `:start`, no view mode yet (not `ready?`): start it there; `:go`, the
+  view mode `listening?`: send it there; `:hold`, the view mode loads:
+  send it there once it listens (see `ready-messages`)."
+  [{:keys [board requested current-page page ready? listening?]}]
+  (cond
+    (or (nil? board) (= board requested)) nil
+    (not= current-page page)              :open
+    (not ready?)                          :start
+    listening?                            :go
+    :else                                 :hold))
+
+(defn ready-messages
+  "What the preview tells a view mode that says it listens, as
+  `[[type data] ...]`: its `zoom`, and, while pinned (`follow?`), to go
+  to the board `unsent` the pin held for it (see `pin-step`)."
+  [{:keys [zoom unsent follow?]}]
+  (cond-> [["penpot:preview-zoom" {:mode zoom}]]
+    (and follow? (some? unsent))
+    (conj ["penpot:preview-go" {:frameId (dm/str unsent)}])))
+
 (defn open-preview
   "The preview open, from the board of the selection (see
   `start-frame-id`)."

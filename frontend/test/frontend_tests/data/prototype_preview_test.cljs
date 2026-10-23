@@ -14,7 +14,8 @@
    [app.main.data.workspace.prototype-preview :as dwpp]
    [app.main.router :as rt]
    [beicon.v2.core :as rx]
-   [cljs.test :as t]
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.async :as async]
    [potok.v2.core :as ptk]))
 
 (def ^:private board-a (uuid/custom 2 1))
@@ -96,44 +97,95 @@
            :viewer-preview {:back [] :forward [] :index index}}
     (some? pending) (assoc-in [:viewer-preview :pending] pending)))
 
-(defn- emits
-  "The events `event` emits on `state`."
+(defn- ^:async emits
+  "The events `event` emits on `state`, once its watch ends."
   [event state]
   (let [out (atom [])]
-    (rx/subs! #(swap! out conj %) (ptk/watch event state (rx/empty)))
+    (await (async/observe (ptk/watch event state (rx/empty)) :on-next #(swap! out conj %)))
     @out))
 
-(t/deftest the-preview-goes-only-to-a-board-the-view-mode-lists
-  (let [state (viewer-state 0 nil)]
+(t/deftest ^:async the-preview-goes-only-to-a-board-the-view-mode-lists
+  (let [state   (viewer-state 0 nil)
+        go-b    (dv/preview-go board-b)
+        go-a    (dv/preview-go board-a)
+        go-in   (dv/preview-go inner)
+        waiting (ptk/update go-in state)
+        refresh (#'app.main.data.viewer/bundle-refreshed {})
+        to-b    (await (emits go-b (ptk/update go-b state)))
+        to-a    (await (emits go-a state))
+        to-in   (await (emits go-in waiting))
+        brought (await (emits refresh (viewer-state 0 board-b)))
+        none    (await (emits refresh state))]
     (t/testing "a board it lists, there"
-      (let [go (dv/preview-go board-b)]
-        (t/is (= [::dv/go-to-frame] (map ptk/type (emits go (ptk/update go state)))))
-        (t/is (nil? (get-in (ptk/update go (viewer-state 0 inner)) [:viewer-preview :pending]))
-              "and it waits for none")))
+      (t/is (= [::dv/go-to-frame] (map ptk/type to-b)))
+      (t/is (nil? (get-in (ptk/update go-b (viewer-state 0 inner)) [:viewer-preview :pending]))
+            "and it waits for none"))
 
     (t/testing "the board it shows, nowhere"
-      (t/is (empty? (emits (dv/preview-go board-a) state))))
+      (t/is (empty? to-a)))
 
     (t/testing "a board not saved yet, or hidden in view mode: it stays, and waits for it"
-      (let [go    (dv/preview-go inner)
-            after (ptk/update go state)]
-        (t/is (empty? (emits go after)) "not to the first board")
-        (t/is (= inner (get-in after [:viewer-preview :pending])))
-        (t/is (= loose (get-in (ptk/update (dv/preview-go loose) after) [:viewer-preview :pending]))
-              "another takes its place")))
+      (t/is (empty? to-in) "not to the first board")
+      (t/is (= inner (get-in waiting [:viewer-preview :pending])))
+      (t/is (= loose (get-in (ptk/update (dv/preview-go loose) waiting) [:viewer-preview :pending]))
+            "another takes its place"))
 
     (t/testing "once a refresh brings it, it goes there"
-      (let [refreshed (#'app.main.data.viewer/bundle-refreshed {})]
-        (t/is (= [::dv/preview-go] (map ptk/type (emits refreshed (viewer-state 0 board-b)))))
-        (t/is (empty? (emits refreshed state)) "waiting for none, nowhere")))))
+      (t/is (= [::dv/preview-go] (map ptk/type brought)))
+      (t/is (empty? none) "waiting for none, nowhere"))))
 
-(t/deftest the-preview-zooms-as-the-workspace-says
-  (t/is (identical? dv/zoom-to-fit (dv/preview-zoom "fit")))
-  (t/is (identical? dv/zoom-to-fill (dv/preview-zoom "fill")))
-  (t/is (identical? dv/reset-zoom (dv/preview-zoom "100")))
-  (t/is (nil? (dv/preview-zoom "200")))
-  (t/testing "fitted or filled again as it resizes; at its own size it stays"
-    (let [at (fn [zoom-type] (assoc-in (viewer-state 0 nil) [:viewer-local :zoom-type] zoom-type))]
-      (t/is (= [dv/zoom-to-fit] (emits (dv/refit-preview) (at :fit))))
-      (t/is (= [dv/zoom-to-fill] (emits (dv/refit-preview) (at :fill))))
-      (t/is (empty? (emits (dv/refit-preview) (ptk/update dv/reset-zoom (at :fit))))))))
+(t/deftest ^:async the-preview-zooms-as-the-workspace-says
+  (let [at     (fn [zoom-type] (assoc-in (viewer-state 0 nil) [:viewer-local :zoom-type] zoom-type))
+        fitted (await (emits (dv/refit-preview) (at :fit)))
+        filled (await (emits (dv/refit-preview) (at :fill)))
+        as-is  (await (emits (dv/refit-preview) (ptk/update dv/reset-zoom (at :fit))))]
+    (t/is (identical? dv/zoom-to-fit (dv/preview-zoom "fit")))
+    (t/is (identical? dv/zoom-to-fill (dv/preview-zoom "fill")))
+    (t/is (identical? dv/reset-zoom (dv/preview-zoom "100")))
+    (t/is (nil? (dv/preview-zoom "200")))
+    (t/testing "fitted or filled again as it resizes; at its own size it stays"
+      (t/is (= [dv/zoom-to-fit] fitted))
+      (t/is (= [dv/zoom-to-fill] filled))
+      (t/is (empty? as-is)))))
+
+(t/deftest the-pin-sends-each-board-once
+  (let [page   (uuid/custom 3 2)
+        other  (uuid/custom 3 3)
+        step   #(dwpp/pin-step (merge {:board board-b :requested board-a :current-page page :page page
+                                       :ready? true :listening? true}
+                                      %))]
+    (t/is (= :go (step {})) "the view mode listens: there")
+    (t/is (nil? (step {:requested board-b})) "the board it asked for already: nothing")
+    (t/is (nil? (step {:board nil})) "nothing selected in a board: nothing")
+    (t/is (= :open (step {:current-page other})) "another page: it starts again there")
+    (t/is (= :start (step {:ready? false :listening? false})) "no view mode yet: it starts there")
+    (t/is (= :hold (step {:listening? false})) "the view mode loads: once it listens")))
+
+(t/deftest a-view-mode-that-listens-gets-what-was-held
+  (t/is (= [["penpot:preview-zoom" {:mode "fit"}]]
+           (dwpp/ready-messages {:zoom "fit" :unsent nil :follow? true}))
+        "its zoom, always")
+  (t/is (= [["penpot:preview-zoom" {:mode "100"}]
+            ["penpot:preview-go" {:frameId (str board-b)}]]
+           (dwpp/ready-messages {:zoom "100" :unsent board-b :follow? true}))
+        "and the board held for it")
+  (t/is (= [["penpot:preview-zoom" {:mode "fill"}]]
+           (dwpp/ready-messages {:zoom "fill" :unsent board-b :follow? false}))
+        "not unpinned: a restart starts where it is"))
+
+(t/deftest ^:async the-preview-starts-where-the-view-mode-starts-without-its-board
+  (let [route   (fn [state frame-id] (assoc-in state [:route :query-params :frame-id] (str frame-id)))
+        fetched (dv/bundle-fetched {})
+        types   #(into #{} (comp (filter some?) (map ptk/type)) %)
+        hidden  (await (emits fetched (route (viewer-state 0 nil) inner)))
+        listed  (await (emits fetched (route (viewer-state 0 nil) board-b)))
+        viewer  (await (emits fetched (route (dissoc (viewer-state 0 nil) :viewer-preview) inner)))]
+    (t/testing "a board it does not list: kept for a refresh, and the start of the view mode"
+      (t/is (contains? (types hidden) ::dv/preview-go))
+      (t/is (contains? (types hidden) ::dv/go-to-frame-auto))
+      (t/is (not (contains? (types hidden) ::dv/go-to-frame)) "not the first board by fallback"))
+    (t/testing "a board it lists: there"
+      (t/is (contains? (types listed) ::dv/go-to-frame))
+      (t/is (not (contains? (types listed) ::dv/preview-go))))
+    (t/testing "the view mode outside a preview goes as it did"
+      (t/is (contains? (types viewer) ::dv/go-to-frame)))))

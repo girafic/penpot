@@ -315,7 +315,15 @@
                         :thumbnails thumbnails
                         :file file}))))
 
+(declare preview?)
+(declare preview-frames)
+(declare preview-go)
+
 (defn bundle-fetched
+  "The view mode showing `bundle`, at the board of the route. In the
+  preview of the prototype, a board its page does not list (hidden in
+  view mode, not saved yet) is kept for a refresh to bring it (see
+  `preview-go`) and it starts where the view mode starts."
   [bundle]
   (ptk/reify ::bundle-fetched
     ptk/UpdateEvent
@@ -336,12 +344,16 @@
                   "fit" zoom-to-fit
                   "fill" zoom-to-fill
                   nil))
-         (rx/of
-          (update-page-position-data file-id page-id)
-          (cond
-            (some? frame-id) (go-to-frame frame-id)
-            (some? index) (go-to-frame-by-index index)
-            :else (go-to-frame-auto))))))))
+         (rx/of (update-page-position-data file-id page-id))
+         (cond
+           (and (some? frame-id)
+                (preview? state)
+                (not (some #(= frame-id (:id %)) (preview-frames state))))
+           (rx/of (preview-go frame-id) (go-to-frame-auto))
+
+           (some? frame-id) (rx/of (go-to-frame frame-id))
+           (some? index)    (rx/of (go-to-frame-by-index index))
+           :else            (rx/of (go-to-frame-auto))))))))
 
 ;; --- The preview of a prototype in the workspace
 

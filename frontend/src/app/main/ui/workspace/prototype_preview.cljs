@@ -114,6 +114,8 @@
         zoom       (deref zoom*)
         ;; the board of the selection the pin last asked for
         requested-ref (mf/use-ref frame-id)
+        ;; the board it asked for while the view mode could not hear it
+        unsent-ref (mf/use-ref nil)
         ;; whether the view mode in the frame listens (see `post!`)
         listening-ref (mf/use-ref false)
         [vw vh]    (cw/use-window-size)
@@ -183,6 +185,7 @@
                     (mf/deps follow? shown frame-id)
                     (fn []
                       (let [start (if follow? shown frame-id)]
+                        (mf/set-ref-val! unsent-ref nil)
                         (reset! start* start)
                         (reset! shown* start)
                         (swap! run* inc))))
@@ -236,48 +239,52 @@
     (mf/with-effect [frame-id]
       (reset! shown* frame-id)
       (reset! start* frame-id)
-      (mf/set-ref-val! requested-ref frame-id))
+      (mf/set-ref-val! requested-ref frame-id)
+      (mf/set-ref-val! unsent-ref nil))
 
-    ;; a new view mode in the frame listens once it says so
-    (mf/with-effect [uri]
+    ;; a new view mode in the frame listens once it says so: a new src,
+    ;; or the same one started again
+    (mf/with-effect [uri (deref run*)]
       (mf/set-ref-val! listening-ref false))
 
-    ;; pinned, it shows the board of the selection: on another page it
-    ;; starts again there; before the frame is there it starts there;
-    ;; while the view mode listens it goes there; while it loads, it goes
-    ;; there once it listens
+    ;; pinned, it shows the board of the selection (see `dwpp/pin-step`)
     (mf/with-effect [follow? ready? selected current page-id objects]
       (when follow?
-        (when-let [board-id (dwpp/start-frame-id objects selected)]
-          (when (not= board-id (mf/ref-val requested-ref))
+        (let [board-id (dwpp/start-frame-id objects selected)
+              step     (dwpp/pin-step {:board board-id
+                                       :requested (mf/ref-val requested-ref)
+                                       :current-page current
+                                       :page page-id
+                                       :ready? ready?
+                                       :listening? (mf/ref-val listening-ref)})]
+          (when (some? step)
             (mf/set-ref-val! requested-ref board-id)
-            (cond
-              (not= current page-id)
-              (st/emit! (dwpp/open-preview))
+            (case step
+              :open  (st/emit! (dwpp/open-preview))
+              :start (do (reset! start* board-id)
+                         (reset! shown* board-id))
+              :go    (do (mf/set-ref-val! unsent-ref nil)
+                         (post! (mf/ref-val iframe-ref) "penpot:preview-go" {:frameId (dm/str board-id)}))
+              :hold  (mf/set-ref-val! unsent-ref board-id))))))
 
-              (not ready?)
-              (do (reset! start* board-id)
-                  (reset! shown* board-id))
-
-              (mf/ref-val listening-ref)
-              (post! (mf/ref-val iframe-ref) "penpot:preview-go" {:frameId (dm/str board-id)}))))))
-
-    ;; what the view mode tells: it listens, the board it shows; Shift +
-    ;; Space in it closes it too
-    (mf/with-effect [follow? zoom start]
+    ;; what the view mode tells: it listens (it gets what was held for
+    ;; it, see `dwpp/ready-messages`), the board it shows; Shift + Space
+    ;; in it closes it too
+    (mf/with-effect [follow? zoom]
       (let [on-message
             (fn [^js event]
               (let [iframe (mf/ref-val iframe-ref)
                     data   (.-data event)]
                 (when (and (some? iframe)
-                           (identical? (.-source event) (.-contentWindow iframe)))
+                           (identical? (.-source event) (.-contentWindow iframe))
+                           (= (.-origin event) (.. js/window -location -origin)))
                   (case (some-> data (unchecked-get "type"))
                     "penpot:preview-ready"
-                    (let [requested (mf/ref-val requested-ref)]
+                    (let [unsent (mf/ref-val unsent-ref)]
                       (mf/set-ref-val! listening-ref true)
-                      (post! iframe "penpot:preview-zoom" {:mode zoom})
-                      (when (and follow? (some? requested) (not= requested start))
-                        (post! iframe "penpot:preview-go" {:frameId (dm/str requested)})))
+                      (mf/set-ref-val! unsent-ref nil)
+                      (doseq [[type data] (dwpp/ready-messages {:zoom zoom :unsent unsent :follow? follow?})]
+                        (post! iframe type data)))
 
                     "penpot:preview-shown"
                     (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))
