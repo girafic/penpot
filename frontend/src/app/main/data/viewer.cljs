@@ -455,6 +455,21 @@
           (rx/of (go-to-frame frame-id))
           (rx/empty))))))
 
+(defn preview-board
+  "The preview to the board before (`:prev`) or after (`:next`) the one
+  it shows, in the order the view mode lists them (see `preview-frames`),
+  as the arrows of its bar go: none before the first or after the last.
+  The screen it leaves goes to its history (see `preview-screen`)."
+  [direction]
+  (ptk/reify ::preview-board
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [current (some-> (rt/get-query-param (dm/get-in state [:route :query-params]) :index) parse-long)
+            target  (when (some? current) (if (= :prev direction) (dec current) (inc current)))]
+        (if (and (some? target) (< -1 target (count (preview-frames state))))
+          (rx/of (go-to-frame-by-index target))
+          (rx/empty))))))
+
 (defn preview-zoom
   "The zoom of the preview as the workspace sets it: the board fitted in
   it (\"fit\"), filling it (\"fill\") or at its own size (\"100\"); nil

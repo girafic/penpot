@@ -8,15 +8,18 @@
   "The preview of the prototype in a window over the workspace (Shift +
   Space, see `dwpp/toggle-preview`): the view mode of the page in a
   frame, once what is edited is saved, showing it again each time the
-  workspace saves; a bar on top that moves the window, with back,
-  forth and start again, the board it shows, a settings button, open in
-  the view mode and close, and the corners at its bottom that resize it.
-  The menu of the settings button holds the zoom (fit, fill or 100 %),
-  Follow the selection (it shows the board selected in the workspace)
-  and two sizes of the window. Where it is, as `{:x :y :w :h}` px of the
-  browser window, Follow and the zoom are kept for the next time. The view mode tells it once it listens
-  (`penpot:preview-ready`), what it asks before is sent then, and which
-  board it shows (`penpot:preview-shown`), which the bar names."
+  workspace saves. A bar on top moves the window, with the boards before
+  and after, start again, the play buttons of an animated board, the
+  board it shows, a settings button, open in the view mode and close;
+  the corners at its bottom resize it. The menu of the settings button
+  holds the zoom (fit, fill or 100 %), how the interactions show, Follow
+  the selection (it shows the board selected in the workspace) and two
+  sizes of the window. Where it is, as `{:x :y :w :h}` px of the browser
+  window, Follow, the zoom and the interactions are kept for the next
+  time; open in the view mode closes it. The view mode tells it once it listens
+  (`penpot:preview-ready`), what it asks before is sent then, which
+  board it shows and where among the boards (`penpot:preview-shown`),
+  and how its animation plays (`penpot:preview-playback`)."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
@@ -135,6 +138,10 @@
         ;; the board on screen, as the view mode tells it
         shown*     (mf/use-state frame-id)
         shown      (deref shown*)
+        ;; where it is among the boards the view mode lists,
+        ;; `{:index :count}`, for the arrows
+        place*     (mf/use-state nil)
+        {:keys [index] boards :count} (deref place*)
         board      (get objects shown)
         ;; the board the view mode in the frame starts at
         start*     (mf/use-state frame-id)
@@ -143,6 +150,9 @@
         follow?    (deref follow*)
         zoom*      (mf/use-state #(get storage/user ::zoom "fit"))
         zoom       (deref zoom*)
+        ;; how the view mode shows the interactions, as it does by default
+        interactions* (mf/use-state #(get storage/user ::interactions "show-on-click"))
+        interactions  (deref interactions*)
         menu*      (mf/use-state false)
         menu?      (deref menu*)
         ;; whether the board shown animates, plays, sounds and is muted,
@@ -195,11 +205,11 @@
            (reset! stored* nil)
            (swap! storage/user dissoc ::frame)))
 
-        on-back    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-back"))
+        on-prev    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-prev"))
+        on-next    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-next"))
         on-play    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-play"))
         on-stop    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-stop"))
         on-sound   (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-sound"))
-        on-forward (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-forward"))
         ;; pinned, at the board shown; else where it started
         on-restart (mf/use-fn
                     (mf/deps follow? shown frame-id)
@@ -235,6 +245,16 @@
            (reset! follow* (not follow?))
            (swap! storage/user assoc ::follow (not follow?))))
 
+        on-interactions
+        (mf/use-fn
+         (fn [event]
+           (let [mode (dom/get-data (dom/get-current-target event) "value")]
+             (when (contains? dwpp/interactions-modes mode)
+               (reset! menu* false)
+               (reset! interactions* mode)
+               (swap! storage/user assoc ::interactions mode)
+               (post! (mf/ref-val iframe-ref) "penpot:preview-interactions" {:mode mode})))))
+
         on-zoom
         (mf/use-fn
          (fn [event]
@@ -267,7 +287,9 @@
         on-open
         (mf/use-fn
          (mf/deps page-id shown)
-         #(st/emit! (dcm/go-to-viewer :page-id page-id :frame-id shown)))]
+         ;; there in a tab of its own, in place of this window
+         #(st/emit! (dcm/go-to-viewer :page-id page-id :frame-id shown)
+                    (dwpp/close-preview)))]
 
     ;; what is edited saved first, so it shows
     (mf/with-effect []
@@ -327,7 +349,7 @@
     ;; what the view mode tells: it listens (it gets what was held for
     ;; it, see `dwpp/ready-messages`), the board it shows; Shift + Space
     ;; in it closes it too
-    (mf/with-effect [follow? zoom]
+    (mf/with-effect [follow? zoom interactions]
       (let [on-message
             (fn [^js event]
               (let [iframe (mf/ref-val iframe-ref)
@@ -340,11 +362,14 @@
                     (let [unsent (mf/ref-val unsent-ref)]
                       (mf/set-ref-val! listening-ref true)
                       (mf/set-ref-val! unsent-ref nil)
-                      (doseq [[type data] (dwpp/ready-messages {:zoom zoom :unsent unsent :follow? follow?})]
+                      (doseq [[type data] (dwpp/ready-messages {:zoom zoom :interactions interactions
+                                                                :unsent unsent :follow? follow?})]
                         (post! iframe type data)))
 
                     "penpot:preview-shown"
-                    (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))
+                    (do (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))
+                        (reset! place* {:index (unchecked-get data "index")
+                                        :count (unchecked-get data "count")}))
 
                     "penpot:preview-playback"
                     (reset! playback* {:animated (true? (unchecked-get data "animated"))
@@ -381,13 +406,15 @@
              :on-pointer-down dom/stop-propagation
              :on-double-click dom/stop-propagation}
        [:> icon-button* {:variant "ghost"
-                         :aria-label (tr "workspace.preview.back")
+                         :aria-label (tr "workspace.preview.previous-board")
                          :icon "arrow-left"
-                         :on-click on-back}]
+                         :disabled (not (and (number? index) (pos? index)))
+                         :on-click on-prev}]
        [:> icon-button* {:variant "ghost"
-                         :aria-label (tr "workspace.preview.forward")
+                         :aria-label (tr "workspace.preview.next-board")
                          :icon "arrow-right"
-                         :on-click on-forward}]
+                         :disabled (not (and (number? index) (number? boards) (< index (dec boards))))
+                         :on-click on-next}]
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.preview.restart")
                          :icon "reload"
@@ -463,6 +490,23 @@
                             :radio true
                             :checked (= zoom "100")
                             :on-click on-zoom}]
+      [:li {:class (stl/css :menu-separator)
+            :role "separator"}]
+      [:> check-menu-item* {:label (tr "viewer.header.dont-show-interactions")
+                            :value "hide"
+                            :radio true
+                            :checked (= interactions "hide")
+                            :on-click on-interactions}]
+      [:> check-menu-item* {:label (tr "viewer.header.show-interactions")
+                            :value "show"
+                            :radio true
+                            :checked (= interactions "show")
+                            :on-click on-interactions}]
+      [:> check-menu-item* {:label (tr "viewer.header.show-interactions-on-click")
+                            :value "show-on-click"
+                            :radio true
+                            :checked (= interactions "show-on-click")
+                            :on-click on-interactions}]
       [:li {:class (stl/css :menu-separator)
             :role "separator"}]
       [:> check-menu-item* {:label (tr "workspace.preview.follow")

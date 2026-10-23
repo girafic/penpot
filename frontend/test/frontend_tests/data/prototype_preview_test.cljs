@@ -135,6 +135,17 @@
       (t/is (= [::dv/preview-go] (map ptk/type brought)))
       (t/is (empty? none) "waiting for none, nowhere"))))
 
+(t/deftest ^:async the-arrows-of-the-preview-go-to-the-board-before-and-after
+  (let [step (fn [direction index] (emits (dv/preview-board direction) (viewer-state index nil)))
+        to-b   (await (step :next 0))
+        past   (await (step :next 1))
+        to-a   (await (step :prev 1))
+        before (await (step :prev 0))]
+    (t/is (= [::dv/go-to-frame-by-index] (map ptk/type to-b)) "from A to B")
+    (t/is (empty? past) "nothing after the last")
+    (t/is (= [::dv/go-to-frame-by-index] (map ptk/type to-a)) "from B to A")
+    (t/is (empty? before) "nothing before the first")))
+
 (t/deftest ^:async the-preview-zooms-as-the-workspace-says
   (let [at     (fn [zoom-type] (assoc-in (viewer-state 0 nil) [:viewer-local :zoom-type] zoom-type))
         fitted (await (emits (dv/refit-preview) (at :fit)))
@@ -172,7 +183,14 @@
         "and the board held for it")
   (t/is (= [["penpot:preview-zoom" {:mode "fill"}]]
            (dwpp/ready-messages {:zoom "fill" :unsent board-b :follow? false}))
-        "not unpinned: a restart starts where it is"))
+        "not unpinned: a restart starts where it is")
+  (t/is (= [["penpot:preview-zoom" {:mode "fit"}]
+            ["penpot:preview-interactions" {:mode "hide"}]]
+           (dwpp/ready-messages {:zoom "fit" :interactions "hide"}))
+        "how it shows the interactions")
+  (t/is (= [["penpot:preview-zoom" {:mode "fit"}]]
+           (dwpp/ready-messages {:zoom "fit" :interactions "sometimes"}))
+        "not a mode the view mode does not know"))
 
 (t/deftest ^:async the-preview-starts-where-the-view-mode-starts-without-its-board
   (let [route   (fn [state frame-id] (assoc-in state [:route :query-params :frame-id] (str frame-id)))

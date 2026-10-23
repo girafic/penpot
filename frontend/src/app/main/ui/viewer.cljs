@@ -618,16 +618,21 @@
     ;; As the preview of the prototype in the workspace (see
     ;; `app.main.ui.workspace.prototype-preview`): the board fitted in its
     ;; window as it resizes, the screens in a history of their own, and
-    ;; what the workspace asks of it (to show what it saved, to go back
-    ;; or forth, to the board selected, a zoom); it tells the workspace
+    ;; what the workspace asks of it (to show what it saved, to go to the
+    ;; board before or after, to the board selected, a zoom, how the
+    ;; interactions show); it tells the workspace
     ;; once it listens and which board it shows. Shift + Space in it
     ;; closes it, as in the workspace.
-    (mf/with-effect [preview index (:id frame)]
+    (mf/with-effect [preview index (:id frame) (count frames)]
       (when (and preview (some? index))
         (st/emit! (dv/preview-screen index))
         (when (some? frame)
+          ;; where it is among the boards, for the arrows of the bar
           (.postMessage (.-parent js/window)
-                        #js {:type "penpot:preview-shown" :frameId (dm/str (:id frame))}
+                        #js {:type "penpot:preview-shown"
+                             :frameId (dm/str (:id frame))
+                             :index index
+                             :count (count frames)}
                         (.. js/window -location -origin)))))
 
     ;; the bar of the preview plays, pauses and stops the animation of the
@@ -681,8 +686,8 @@
                   (let [data (.-data event)]
                     (case (some-> data (unchecked-get "type"))
                       "penpot:preview-refresh" (st/emit! (dv/refresh-bundle))
-                      "penpot:preview-back"    (st/emit! (dv/preview-step :back))
-                      "penpot:preview-forward" (st/emit! (dv/preview-step :forward))
+                      "penpot:preview-prev"    (st/emit! (dv/preview-board :prev))
+                      "penpot:preview-next"    (st/emit! (dv/preview-board :next))
                       ;; the board selected in the workspace
                       "penpot:preview-go"      (some->> (unchecked-get data "frameId")
                                                         (uuid/parse*)
@@ -690,6 +695,10 @@
                                                         (st/emit!))
                       "penpot:preview-zoom"    (some-> (dv/preview-zoom (unchecked-get data "mode"))
                                                        (st/emit!))
+                      "penpot:preview-interactions"
+                      (let [mode (keyword (unchecked-get data "mode"))]
+                        (when (contains? dv/valid-interaction-modes mode)
+                          (st/emit! (dv/set-interactions-mode mode))))
                       nil))))
 
               on-key-down

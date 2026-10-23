@@ -9459,11 +9459,11 @@ msgstr "Drag to move, double-click to fit it to the board again"
 msgid "workspace.preview.resize"
 msgstr "Drag to resize"
 
-msgid "workspace.preview.back"
-msgstr "Back"
+msgid "workspace.preview.previous-board"
+msgstr "Previous board"
 
-msgid "workspace.preview.forward"
-msgstr "Forward"
+msgid "workspace.preview.next-board"
+msgstr "Next board"
 
 msgid "workspace.preview.restart"
 msgstr "Restart"

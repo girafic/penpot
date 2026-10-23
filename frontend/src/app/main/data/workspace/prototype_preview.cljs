@@ -69,12 +69,21 @@
     listening?                            :go
     :else                                 :hold))
 
+(def interactions-modes
+  "How the view mode of the preview shows the interactions of the
+  prototype, as its settings pick it (see `dv/set-interactions-mode`)."
+  #{"hide" "show" "show-on-click"})
+
 (defn ready-messages
   "What the preview tells a view mode that says it listens, as
-  `[[type data] ...]`: its `zoom`, and, while pinned (`follow?`), to go
-  to the board `unsent` the pin held for it (see `pin-step`)."
-  [{:keys [zoom unsent follow?]}]
+  `[[type data] ...]`: its `zoom`, how it shows the `interactions`, and,
+  while pinned (`follow?`), to go to the board `unsent` the pin held for
+  it (see `pin-step`)."
+  [{:keys [zoom interactions unsent follow?]}]
   (cond-> [["penpot:preview-zoom" {:mode zoom}]]
+    (contains? interactions-modes interactions)
+    (conj ["penpot:preview-interactions" {:mode interactions}])
+
     (and follow? (some? unsent))
     (conj ["penpot:preview-go" {:frameId (dm/str unsent)}])))
 
