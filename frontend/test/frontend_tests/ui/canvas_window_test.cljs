@@ -94,3 +94,32 @@
         (render! frame)
         (drag! window (.querySelector document "[data-mode=move]") [1100 605] [1080 600])
         (t/is (= [[(cw/moved frame -20 -5) false]] @commits) "a drag that goes somewhere kept")))))
+
+(mf/defc dragged*
+  "A window that shows where it is dragged, as the preview of the
+  prototype does: each step of a drag renders it again."
+  {::mf/private true}
+  [{:keys [frame on-commit]}]
+  (let [shown*  (mf/use-state nil)
+        on-drag (mf/use-fn #(reset! shown* %))
+        {:keys [on-down on-move on-up]} (cw/use-frame-drag (or (deref shown*) frame) on-drag on-commit)]
+    [:div {:data-mode "move"
+           :on-pointer-down on-down
+           :on-pointer-move on-move
+           :on-lost-pointer-capture on-up}]))
+
+(t/deftest a-window-shown-where-it-is-dragged-stays-where-it-is-let-go
+  ;; a handler kept from an earlier render reads the state of that render:
+  ;; where the drag went comes from the drag itself (the preview window
+  ;; went back where it was, 2026-10-23)
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (unchecked-set (.. window -HTMLElement -prototype) "setPointerCapture" (fn [_]))
+      (let [commits (atom [])
+            render! #(thd/render! root (mf/element dragged* #js {:frame frame
+                                                                 :onCommit (fn [f resized?] (swap! commits conj [f resized?]))}))]
+        (render!)
+        (drag! window (.querySelector document "[data-mode=move]") [1100 605] [1080 600])
+        (t/is (= [[(cw/moved frame -20 -5) false]] @commits) "where it went")
+        (drag! window (.querySelector document "[data-mode=move]") [1100 605] [1100 605])
+        (t/is (= 1 (count @commits)) "a click keeps nothing")))))

@@ -174,7 +174,6 @@
                                        (deref stored*)
                                        (start-frame vw vh (:width board 16) (:height board 9)))
                                    vw vh)
-        drag-ref   (mf/use-ref nil)
         iframe-ref (mf/use-ref nil)
         ;; the view mode loads once what is edited is saved
         ready*     (mf/use-state false)
@@ -185,45 +184,20 @@
         uri        (mf/with-memo [file-id page-id start (deref run*)]
                      (preview-uri file-id page-id start zoom))
 
-        on-down
-        (mf/use-fn
-         (mf/deps frame)
-         (fn [event]
-           (let [target (dom/get-current-target event)]
-             (dom/stop-propagation event)
-             (dom/prevent-default event)
-             (.setPointerCapture target (.-pointerId event))
-             (mf/set-ref-val! drag-ref {:mode (keyword (dom/get-data target "mode"))
-                                        :frame frame
-                                        :last frame
-                                        :x (.-clientX event)
-                                        :y (.-clientY event)}))))
+        ;; it shows where it is dragged, and stays where it is let go
+        on-drag
+        (mf/use-fn #(reset! drag-frame* %))
 
-        on-move
-        (mf/use-fn
-         (fn [event]
-           (when-let [{:keys [mode frame x y] :as drag} (mf/ref-val drag-ref)]
-             (let [dx    (- (.-clientX event) x)
-                   dy    (- (.-clientY event) y)
-                   frame (if (= mode :move)
-                           (cw/moved frame dx dy)
-                           (cw/resized frame mode dx dy))]
-               ;; where it went, for letting go: the state read by a
-               ;; handler kept from an earlier render is the old one
-               (mf/set-ref-val! drag-ref (assoc drag :last frame))
-               (reset! drag-frame* frame)))))
-
-        on-up
+        on-drop
         (mf/use-fn
          (mf/deps vw vh)
-         (fn [_]
-           (when-let [drag (mf/ref-val drag-ref)]
-             (mf/set-ref-val! drag-ref nil)
-             (when-let [[frame] (cw/drag-commit drag)]
-               (let [frame (cw/clamp-frame frame vw vh)]
-                 (reset! stored* frame)
-                 (swap! storage/user assoc ::frame frame)))
+         (fn [frame _]
+           (let [frame (cw/clamp-frame frame vw vh)]
+             (reset! stored* frame)
+             (swap! storage/user assoc ::frame frame)
              (reset! drag-frame* nil))))
+
+        {:keys [on-down on-move on-up]} (cw/use-frame-drag frame on-drag on-drop)
 
         ;; a double click on the bar puts it back where it starts, as
         ;; large as the board then fits

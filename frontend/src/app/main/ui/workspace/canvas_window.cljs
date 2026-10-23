@@ -117,21 +117,16 @@
         #(events/unlistenByKey key)))
     (deref size*)))
 
-(def ^:private corners
-  "Each corner that resizes the window, with its classes."
-  [["top-left" (stl/css :corner :top-left)]
-   ["top-right" (stl/css :corner :top-right)]
-   ["bottom-left" (stl/css :corner :bottom-left)]
-   ["bottom-right" (stl/css :corner :bottom-right)]])
-
-(mf/defc canvas-window*
-  "The window at `frame` the canvas shows in (see `canvas-box`): its
-  border, the bar on top that moves it (a double click puts it back
-  where it starts), with a button that hides it, and its corners that
-  resize it: `on-change` with the frame as they drag (nil once they let
-  go where they started), `on-commit` with it once they let go, and
-  whether its size changed."
-  [{:keys [frame on-change on-commit]}]
+(defn use-frame-drag
+  "The pointer handlers `{:on-down :on-move :on-up}` that drag a window at
+  `frame` by its bar or a corner, the `data-mode` of the element they are
+  on (`move`, `top-left`, ...; see `moved` and `resized`): `on-change`
+  with the frame as it drags (nil once it is let go where it started),
+  `on-commit` with it once it is let go, and whether its size changed
+  (see `drag-commit`). What the drag went to stays in a ref, not in
+  state: a handler kept from an earlier render reads the state of that
+  render."
+  [frame on-change on-commit]
   (let [drag-ref (mf/use-ref nil)
 
         on-down
@@ -161,14 +156,32 @@
 
         on-up
         (mf/use-fn
-         (mf/deps on-commit)
+         (mf/deps on-change on-commit)
          (fn [_]
            (when-let [drag (mf/ref-val drag-ref)]
              (mf/set-ref-val! drag-ref nil)
              (if-let [[frame resized?] (drag-commit drag)]
                (on-commit frame resized?)
                ;; nothing changed: not even where it showed while dragged
-               (on-change nil)))))
+               (on-change nil)))))]
+    {:on-down on-down :on-move on-move :on-up on-up}))
+
+(def ^:private corners
+  "Each corner that resizes the window, with its classes."
+  [["top-left" (stl/css :corner :top-left)]
+   ["top-right" (stl/css :corner :top-right)]
+   ["bottom-left" (stl/css :corner :bottom-left)]
+   ["bottom-right" (stl/css :corner :bottom-right)]])
+
+(mf/defc canvas-window*
+  "The window at `frame` the canvas shows in (see `canvas-box`): its
+  border, the bar on top that moves it (a double click puts it back
+  where it starts), with a button that hides it, and its corners that
+  resize it: `on-change` with the frame as they drag (nil once they let
+  go where they started), `on-commit` with it once they let go, and
+  whether its size changed."
+  [{:keys [frame on-change on-commit]}]
+  (let [{:keys [on-down on-move on-up]} (use-frame-drag frame on-change on-commit)
 
         on-reset
         (mf/use-fn
