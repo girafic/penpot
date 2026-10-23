@@ -1,0 +1,59 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_sizes.scss" as *;
+@use "ds/_borders.scss" as *;
+@use "ds/typography.scss" as t;
+
+// A row of a menu: its tick, an icon, its label and the keys of its
+// shortcut. The keyboard reaches it as the pointer does.
+.item {
+  @include t.use-typography("body-small");
+
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+  block-size: $sz-32;
+  padding-inline: var(--sp-s);
+  border-radius: $br-6;
+  color: var(--color-foreground-primary);
+  cursor: pointer;
+  outline: none;
+
+  &:hover,
+  &:focus-visible {
+    background-color: var(--color-background-quaternary);
+  }
+}
+
+.check,
+.icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  inline-size: $sz-16;
+}
+
+.icon {
+  color: var(--color-foreground-secondary);
+}
+
+.label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.shortcut {
+  @extend %shortcut-base;
+
+  margin-inline-start: auto;
+}
+
+.key {
+  @extend %shortcut-key-base;
+}

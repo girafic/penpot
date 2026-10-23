@@ -18,7 +18,9 @@
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.refs :as refs]
    [app.main.store :as st]
+   [app.main.ui.components.check-menu-item :refer [check-menu-item*]]
    [app.main.ui.components.dropdown :refer [dropdown]]
+   [app.main.ui.components.dropdown-menu :refer [dropdown-menu*]]
    [app.main.ui.context :as ctx]
    [app.main.ui.dashboard.team]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
@@ -29,6 +31,7 @@
    [app.main.ui.workspace.presence :refer [active-sessions*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.keyboard :as kbd]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -112,30 +115,13 @@
 
 ;; --- Play Button
 
-(mf/defc play-option*
-  {::mf/private true}
-  [{:keys [mode label shortcut selected on-pick]}]
-  [:li {:class (stl/css :play-option)
-        :role "menuitemradio"
-        :aria-checked selected
-        :data-mode (name mode)
-        :on-click on-pick}
-   [:span {:class (stl/css :play-option-check)}
-    (when ^boolean selected
-      [:> icon* {:icon-id i/tick :size "s"}])]
-   [:span {:class (stl/css :play-option-label)} label]
-   [:span {:class (stl/css :shortcuts)}
-    (for [sc (scd/split-sc shortcut)]
-      [:span {:class (stl/css :shortcut-key)
-              :key (str (name mode) "-" sc)} sc])]])
-
 (mf/defc play-button*
   "The play button of the header and the menu of its arrow: it opens the
   view mode or the preview of the prototype, as picked last in the menu
   (see `dwpp/play-mode`)."
   {::mf/private true}
   [{:keys [on-view-mode]}]
-  (let [mode*            (mf/use-state (dwpp/play-mode))
+  (let [mode*            (mf/use-state #(dwpp/play-mode))
         mode             (deref mode*)
         preview?         (= mode :preview)
 
@@ -152,6 +138,14 @@
            (if ^boolean preview?
              (st/emit! (dwpp/toggle-preview))
              (on-view-mode))))
+
+        ;; Enter opens the menu, as on any button: the workspace takes it
+        ;; for its own shortcut else
+        keep-enter
+        (mf/use-fn
+         (fn [event]
+           (when (kbd/enter? event)
+             (dom/stop-propagation event))))
 
         toggle-menu
         (mf/use-fn
@@ -170,7 +164,7 @@
          (mf/deps on-view-mode)
          (fn [event]
            (let [mode (-> (dom/get-current-target event)
-                          (dom/get-data "mode")
+                          (dom/get-data "value")
                           (keyword))]
              (dom/stop-propagation event)
              (reset! open* false)
@@ -193,21 +187,24 @@
                :aria-label (tr "workspace.header.play-options")
                :aria-haspopup "menu"
                :aria-expanded open?
+               :on-key-down keep-enter
                :on-click toggle-menu}
       [:> icon* {:icon-id i/arrow-down :size "s"}]]
-     [:& dropdown {:show open? :on-close close-menu}
-      [:ul {:class (stl/css :play-dropdown)
-            :role "menu"}
-       [:> play-option* {:mode :view-mode
-                         :label (tr "workspace.header.play.view-mode")
-                         :shortcut (get-tt :open-viewer)
-                         :selected (not preview?)
-                         :on-pick on-pick}]
-       [:> play-option* {:mode :preview
-                         :label (tr "workspace.header.play.preview")
-                         :shortcut (get-tt :toggle-prototype-preview)
-                         :selected preview?
-                         :on-pick on-pick}]]]]))
+     [:> dropdown-menu* {:show open?
+                         :on-close close-menu
+                         :class (stl/css :play-dropdown)}
+      [:> check-menu-item* {:label (tr "workspace.header.play.view-mode")
+                            :value "view-mode"
+                            :shortcut (get-tt :open-viewer)
+                            :radio true
+                            :checked (not preview?)
+                            :on-click on-pick}]
+      [:> check-menu-item* {:label (tr "workspace.header.play.preview")
+                            :value "preview"
+                            :shortcut (get-tt :toggle-prototype-preview)
+                            :radio true
+                            :checked preview?
+                            :on-click on-pick}]]]))
 
 ;; --- Header Component
 

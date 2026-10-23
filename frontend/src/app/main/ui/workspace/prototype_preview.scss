@@ -26,8 +26,8 @@
 }
 
 // The bar that moves the window: back, forth and start again at its
-// left, the board it started from, open in the view mode and close at
-// its right.
+// left, the board it shows, and its settings, open in the view mode and
+// close at its right.
 .bar {
   display: flex;
   flex: none;
@@ -59,9 +59,9 @@
   color: var(--color-accent-primary);
 }
 
-// The menu of the settings button: the zoom, the pin and the size of the
-// window. Fixed under the bar, its top and right come inline, so that the
-// window does not clip it.
+// The menu of the settings button: the zoom, Follow the selection and the
+// size of the window (its rows, see `check-menu-item*`). Fixed under the
+// bar, its top and right come inline, so that the window does not clip it.
 .menu {
   position: fixed;
   z-index: 1;
@@ -75,41 +75,6 @@
   background-color: var(--color-background-tertiary);
   box-shadow: var(--el-shadow-dark);
   list-style: none;
-}
-
-.menu-item {
-  @include t.use-typography("body-small");
-
-  display: flex;
-  align-items: center;
-  gap: var(--sp-s);
-  block-size: $sz-32;
-  padding-inline: var(--sp-s);
-  border-radius: $br-6;
-  color: var(--color-foreground-primary);
-  cursor: pointer;
-
-  &:hover {
-    background-color: var(--color-background-quaternary);
-  }
-}
-
-.menu-check,
-.menu-icon {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  inline-size: $sz-16;
-}
-
-.menu-icon {
-  color: var(--color-foreground-secondary);
-}
-
-.menu-label {
-  flex: 1;
-  white-space: nowrap;
 }
 
 .menu-separator {

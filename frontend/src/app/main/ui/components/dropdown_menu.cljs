@@ -19,10 +19,12 @@
   (:import goog.events.EventType))
 
 (mf/defc dropdown-menu-item*
-  [{:keys [can-focus] :rest props}]
+  "An entry of `dropdown-menu*`: a `menuitem`, or the `role` given, as
+  `menuitemradio` or `menuitemcheckbox` for one that is ticked."
+  [{:keys [can-focus role] :rest props}]
   (let [can-focus (d/nilv can-focus true)
         tab-index (if can-focus "0" "-1")
-        props     (mf/spread-props props {:role "menuitem" :tab-index tab-index})]
+        props     (mf/spread-props props {:role (d/nilv role "menuitem") :tab-index tab-index})]
     [:> :li props]))
 
 (mf/defc internal-dropdown-menu*
@@ -55,7 +57,7 @@
         on-key-down
         (fn [event]
           (when-let [container (mf/ref-val container)]
-            (let [entries (vec (dom/query-all container "[role=menuitem]"))]
+            (let [entries (vec (dom/query-all container "[role^=menuitem]"))]
 
               (cond
                 (kbd/up-arrow? event)

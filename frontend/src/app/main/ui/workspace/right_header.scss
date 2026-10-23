@@ -261,7 +261,8 @@
 }
 
 // The play button with the arrow of its menu, which picks what the button
-// opens: the view mode or the preview of the prototype.
+// opens: the view mode or the preview of the prototype (its rows, see
+// `check-menu-item*`).
 .play-section {
   position: relative;
   display: flex;
@@ -274,7 +275,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  inline-size: $sz-16;
+  inline-size: $sz-24;
   block-size: $sz-28;
   margin: 0;
   padding: 0;
@@ -299,40 +300,4 @@
   inset-block-start: calc(100% + var(--sp-s));
   inset-inline-end: 0;
   inline-size: $sz-224;
-}
-
-.play-option {
-  @extend %menu-item-base;
-
-  justify-content: flex-start;
-  gap: var(--sp-s);
-
-  .shortcuts {
-    @extend %shortcut-base;
-
-    margin-inline-start: auto;
-
-    .shortcut-key {
-      @extend %shortcut-key-base;
-    }
-  }
-
-  &:hover {
-    color: var(--menu-foreground-color-hover);
-
-    .shortcuts {
-      .shortcut-key {
-        color: var(--menu-foreground-color-hover);
-      }
-    }
-  }
-}
-
-.play-option-check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  inline-size: $sz-16;
-  color: var(--menu-foreground-color-hover);
 }

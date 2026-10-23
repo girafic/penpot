@@ -137,6 +137,7 @@
    [frontend-tests.tokens.workspace-tokens-remap-test]
    [frontend-tests.ui.board-play-test]
    [frontend-tests.ui.canvas-window-test]
+   [frontend-tests.ui.check-menu-item-test]
    [frontend-tests.ui.check-updates-test]
    [frontend-tests.ui.color-token-position-test]
    [frontend-tests.ui.colorpicker-token-set-order-test]
@@ -339,6 +340,7 @@
    'frontend-tests.tokens.workspace-tokens-remap-test
    'frontend-tests.ui.board-play-test
    'frontend-tests.ui.canvas-window-test
+   'frontend-tests.ui.check-menu-item-test
    'frontend-tests.ui.check-updates-test
    'frontend-tests.ui.color-token-position-test
    'frontend-tests.ui.colorpicker-token-set-order-test
