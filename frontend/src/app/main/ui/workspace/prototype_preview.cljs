@@ -195,28 +195,34 @@
              (.setPointerCapture target (.-pointerId event))
              (mf/set-ref-val! drag-ref {:mode (keyword (dom/get-data target "mode"))
                                         :frame frame
+                                        :last frame
                                         :x (.-clientX event)
                                         :y (.-clientY event)}))))
 
         on-move
         (mf/use-fn
          (fn [event]
-           (when-let [{:keys [mode frame x y]} (mf/ref-val drag-ref)]
-             (let [dx (- (.-clientX event) x)
-                   dy (- (.-clientY event) y)]
-               (reset! drag-frame* (if (= mode :move)
-                                     (cw/moved frame dx dy)
-                                     (cw/resized frame mode dx dy)))))))
+           (when-let [{:keys [mode frame x y] :as drag} (mf/ref-val drag-ref)]
+             (let [dx    (- (.-clientX event) x)
+                   dy    (- (.-clientY event) y)
+                   frame (if (= mode :move)
+                           (cw/moved frame dx dy)
+                           (cw/resized frame mode dx dy))]
+               ;; where it went, for letting go: the state read by a
+               ;; handler kept from an earlier render is the old one
+               (mf/set-ref-val! drag-ref (assoc drag :last frame))
+               (reset! drag-frame* frame)))))
 
         on-up
         (mf/use-fn
          (mf/deps vw vh)
          (fn [_]
-           (when (some? (mf/ref-val drag-ref))
+           (when-let [drag (mf/ref-val drag-ref)]
              (mf/set-ref-val! drag-ref nil)
-             (when-let [frame (some-> (deref drag-frame*) (cw/clamp-frame vw vh))]
-               (reset! stored* frame)
-               (swap! storage/user assoc ::frame frame))
+             (when-let [[frame] (cw/drag-commit drag)]
+               (let [frame (cw/clamp-frame frame vw vh)]
+                 (reset! stored* frame)
+                 (swap! storage/user assoc ::frame frame)))
              (reset! drag-frame* nil))))
 
         ;; a double click on the bar puts it back where it starts, as
