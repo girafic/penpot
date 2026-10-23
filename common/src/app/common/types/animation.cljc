@@ -1182,9 +1182,7 @@
   [track]
   (let [progress? #(= :path-progress (:property %))]
     (if (or (some? (:path-follow track)) (some progress? (:keyframes track)))
-      (reduce (fn [track flag]
-                (let [kept (disj (get track flag #{}) :path-progress)]
-                  (if (empty? kept) (dissoc track flag) (assoc track flag kept))))
+      (reduce #(update-slot-flag %1 %2 disj :path-progress)
               (-> (dissoc track :path-follow)
                   (update :keyframes (partial filterv (complement progress?))))
               slot-flags)
@@ -1296,13 +1294,21 @@
     (-> (ensure-track timeline shape-id)
         (assoc-in [:tracks shape-id :links] (if (some? at) (assoc links at stored) (conj links stored))))))
 
+(defn- links-without
+  "`track` without its links (see `schema:link`) of the properties
+  `drop?` is true of, and without `:links` when none is left."
+  [track drop?]
+  (if (seq (:links track))
+    (let [links (filterv #(not (drop? (:property %))) (:links track))]
+      (if (seq links) (assoc track :links links) (dissoc track :links)))
+    track))
+
 (defn remove-link
   "`timeline` without the link of `property` of `shape-id` (see
   `set-link`)."
   [timeline shape-id property]
   (if-let [track (get-track timeline shape-id)]
-    (let [links (filterv #(not= property (:property %)) (:links track))]
-      (store-track timeline shape-id (if (seq links) (assoc track :links links) (dissoc track :links))))
+    (store-track timeline shape-id (links-without track #{property}))
     timeline))
 
 (def ^:private path-follow-defaults
@@ -1325,10 +1331,7 @@
   "`track` without its links on x and y (see `schema:link`), which set a
   place, as a layer riding a path takes its own from the path."
   [track]
-  (if-let [links (seq (:links track))]
-    (let [links (filterv #(not (contains? #{:x :y} (:property %))) links)]
-      (if (seq links) (assoc track :links links) (dissoc track :links)))
-    track))
+  (links-without track #{:x :y}))
 
 (defn set-path-follow
   "`timeline` with `shape-id` riding the outline of the shape `:path` of
@@ -1385,21 +1388,27 @@
   [track]
   (d/update-when track :wiggles (partial mapv #(assoc % :seed (random-seed)))))
 
+(defn stored-wiggle
+  "`wiggle` as a timeline stores it (see `schema:wiggle`): its own keys,
+  the octaves and times whole, the defaults and absent values left out;
+  its seed as given (see `set-wiggle`)."
+  [wiggle]
+  (->> (-> (select-keys wiggle [:property :frequency :amplitude :seed :octaves :start :end :fade])
+           (d/update-when :octaves mth/round)
+           (d/update-when :start mth/round)
+           (d/update-when :end mth/round)
+           (d/update-when :fade mth/round))
+       (remove (fn [[k v]] (or (nil? v) (= v (get wiggle-defaults k ::none)))))
+       (into {})))
+
 (defn set-wiggle
   "`timeline` with `property` of `shape-id` shaking as `wiggle` says (see
   `schema:wiggle`), in place of the wiggle it had, or of the one of
-  `replaced` (another property it shakes now instead): a new seed
-  without one, the times in whole ms, the defaults left out."
+  `replaced` (another property it shakes now instead): stored as
+  `stored-wiggle` gives it, with a new seed without one."
   [timeline shape-id {:keys [property] :as wiggle} & {:keys [replaced]}]
-  (let [round   mth/round
-        wiggle  (-> (select-keys wiggle [:property :frequency :amplitude :seed :octaves :start :end :fade])
-                    (d/update-when :octaves round)
-                    (d/update-when :start round)
-                    (d/update-when :end round)
-                    (d/update-when :fade round))
-        wiggle  (cond-> wiggle
-                  (nil? (:seed wiggle)) (assoc :seed (random-seed)))
-        stored  (into {} (remove (fn [[k v]] (or (nil? v) (= v (get wiggle-defaults k ::none))))) wiggle)
+  (let [stored  (stored-wiggle (cond-> wiggle
+                                 (nil? (:seed wiggle)) (assoc :seed (random-seed))))
         wiggles (dm/get-in timeline [:tracks shape-id :wiggles] [])
         at      (d/index-of-pred wiggles #(= (or replaced property) (:property %)))
         wiggles (cond-> wiggles

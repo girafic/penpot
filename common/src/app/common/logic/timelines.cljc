@@ -110,9 +110,9 @@
 
 (defn- moved-track
   "`track` for `shape-id`, its positions moved by `delta`. A copy gets
-  new keyframe and animation ids, and shakes its own way (see
-  `cta/reseed-wiggles`)."
-  [track shape-id {dx :x dy :y} copy?]
+  new keyframe and animation ids, and, with `reseed?`, shakes its own
+  way (see `cta/reseed-wiggles`)."
+  [track shape-id {dx :x dy :y} copy? & {:keys [reseed?]}]
   (let [new-id #(cond-> % copy? (assoc :id (uuid/next)))]
     (-> track
         (assoc :shape-id shape-id)
@@ -122,7 +122,7 @@
                                   (= :x (:property keyframe)) (update :value + dx)
                                   (= :y (:property keyframe)) (update :value + dy)))))
         (d/update-when :animations (partial mapv new-id))
-        (cond-> copy? (cta/reseed-wiggles)))))
+        (cond-> reseed? (cta/reseed-wiggles)))))
 
 (defn- placed-to-follow?
   "Whether the layer `id` of `objects` is where it can follow the layer
@@ -390,9 +390,14 @@
                (if (nil? new-board)
                  timelines
                  (add-track timelines new-board
+                            ;; beside its original, still on the page, a
+                            ;; copy shakes its own way; pasted after a cut,
+                            ;; or elsewhere, as it did (`objects` also
+                            ;; hold the shapes of a paste, by their old ids)
                             (-> (moved-track track new-id
                                              (offset at (in-board objects new-id new-board))
-                                             true)
+                                             true
+                                             :reseed? (contains? (:objects page) old-id))
                                 (copied-follow ids-map objects new-board))
                             (settings-of new-board board)))))
            (:timelines page)

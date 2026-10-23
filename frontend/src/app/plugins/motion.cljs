@@ -2070,6 +2070,12 @@
                 end       (prop "end")
                 fade      (prop "fade")
                 seed      (prop "seed")
+                ;; the wiggle to set, but its seed
+                fields    (cond-> {:property property :frequency frequency :amplitude amplitude}
+                            (some? octaves) (assoc :octaves octaves)
+                            (some? start)   (assoc :start start)
+                            (some? end)     (assoc :end end)
+                            (some? fade)    (assoc :fade fade))
                 whole?    #(and (sm/valid-safe-number? %) (== % (mth/round %)))
                 names     (str/join ", " (map #(dm/str "'" (get wiggle-names %) "'") cta/wiggle-properties))
                 error     (cond
@@ -2108,12 +2114,7 @@
 
                             ;; as the timeline stores it, whatever the checks
                             ;; above leave
-                            (not (cta/valid-wiggle? (cond-> {:property property :frequency frequency
-                                                             :amplitude amplitude :seed (or seed 1)}
-                                                      (some? octaves) (assoc :octaves octaves)
-                                                      (some? start)   (assoc :start (mth/round start))
-                                                      (some? end)     (assoc :end (mth/round end))
-                                                      (some? fade)    (assoc :fade (mth/round fade)))))
+                            (not (cta/valid-wiggle? (cta/stored-wiggle (assoc fields :seed (or seed 1)))))
                             "The wiggle is not one a timeline can hold")]
             (if (some? error)
               (u/not-valid plugin-id :wiggle error)
@@ -2121,13 +2122,7 @@
                       (fn [timeline]
                         ;; shaking as it did, unless told another seed
                         (let [seed (or seed (:seed (cta/wiggle-of timeline shape-id property)))]
-                          (cta/set-wiggle timeline shape-id
-                                          (cond-> {:property property :frequency frequency :amplitude amplitude}
-                                            (some? seed)    (assoc :seed seed)
-                                            (some? octaves) (assoc :octaves octaves)
-                                            (some? start)   (assoc :start start)
-                                            (some? end)     (assoc :end end)
-                                            (some? fade)    (assoc :fade fade))))))))))
+                          (cta/set-wiggle timeline shape-id (cond-> fields (some? seed) (assoc :seed seed))))))))))
 
       :unwiggle
       (fn [shape property]

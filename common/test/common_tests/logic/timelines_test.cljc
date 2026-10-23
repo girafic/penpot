@@ -1636,7 +1636,22 @@
             ids     (copy-of changes)
             tl      (get (timelines (thf/apply-changes file changes)) (get ids a))]
         (t/is (not= 42 (:seed (cta/wiggle-of tl (get ids rect) :rotation))))
-        (t/is (cta/valid-timeline? tl))))))
+        (t/is (cta/valid-timeline? tl))))
+    (t/testing "pasted after a cut, its original gone: as it did"
+      ;; a cut copies and deletes: its animation is read before
+      (let [sources (cltl/animation-sources page (:objects page) #{rect})
+            cut     (delete file :rect)
+            after   (thf/current-page cut)
+            copy-id (uuid/next)
+            ;; a paste works on the page with the shapes of the
+            ;; clipboard, under their old ids
+            changes (-> (pcb/empty-changes nil)
+                        (pcb/with-page after)
+                        (pcb/with-objects (assoc (:objects after) rect (get (:objects page) rect)))
+                        (pcb/add-object (assoc (get (:objects page) rect) :id copy-id)))
+            changes (cltl/generate-copy-timelines changes after {rect copy-id} sources)
+            pasted  (cta/wiggle-of (get (timelines (thf/apply-changes cut changes)) a) copy-id :rotation)]
+        (t/is (= 42 (:seed pasted)))))))
 
 (defn- reaching-board-file
   "`animated-file` with an arm in board A (an upper arm, a forearm
@@ -1721,13 +1736,17 @@
 
 (defn- riding-component-file
   "`following-component-file` whose dot rides the rect of the main in
-  place of following it."
+  place of following it, its progress keyframed and looping."
   []
   (let [file (following-component-file :main-still)
         main (thi/id :main)
+        dot  (thi/id :main-dot)
         tl   (-> (get (timelines file) main)
-                 (cta/set-follow (thi/id :main-dot) nil)
-                 (cta/set-path-follow (thi/id :main-dot) {:path (thi/id :main-rect) :orient true}))]
+                 (cta/set-follow dot nil)
+                 (cta/set-path-follow dot {:path (thi/id :main-rect) :orient true})
+                 (cta/add-keyframe dot {:time 0 :property :path-progress :value 0})
+                 (cta/add-keyframe dot {:time 1000 :property :path-progress :value 1})
+                 (cta/toggle-slot-flag dot :loops :path-progress))]
     (thf/apply-changes file (-> (pcb/empty-changes nil)
                                 (pcb/with-page (thf/current-page file))
                                 (pcb/set-timeline main tl)))))
@@ -1738,6 +1757,19 @@
     (t/is (= {:path (copy-of objects copy :main-rect) :orient true}
              (get-in tl [:tracks (copy-of objects copy :main-dot) :path-follow]))
           "the rect of the copy, not of the main")))
+
+(t/deftest a-copy-of-a-component-without-its-path-rides-none
+  (let [{:keys [objects board copy main-page]} (component-scene (riding-component-file))
+        rect    (copy-of objects copy :main-rect)
+        dot     (copy-of objects copy :main-dot)
+        ;; the rect of the copy gone, as when it is swapped
+        objects (-> (dissoc objects rect)
+                    (update-in [copy :shapes] (partial filterv #(not= rect %))))
+        tl      (get (cltl/instance-timelines objects board nil main-page) [:copy copy (thi/id :main)])
+        track   (get-in tl [:tracks dot])]
+    (t/is (nil? (:path-follow track)))
+    (t/is (not-any? #(= :path-progress (:property %)) (:keyframes track)) "nor the keyframes of its progress")
+    (t/is (not (contains? (:loops track #{}) :path-progress)) "nor their flags")))
 
 (t/deftest a-path-of-a-component-copy-is-ridden-when-the-board-animates-it
   ;; what the copy plays of its main carries no rider of the board

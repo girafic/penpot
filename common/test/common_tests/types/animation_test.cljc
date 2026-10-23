@@ -7377,12 +7377,15 @@
       (let [moving (-> timeline
                        (cta/add-keyframe trailer {:time 0 :property :x :value 0})
                        (cta/add-keyframe trailer {:time 1000 :property :x :value 200}))
-            linked (assoc-in moving [:tracks car :links] [{:property :x :source trailer :source-property :x}])]
+            linked (assoc-in moving [:tracks car :links] [{:property :x :source trailer :source-property :x}
+                                                          {:property :rotation :source trailer
+                                                           :source-property :x}])]
         (t/is (near? (pivot-at moving objects car 500) (pivot-at linked objects car 500)))
-        (t/is (empty? (cta/links-of (cta/set-path-follow (cta/set-path-follow linked car nil) car
-                                                         {:path (:path (cta/path-follow-of linked car))})
-                                    car))
-              "and goes as it starts riding")))))
+        (t/is (= [:rotation]
+                 (mapv :property (cta/links-of (cta/set-path-follow (cta/set-path-follow linked car nil) car
+                                                                    {:path (:path (cta/path-follow-of linked car))})
+                                               car)))
+              "and goes as it starts riding; a link of another property stays")))))
 
 (t/deftest what-a-layer-can-ride
   (let [{:keys [car road ring board timeline objects]} (road-and-car)

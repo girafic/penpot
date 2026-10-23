@@ -4814,9 +4814,9 @@ export interface Timeline {
    * degrees more, its own rotation on top. Its own `x` and `y` keyframes
    * and links do not play while it rides; a wiggle of its position (see
    * `wiggle`) shakes it around the path. The path may move, morph or
-   * follow, and the shape rides it as it plays. A shape rides a path or follows a
-   * leader, not both. Every export plays it by keyframes. `null` rides
-   * none, and drops the keyframes of its progress.
+   * follow, and the shape rides it as it plays. A shape rides a path or
+   * follows a leader, not both. Every export plays it by keyframes.
+   * `null` rides none, and drops the keyframes of its progress.
    * @param shape A layer inside the board.
    * @param pathFollow The path and how the shape rides it, or `null`.
    *
@@ -5664,7 +5664,8 @@ export interface Wiggle {
 
   /**
    * What makes its shakes the ones they are: another seed shakes another
-   * way. A copy of the layer (duplicated or pasted) gets a new one.
+   * way. A copy beside the layer (duplicated, or pasted where the layer
+   * is) gets a new one; pasted after a cut, the layer keeps it.
    */
   readonly seed: number;
 }
