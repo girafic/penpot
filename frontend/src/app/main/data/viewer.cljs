@@ -543,28 +543,30 @@
   "The file shown fetched again, as it was saved last, the screen and the
   overlays on it staying: the preview of the prototype, when it missed
   what the workspace edited (see `apply-preview-changes`), once that is
-  saved. `on-refreshed`, when given, is called once it is done, or
-  failed."
-  ([]
-   (refresh-bundle nil))
-  ([on-refreshed]
-   (ptk/reify ::refresh-bundle
-     ptk/WatchEvent
-     (watch [_ state _]
-       (let [params   (rt/get-params state)
-             file-id  (some-> (rt/get-query-param params :file-id) uuid/parse*)
-             page-id  (some-> (rt/get-query-param params :page-id) uuid/parse*)
-             share-id (some-> (rt/get-query-param params :share-id) uuid/parse*)]
-         (->> (if (some? file-id)
-                (->> (load-bundle {:file-id file-id :share-id share-id})
-                     (rx/mapcat
-                      (fn [{:keys [fonts] :as bundle}]
-                        (rx/of (df/fonts-fetched fonts)
-                               (bundle-refreshed bundle)
-                               (update-page-position-data file-id page-id)))))
-                (rx/empty))
-              (rx/finalize #(when (some? on-refreshed)
-                              (on-refreshed)))))))))
+  saved. `on-refreshed` is called once it is done; `on-failed` in its
+  place when the fetch fails, which then shows nothing but a warning in
+  the log: the preview tries again once the workspace saves."
+  [on-refreshed on-failed]
+  (ptk/reify ::refresh-bundle
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [params   (rt/get-params state)
+            file-id  (some-> (rt/get-query-param params :file-id) uuid/parse*)
+            page-id  (some-> (rt/get-query-param params :page-id) uuid/parse*)
+            share-id (some-> (rt/get-query-param params :share-id) uuid/parse*)]
+        (->> (if (some? file-id)
+               (->> (load-bundle {:file-id file-id :share-id share-id})
+                    (rx/mapcat
+                     (fn [{:keys [fonts] :as bundle}]
+                       (rx/of (df/fonts-fetched fonts)
+                              (bundle-refreshed bundle)
+                              (update-page-position-data file-id page-id)))))
+               (rx/empty))
+             (rx/tap (fn [_] nil) (fn [_] nil) on-refreshed)
+             (rx/catch (fn [cause]
+                         (log/warn :hint "unable to refresh the preview" :cause cause)
+                         (on-failed)
+                         (rx/empty))))))))
 
 (defn apply-preview-changes
   "The preview of the prototype showing `changes`, made in the workspace

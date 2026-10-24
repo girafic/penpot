@@ -707,7 +707,9 @@
                   (let [data (.-data event)]
                     (case (some-> data (unchecked-get "type"))
                       "penpot:preview-refresh"
-                      (st/emit! (dv/refresh-bundle #(.postMessage parent #js {:type "penpot:preview-refreshed"} origin)))
+                      (st/emit! (dv/refresh-bundle
+                                 #(.postMessage parent #js {:type "penpot:preview-refreshed"} origin)
+                                 #(.postMessage parent #js {:type "penpot:preview-refreshed" :failed true} origin)))
                       ;; what is edited in the workspace, as it is made
                       "penpot:preview-changes"
                       (let [on-stale #(.postMessage parent #js {:type "penpot:preview-stale"} origin)

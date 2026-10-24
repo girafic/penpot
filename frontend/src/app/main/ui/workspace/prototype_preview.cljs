@@ -459,9 +459,13 @@
                     (do (mf/set-ref-val! missed-ref true)
                         (resync!))
 
+                    ;; a fetch that failed leaves what it missed for the
+                    ;; next save
                     "penpot:preview-refreshed"
                     (do (mf/set-ref-val! refreshing-ref false)
-                        (resync!))
+                        (if (true? (unchecked-get data "failed"))
+                          (mf/set-ref-val! missed-ref true)
+                          (resync!)))
 
                     "penpot:preview-shown"
                     (do (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))

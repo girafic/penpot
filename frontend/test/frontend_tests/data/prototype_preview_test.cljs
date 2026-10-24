@@ -15,6 +15,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
    [app.main.data.workspace.prototype-preview :as dwpp]
+   [app.main.repo :as rp]
    [app.main.router :as rt]
    [app.main.ui.viewer.shapes]
    [app.util.storage :as storage]
@@ -22,6 +23,7 @@
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.async :as async]
+   [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]))
 
 (def ^:private board-a (uuid/custom 2 1))
@@ -324,9 +326,21 @@
     (t/is (= {} (ptk/update hide {})) "the view mode outside a preview has none")))
 
 (t/deftest ^:async a-refresh-says-when-it-is-done
-  (let [done (atom 0)]
-    (await (emits (dv/refresh-bundle #(swap! done inc)) {}))
-    (t/is (= 1 @done) "for the workspace to send what it missed meanwhile")))
+  (let [done   (atom 0)
+        failed (atom 0)]
+    (await (emits (dv/refresh-bundle #(swap! done inc) #(swap! failed inc)) {}))
+    (t/is (= [1 0] [@done @failed]) "for the workspace to send what it missed meanwhile")))
+
+(t/deftest ^:async a-refresh-that-fails-says-so
+  (let [done   (atom 0)
+        failed (atom 0)
+        state  (assoc-in (viewer-state 0 nil) [:route :params :query :file-id] (str file-id))]
+    (await
+     (mock/with-mocks*
+       {rp/cmd! (mock/stub (fn [& _] (rx/throw (ex-info "offline" {:type :network}))))}
+       (let [events (await (emits (dv/refresh-bundle #(swap! done inc) #(swap! failed inc)) state))]
+         (t/is (= [0 1] [@done @failed]) "the workspace keeps what it missed for its next save")
+         (t/is (empty? events) "and nothing breaks in the view mode"))))))
 
 (t/deftest the-preview-shows-holds-or-misses-what-is-edited
   (let [step #(dwpp/edit-step (merge {:listening? true :hidden? false :refreshing? false
