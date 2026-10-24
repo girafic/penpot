@@ -10,8 +10,9 @@
   frame, once what is edited is saved, showing what is edited after as
   it is made (see `dv/apply-preview-changes`), and what it missed (while
   it loaded, or could not show) once that is saved. Closed, it stays
-  loaded, hidden, to show again at once, until it opens on another
-  page. A bar on top moves the window, with the boards before
+  loaded, hidden, to show again at once, for a while (see
+  `unload-delay`); another page of the workspace starts without it. A
+  bar on top moves the window, with the boards before
   and after, start again, the play buttons of an animated board, the
   board it shows, a settings button, open in the view mode and close;
   the corners at its bottom resize it. The menu of the settings button
@@ -637,16 +638,28 @@
               :on-pointer-move on-move
               :on-lost-pointer-capture on-up}])]))
 
+(def unload-delay
+  "Ms a closed preview stays loaded, hidden (see `prototype-preview*`):
+  opened again meanwhile, it shows at once; after, it goes, with the
+  memory its view mode takes, and loads again as it opens."
+  (* 10 60 1000))
+
 (mf/defc prototype-preview*
   "The preview of the prototype of the file `file-id`, while it is open;
-  closed, hidden, until it opens on another page."
+  closed, hidden, for `unload-delay`."
   [{:keys [file-id]}]
   (let [preview (mf/deref ref:preview)
         kept*   (mf/use-state preview)
-        shown   (d/nilv preview (deref kept*))]
+        kept    (deref kept*)
+        shown   (d/nilv preview kept)]
     (mf/with-effect [preview]
       (when (some? preview)
         (reset! kept* preview)))
+    ;; closed a while, it goes
+    (mf/with-effect [preview kept]
+      (when (and (nil? preview) (some? kept))
+        (let [timer (js/setTimeout #(reset! kept* nil) unload-delay)]
+          #(js/clearTimeout timer))))
     (when (some? shown)
       [:> preview-window* {:key (dm/str (:page-id shown))
                            :file-id file-id
