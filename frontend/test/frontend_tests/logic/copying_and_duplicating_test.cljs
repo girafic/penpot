@@ -53,6 +53,9 @@
       (cthf/switch-to-page :page-1)))
 
 
+(def ^:private switch-page
+  #'dwp/initialize-page*)
+
 (defn- copy-paste-shape
   [id file & {:keys [target-page-label target-container-id]}]
   (let [features            #{"components/v2"}
@@ -65,11 +68,14 @@
         pdata               (thp/simulate-copy-shape #{(:id shape)} (:objects page) {(:id  file) file} page file features version)
         target-container-id (or target-container-id (:parent-id shape))]
 
+    ;; the page switched to as `initialize-page` does, without the watchers
+    ;; it starts: they outlive the test (the thumbnails of a page render
+    ;; and are deleted seconds later, in the tests that run then)
     (filter some?
-            [(when target-page-id (dw/initialize-page (:id file) target-page-id))
+            [(when target-page-id (switch-page (:id file) target-page-id))
              (dws/select-shape target-container-id)
              (dw/paste-shapes pdata)
-             (when target-page-id (dw/initialize-page (:id file) (:id page)))])))
+             (when target-page-id (switch-page (:id file) (:id page)))])))
 
 (defn- sync-file [file]
   (map (fn [component-tag]

@@ -18,14 +18,22 @@
   (t/is (preg/check-permission preg/mcp-plugin-id "content:write"))
   (t/is (not (preg/check-permission preg/mcp-plugin-id "unknown:permission"))))
 
+(def ^:private plugin-cmds
+  "The commands of the registry, which the tests count and answer."
+  #{:add-profile-plugin :remove-profile-plugin})
+
 (defn- record-cmd-mock
-  "Mock rp/cmd! that records calls in mock/rpc-calls and answers
-  with (response-fn cmd params)."
+  "Mock rp/cmd! that records the calls of the registry (`plugin-cmds`) in
+  mock/rpc-calls and answers them with (response-fn cmd params). Another
+  command, one a test before left to run later, gets no answer and is
+  not counted."
   [response-fn]
   (mock/stub
    (fn [cmd params]
-     (swap! mock/rpc-calls conj {:cmd cmd :params params})
-     (response-fn cmd params))))
+     (if (contains? plugin-cmds cmd)
+       (do (swap! mock/rpc-calls conj {:cmd cmd :params params})
+           (response-fn cmd params))
+       (rx/empty)))))
 
 (defn- cmds
   []
