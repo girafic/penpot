@@ -90,10 +90,42 @@
 (defn edited-changes
   "What `commit` (see `dch/commit`) changed in the file `file-id`, for the
   view mode of the preview to show as it is made, before it is saved
-  (see `dv/apply-preview-changes`); nil for another file."
-  [{:keys [redo-changes] :as commit} file-id]
+  (see `dv/apply-preview-changes`): `{:changes :remote?}`, its changes
+  and whether another session made them; nil for another file."
+  [{:keys [redo-changes source] :as commit} file-id]
   (when (and (= file-id (:file-id commit)) (seq redo-changes))
-    redo-changes))
+    {:changes redo-changes
+     :remote? (= :remote source)}))
+
+(def max-held
+  "How many changes the preview holds for the view mode while it is
+  hidden (see `edit-step`); past them it fetches what was saved."
+  500)
+
+(defn edit-step
+  "What the preview does with `n` changes made in the workspace (see
+  `edited-changes`): `:miss` them while the view mode does not listen
+  (it loads, and what it fetches may not hold them); `:hold` them while
+  it is hidden, or past `max-held` held changes `:drop-and-miss` them
+  all; `:post` them; or `:post-and-miss` them when what the view mode
+  shows may not hold them, or not in the order saved: while it fetches
+  what was saved, or for changes of another session (`remote?`) that
+  come while those of this one are not saved (`saved?`), which the
+  workspace plays under its own and the view mode after them."
+  [{:keys [listening? hidden? refreshing? held n remote? saved?]}]
+  (cond
+    (not listening?)                            :miss
+    (and hidden? (> (+ held n) max-held))       :drop-and-miss
+    hidden?                                     :hold
+    (or refreshing? (and remote? (not saved?))) :post-and-miss
+    :else                                       :post))
+
+(defn resync?
+  "Whether the preview fetches what was saved now (see `edit-step`): it
+  missed changes, the view mode listens, fetches nothing yet and the
+  workspace saved."
+  [{:keys [missed? listening? refreshing? saved?]}]
+  (boolean (and missed? listening? (not refreshing?) saved?)))
 
 (defn open-preview
   "The preview open, from the board of the selection (see

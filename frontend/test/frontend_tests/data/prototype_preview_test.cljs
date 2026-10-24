@@ -274,7 +274,10 @@
     :operations [{:type :set :attr :name :val "Renamed"}]}])
 
 (t/deftest the-workspace-sends-what-it-edits-in-its-file
-  (t/is (= edits (dwpp/edited-changes {:file-id file-id :redo-changes edits} file-id)))
+  (t/is (= {:changes edits :remote? false}
+           (dwpp/edited-changes {:file-id file-id :redo-changes edits :source :local} file-id)))
+  (t/is (true? (:remote? (dwpp/edited-changes {:file-id file-id :redo-changes edits :source :remote} file-id)))
+        "what another session edited, as such")
   (t/is (nil? (dwpp/edited-changes {:file-id (uuid/next) :redo-changes edits} file-id))
         "not what it edits in another file")
   (t/is (nil? (dwpp/edited-changes {:file-id file-id :redo-changes []} file-id))
@@ -322,3 +325,30 @@
   (let [done (atom 0)]
     (await (emits (dv/refresh-bundle #(swap! done inc)) {}))
     (t/is (= 1 @done) "for the workspace to send what it missed meanwhile")))
+
+(t/deftest the-preview-shows-holds-or-misses-what-is-edited
+  (let [step #(dwpp/edit-step (merge {:listening? true :hidden? false :refreshing? false
+                                      :held 0 :n 2 :remote? false :saved? true}
+                                     %))]
+    (t/is (= :post (step {})) "the view mode listens: there at once")
+    (t/is (= :miss (step {:listening? false})) "it loads: fetched once saved")
+    (t/is (= :miss (step {:listening? false :hidden? true})) "it loads hidden, the same")
+    (t/is (= :hold (step {:hidden? true})) "hidden: once it shows")
+    (t/is (= :hold (step {:hidden? true :held (- dwpp/max-held 2)})) "up to the most it holds")
+    (t/is (= :drop-and-miss (step {:hidden? true :held (dec dwpp/max-held)}))
+          "past it: what was saved, fetched")
+    (t/is (= :post-and-miss (step {:refreshing? true}))
+          "what it fetches may not hold it")
+    (t/is (= :post-and-miss (step {:remote? true :saved? false}))
+          "another session's, under unsaved changes: out of the order saved")
+    (t/is (= :post (step {:remote? true :saved? true})) "another session's, all saved")
+    (t/is (= :post (step {:saved? false})) "its own, not saved yet")))
+
+(t/deftest the-preview-fetches-what-it-missed-once-saved
+  (let [resync? #(dwpp/resync? (merge {:missed? true :listening? true :refreshing? false :saved? true} %))]
+    (t/is (true? (resync? {})))
+    (t/is (false? (resync? {:missed? false})) "nothing missed")
+    (t/is (false? (resync? {:listening? false})) "the view mode loads")
+    (t/is (false? (resync? {:refreshing? true})) "a fetch is under way")
+    (t/is (false? (resync? {:saved? false})) "not saved yet")))
+

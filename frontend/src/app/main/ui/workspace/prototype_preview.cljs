@@ -217,37 +217,42 @@
            (reset! stored* nil)
            (swap! storage/user dissoc ::frame)))
 
-        ;; what it missed, fetched once it is saved
+        ;; what it missed, fetched once it is saved (see `dwpp/resync?`):
+        ;; what it fetches holds what was held for it too
         resync!
         (mf/use-fn
          (fn []
-           (when (and (mf/ref-val missed-ref)
-                      (mf/ref-val listening-ref)
-                      (not (mf/ref-val refreshing-ref))
-                      (dps/terminal-status? @refs/persistence))
+           (when (dwpp/resync? {:missed? (mf/ref-val missed-ref)
+                                :listening? (mf/ref-val listening-ref)
+                                :refreshing? (mf/ref-val refreshing-ref)
+                                :saved? (dps/terminal-status? @refs/persistence)})
              (mf/set-ref-val! missed-ref false)
              (mf/set-ref-val! refreshing-ref true)
+             (mf/set-ref-val! held-ref nil)
              (post! (mf/ref-val iframe-ref) "penpot:preview-refresh"))))
 
-        ;; what is edited, shown by the view mode as it is made; held
-        ;; while it is hidden, missed while it loads, or when what it
-        ;; fetches may not hold it
+        ;; what is edited, shown by the view mode as it is made, held
+        ;; while it is hidden or missed (see `dwpp/edit-step`)
         on-edit
         (mf/use-fn
-         (fn [changes]
-           (cond
-             (not (mf/ref-val listening-ref))
-             (when (some? (mf/ref-val iframe-ref))
-               (mf/set-ref-val! missed-ref true))
-
-             (mf/ref-val hidden-ref)
-             (mf/set-ref-val! held-ref (into (or (mf/ref-val held-ref) []) changes))
-
-             :else
-             (do (when (mf/ref-val refreshing-ref)
-                   (mf/set-ref-val! missed-ref true))
-                 (post! (mf/ref-val iframe-ref) "penpot:preview-changes"
-                        {:changes (t/encode-str changes)})))))
+         (fn [{:keys [changes remote?]}]
+           (let [held (mf/ref-val held-ref)
+                 step (dwpp/edit-step {:listening? (mf/ref-val listening-ref)
+                                       :hidden? (mf/ref-val hidden-ref)
+                                       :refreshing? (mf/ref-val refreshing-ref)
+                                       :held (count held)
+                                       :n (count changes)
+                                       :remote? remote?
+                                       :saved? (dps/terminal-status? @refs/persistence)})]
+             (case step
+               :miss          (mf/set-ref-val! missed-ref true)
+               :hold          (mf/set-ref-val! held-ref (into (or held []) changes))
+               :drop-and-miss (do (mf/set-ref-val! held-ref nil)
+                                  (mf/set-ref-val! missed-ref true))
+               (do (when (= :post-and-miss step)
+                     (mf/set-ref-val! missed-ref true))
+                   (post! (mf/ref-val iframe-ref) "penpot:preview-changes"
+                          {:changes (t/encode-str changes)}))))))
 
         on-prev    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-prev"))
         on-next    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-next"))
@@ -381,8 +386,11 @@
         (when (mf/ref-val listening-ref)
           (when (and (not hidden) (seq held))
             (mf/set-ref-val! held-ref nil)
-            (on-edit held))
-          (post! iframe (if ^boolean hidden "penpot:preview-hide" "penpot:preview-show")))))
+            (on-edit {:changes held}))
+          (post! iframe (if ^boolean hidden "penpot:preview-hide" "penpot:preview-show"))
+          ;; what it dropped while hidden
+          (when-not hidden
+            (resync!)))))
 
     ;; a new board to start at, a new page, or as it shows again: the
     ;; view mode goes there once it listens, else starts there
