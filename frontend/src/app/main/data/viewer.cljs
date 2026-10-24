@@ -12,6 +12,7 @@
    [app.common.files.changes :as cpc]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
+   [app.common.logging :as log]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.schema :as sm]
@@ -205,6 +206,28 @@
 (declare go-to-frame-by-index)
 (declare go-to-frame-auto)
 
+(defn- apply-changes
+  "`state` with `changes` applied to the file the viewer shows, without
+  saving them, and the boards of its pages listed again."
+  [state changes]
+  (let [file (-> (dm/get-in state [:viewer :file])
+                 (update :data cpc/process-changes changes false))
+
+        pages
+        (->> (dm/get-in file [:data :pages])
+             (map (fn [page-id]
+                    (let [data (get-in file [:data :pages-index page-id])]
+                      [page-id (assoc data
+                                      :frames (ctt/get-viewer-frames (:objects data))
+                                      :all-frames (ctt/get-viewer-frames (:objects data) {:all-frames? true}))])))
+             (into {}))]
+
+    (-> state
+        (assoc-in [:viewer :file] file)
+        (assoc-in [:viewer :pages] pages)
+        (cond-> (contains? (:files state) (:id file))
+          (assoc-in [:files (:id file)] file)))))
+
 ;; Applies to the viewer the changes passed as parameters
 ;; will not save the data but just modify the data localy
 (defn- apply-changes-viewer
@@ -212,21 +235,7 @@
   (ptk/reify ::apply-changes-viewer
     ptk/UpdateEvent
     (update [_ state]
-      (let [file (-> (dm/get-in state [:viewer :file])
-                     (update :data cpc/process-changes changes false))
-
-            pages
-            (->> (dm/get-in file [:data :pages])
-                 (map (fn [page-id]
-                        (let [data (get-in file [:data :pages-index page-id])]
-                          [page-id (assoc data
-                                          :frames (ctt/get-viewer-frames (:objects data))
-                                          :all-frames (ctt/get-viewer-frames (:objects data) {:all-frames? true}))])))
-                 (into {}))]
-
-        (-> state
-            (assoc-in [:viewer :file] file)
-            (assoc-in [:viewer :pages] pages))))))
+      (apply-changes state changes))))
 
 (defn- generate-update-position-data-changes
   [shapes page-id]
@@ -322,6 +331,7 @@
 (declare preview?)
 (declare preview-frames)
 (declare preview-go)
+(declare pause-timeline)
 
 (defn bundle-fetched
   "The view mode showing `bundle`, at the board of the route. In the
@@ -380,6 +390,27 @@
       (-> state
           (assoc ::rt/replace-only true)
           (assoc :viewer-preview {:back [] :forward []})))))
+
+(defn preview-hidden?
+  "Whether the preview of the prototype is closed, loaded, hidden (see
+  `preview-hidden`)."
+  [state]
+  (true? (dm/get-in state [:viewer-preview :hidden?])))
+
+(defn preview-hidden
+  "The preview of the prototype closed (`hidden?`), loaded, hidden, to
+  show again at once: nothing plays in it then, or shown again."
+  [hidden?]
+  (ptk/reify ::preview-hidden
+    ptk/UpdateEvent
+    (update [_ state]
+      (d/update-when state :viewer-preview assoc :hidden? hidden?))
+
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (if hidden?
+        (rx/of (pause-timeline))
+        (rx/empty)))))
 
 (defn preview-screen
   "The screen at `index` on show in the preview: the one it leaves goes
@@ -510,23 +541,61 @@
 
 (defn refresh-bundle
   "The file shown fetched again, as it was saved last, the screen and the
-  overlays on it staying: the preview of the prototype, as the workspace
-  saves."
-  []
-  (ptk/reify ::refresh-bundle
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [params   (rt/get-params state)
-            file-id  (some-> (rt/get-query-param params :file-id) uuid/parse*)
-            page-id  (some-> (rt/get-query-param params :page-id) uuid/parse*)
-            share-id (some-> (rt/get-query-param params :share-id) uuid/parse*)]
-        (when (some? file-id)
-          (->> (load-bundle {:file-id file-id :share-id share-id})
-               (rx/mapcat
-                (fn [{:keys [fonts] :as bundle}]
-                  (rx/of (df/fonts-fetched fonts)
-                         (bundle-refreshed bundle)
-                         (update-page-position-data file-id page-id))))))))))
+  overlays on it staying: the preview of the prototype, when it missed
+  what the workspace edited (see `apply-preview-changes`), once that is
+  saved. `on-refreshed`, when given, is called once it is done, or
+  failed."
+  ([]
+   (refresh-bundle nil))
+  ([on-refreshed]
+   (ptk/reify ::refresh-bundle
+     ptk/WatchEvent
+     (watch [_ state _]
+       (let [params   (rt/get-params state)
+             file-id  (some-> (rt/get-query-param params :file-id) uuid/parse*)
+             page-id  (some-> (rt/get-query-param params :page-id) uuid/parse*)
+             share-id (some-> (rt/get-query-param params :share-id) uuid/parse*)]
+         (->> (if (some? file-id)
+                (->> (load-bundle {:file-id file-id :share-id share-id})
+                     (rx/mapcat
+                      (fn [{:keys [fonts] :as bundle}]
+                        (rx/of (df/fonts-fetched fonts)
+                               (bundle-refreshed bundle)
+                               (update-page-position-data file-id page-id)))))
+                (rx/empty))
+              (rx/finalize #(when (some? on-refreshed)
+                              (on-refreshed)))))))))
+
+(defn apply-preview-changes
+  "The preview of the prototype showing `changes`, made in the workspace
+  and not saved yet, as they are made; `on-stale` is called when they
+  do not apply, for the workspace to refresh it once they are saved
+  (see `refresh-bundle`)."
+  [changes on-stale]
+  (let [applied? (volatile! true)]
+    (ptk/reify ::apply-preview-changes
+      ptk/UpdateEvent
+      (update [_ state]
+        (try
+          (apply-changes state changes)
+          (catch :default cause
+            (log/warn :hint "unable to apply the changes of the workspace" :cause cause)
+            (vreset! applied? false)
+            state)))
+
+      ptk/WatchEvent
+      (watch [_ state _]
+        (let [params  (rt/get-params state)
+              file-id (some-> (rt/get-query-param params :file-id) uuid/parse*)
+              page-id (some-> (rt/get-query-param params :page-id) uuid/parse*)]
+          (if (and @applied? (some? file-id))
+            (rx/of (update-page-position-data file-id page-id))
+            (rx/empty))))
+
+      ptk/EffectEvent
+      (effect [_ _ _]
+        (when-not @applied?
+          (on-stale))))))
 
 (defn fetch-comment-threads
   [{:keys [file-id page-id share-id] :as params}]

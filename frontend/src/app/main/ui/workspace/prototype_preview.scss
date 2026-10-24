@@ -179,3 +179,9 @@
   inset-inline-end: 0;
   cursor: nwse-resize;
 }
+
+// Closed, it stays loaded for Shift + Space to show it again at once.
+.hidden {
+  visibility: hidden;
+  pointer-events: none;
+}

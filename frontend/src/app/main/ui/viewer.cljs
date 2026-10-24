@@ -14,6 +14,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes.bounds :as gsb]
    [app.common.logic.timelines :as cltl]
+   [app.common.transit :as t]
    [app.common.types.animation :as cta]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.types.text :as txt]
@@ -464,6 +465,8 @@
         clock     (mf/with-memo [base-page files (:id frame)]
                     (when (some? frame)
                       (dv/board-clock base-page files (:id frame))))
+        ;; whether it plays from its start as it shows (see below)
+        autoplay? (and (some? clock) (cta/autoplay? clock) (= section :interactions))
 
         ;; whether the board on screen, and a board of the page, plays
         ;; sound, its own or the one of the mains of its component copies
@@ -579,7 +582,8 @@
       (let [alive? (volatile! true)]
         (when (and (some? clock) (cta/autoplay? clock) (= section :interactions))
           (let [board-id (:id frame)
-                play     #(when @alive?
+                ;; not while the preview is hidden: it plays as it shows
+                play     #(when (and @alive? (not (dv/preview-hidden? @st/state)))
                             (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))
                 ;; with sound, once the sound can play (see below); the
                 ;; board the view mode opens with comes without a
@@ -618,11 +622,12 @@
     ;; As the preview of the prototype in the workspace (see
     ;; `app.main.ui.workspace.prototype-preview`): the board fitted in its
     ;; window as it resizes, the screens in a history of their own, and
-    ;; what the workspace asks of it (to show what it saved, to go to the
-    ;; board before or after, to the board selected, a zoom, how the
-    ;; interactions show); it tells the workspace
-    ;; once it listens and which board it shows. Shift + Space in it
-    ;; closes it, as in the workspace.
+    ;; what the workspace asks of it (to show what is edited there as it
+    ;; is made, or what it saved, to go to the board before or after, to
+    ;; the board selected, a zoom, how the interactions show); it tells
+    ;; the workspace once it listens, which board it shows, and when it
+    ;; could not show what was edited. Shift + Space in it closes it, as
+    ;; in the workspace.
     (mf/with-effect [preview index (:id frame) (count frames)]
       (when (and preview (some? index))
         (st/emit! (dv/preview-screen index))
@@ -638,7 +643,9 @@
     ;; the bar of the preview plays, pauses and stops the animation of the
     ;; board it shows, and turns its sound on and off: it is told whether
     ;; the board animates and sounds, and whether it plays, and asks for
-    ;; it here
+    ;; it here. Closed, the preview stays loaded, hidden: it stops what
+    ;; plays and its sound, and shown again, the board plays from its
+    ;; start, as when it opened (see above)
     (mf/with-effect [preview (:id frame) (some? clock) playing? board-sound? muted?]
       (when (and preview (some? frame))
         (.postMessage (.-parent js/window)
@@ -649,11 +656,19 @@
                            :muted (boolean muted?)}
                       (.. js/window -location -origin))))
 
-    (mf/with-effect [preview (:id frame)]
+    (mf/with-effect [preview (:id frame) autoplay? board-sound?]
       (when (and preview (some? frame))
         (let [board-id (:id frame)
               parent   (.-parent js/window)
               origin   (.. js/window -location -origin)
+
+              replay
+              (fn []
+                (let [play #(st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id))]
+                  (if board-sound?
+                    (do (audio/unlock!)
+                        (audio/when-running play 200))
+                    (play))))
 
               on-message
               (fn [^js event]
@@ -665,6 +680,9 @@
                     "penpot:preview-stop"  (st/emit! (dv/stop-timeline))
                     "penpot:preview-sound" (do (audio/unlock!)
                                                (st/emit! (dv/toggle-audio-muted)))
+                    "penpot:preview-hide"  (st/emit! (dv/preview-hidden true))
+                    "penpot:preview-show"  (do (st/emit! (dv/preview-hidden false))
+                                               (when autoplay? (replay)))
                     nil)))]
           (.addEventListener js/window "message" on-message)
           #(.removeEventListener js/window "message" on-message))))
@@ -685,7 +703,17 @@
                            (= (.-origin event) origin))
                   (let [data (.-data event)]
                     (case (some-> data (unchecked-get "type"))
-                      "penpot:preview-refresh" (st/emit! (dv/refresh-bundle))
+                      "penpot:preview-refresh"
+                      (st/emit! (dv/refresh-bundle #(.postMessage parent #js {:type "penpot:preview-refreshed"} origin)))
+                      ;; what is edited in the workspace, as it is made
+                      "penpot:preview-changes"
+                      (let [on-stale #(.postMessage parent #js {:type "penpot:preview-stale"} origin)
+                            changes  (try
+                                       (t/decode-str (unchecked-get data "changes"))
+                                       (catch :default _ nil))]
+                        (if (vector? changes)
+                          (st/emit! (dv/apply-preview-changes changes on-stale))
+                          (on-stale)))
                       "penpot:preview-prev"    (st/emit! (dv/preview-board :prev))
                       "penpot:preview-next"    (st/emit! (dv/preview-board :next))
                       ;; the board selected in the workspace

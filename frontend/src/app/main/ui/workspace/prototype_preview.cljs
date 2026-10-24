@@ -7,8 +7,11 @@
 (ns app.main.ui.workspace.prototype-preview
   "The preview of the prototype in a window over the workspace (Shift +
   Space, see `dwpp/toggle-preview`): the view mode of the page in a
-  frame, once what is edited is saved, showing it again each time the
-  workspace saves. A bar on top moves the window, with the boards before
+  frame, once what is edited is saved, showing what is edited after as
+  it is made (see `dv/apply-preview-changes`), and what it missed (while
+  it loaded, or could not show) once that is saved. Closed, it stays
+  loaded, hidden, to show again at once, until it opens on another
+  page. A bar on top moves the window, with the boards before
   and after, start again, the play buttons of an animated board, the
   board it shows, a settings button, open in the view mode and close;
   the corners at its bottom resize it. The menu of the settings button
@@ -24,7 +27,9 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.transit :as t]
    [app.common.uuid :as uuid]
+   [app.main.data.changes :as dch]
    [app.main.data.common :as dcm]
    [app.main.data.persistence :as dps]
    [app.main.data.workspace.prototype-preview :as dwpp]
@@ -54,8 +59,8 @@
 (def ^:private border 1)
 
 (def ^:private refresh-delay
-  "Ms after the workspace saved before the preview shows it, so the saves
-  of an edit come in at once."
+  "Ms after the workspace saved before the preview fetches what it
+  missed, so the saves of an edit come in at once."
   250)
 
 (defn start-frame
@@ -130,7 +135,7 @@
 
 (mf/defc preview-window*
   {::mf/private true}
-  [{:keys [file-id preview]}]
+  [{:keys [file-id preview hidden]}]
   (let [{:keys [page-id frame-id]} preview
         objects    (mf/deref refs/workspace-page-objects)
         current    (mf/deref refs/current-page-id)
@@ -165,6 +170,13 @@
         unsent-ref (mf/use-ref nil)
         ;; whether the view mode in the frame listens (see `post!`)
         listening-ref (mf/use-ref false)
+        hidden-ref (mf/use-ref hidden)
+        ;; what is edited while it is hidden, for it to show once shown
+        held-ref   (mf/use-ref nil)
+        ;; whether it misses something edited, and whether it fetches
+        ;; what was saved (see `resync!`)
+        missed-ref (mf/use-ref false)
+        refreshing-ref (mf/use-ref false)
         [vw vh]    (cw/use-window-size)
         stored*    (mf/use-state #(get storage/user ::frame))
         drag-frame* (mf/use-state nil)
@@ -204,6 +216,38 @@
          (fn [_]
            (reset! stored* nil)
            (swap! storage/user dissoc ::frame)))
+
+        ;; what it missed, fetched once it is saved
+        resync!
+        (mf/use-fn
+         (fn []
+           (when (and (mf/ref-val missed-ref)
+                      (mf/ref-val listening-ref)
+                      (not (mf/ref-val refreshing-ref))
+                      (dps/terminal-status? @refs/persistence))
+             (mf/set-ref-val! missed-ref false)
+             (mf/set-ref-val! refreshing-ref true)
+             (post! (mf/ref-val iframe-ref) "penpot:preview-refresh"))))
+
+        ;; what is edited, shown by the view mode as it is made; held
+        ;; while it is hidden, missed while it loads, or when what it
+        ;; fetches may not hold it
+        on-edit
+        (mf/use-fn
+         (fn [changes]
+           (cond
+             (not (mf/ref-val listening-ref))
+             (when (some? (mf/ref-val iframe-ref))
+               (mf/set-ref-val! missed-ref true))
+
+             (mf/ref-val hidden-ref)
+             (mf/set-ref-val! held-ref (into (or (mf/ref-val held-ref) []) changes))
+
+             :else
+             (do (when (mf/ref-val refreshing-ref)
+                   (mf/set-ref-val! missed-ref true))
+                 (post! (mf/ref-val iframe-ref) "penpot:preview-changes"
+                        {:changes (t/encode-str changes)})))))
 
         on-prev    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-prev"))
         on-next    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-next"))
@@ -298,7 +342,16 @@
             sub  (rx/subs! (fn [_] nil) (fn [_] (done)) done (dps/wait-persisted 15000))]
         #(rx/dispose! sub)))
 
-    ;; then each save of the workspace shows, shortly after it
+    ;; then what is edited shows as it is made, and what the view mode
+    ;; missed, shortly after the workspace saves it
+    (mf/with-effect [file-id]
+      (let [sub (->> st/stream
+                     (rx/filter dch/commit?)
+                     (rx/map #(dwpp/edited-changes (deref %) file-id))
+                     (rx/filter some?)
+                     (rx/subs! on-edit))]
+        #(rx/dispose! sub)))
+
     (mf/with-effect [ready?]
       (when ready?
         (let [timer (volatile! nil)
@@ -308,18 +361,40 @@
                        (when (and (not (dps/terminal-status? old))
                                   (dps/terminal-status? new))
                          (some-> @timer js/clearTimeout)
-                         (vreset! timer (js/setTimeout #(post! (mf/ref-val iframe-ref) "penpot:preview-refresh")
-                                                       refresh-delay)))))
+                         (vreset! timer (js/setTimeout resync! refresh-delay)))))
           (fn []
             (remove-watch refs/persistence key)
             (some-> @timer js/clearTimeout)))))
 
-    ;; a new board to start at, a new page
-    (mf/with-effect [frame-id]
-      (reset! shown* frame-id)
-      (reset! start* frame-id)
-      (mf/set-ref-val! requested-ref frame-id)
-      (mf/set-ref-val! unsent-ref nil))
+    ;; closed, it stays loaded, hidden, for Shift + Space to show it again
+    ;; at once: the view mode stops what plays, and shown again, it plays
+    ;; the board from its start and shows what was edited meanwhile
+    (mf/with-effect [hidden]
+      (mf/set-ref-val! hidden-ref hidden)
+      (let [iframe (mf/ref-val iframe-ref)
+            held   (mf/ref-val held-ref)]
+        (when ^boolean hidden
+          (reset! menu* false)
+          ;; the keys go to the workspace again
+          (when (and (some? iframe) (identical? iframe (.-activeElement js/document)))
+            (.blur iframe)))
+        (when (mf/ref-val listening-ref)
+          (when (and (not hidden) (seq held))
+            (mf/set-ref-val! held-ref nil)
+            (on-edit held))
+          (post! iframe (if ^boolean hidden "penpot:preview-hide" "penpot:preview-show")))))
+
+    ;; a new board to start at, a new page, or as it shows again: the
+    ;; view mode goes there once it listens, else starts there
+    (mf/with-effect [frame-id hidden]
+      (when-not ^boolean hidden
+        (mf/set-ref-val! requested-ref frame-id)
+        (mf/set-ref-val! unsent-ref nil)
+        (if (mf/ref-val listening-ref)
+          (when (some? frame-id)
+            (post! (mf/ref-val iframe-ref) "penpot:preview-go" {:frameId (dm/str frame-id)}))
+          (do (reset! shown* frame-id)
+              (reset! start* frame-id)))))
 
     ;; a new view mode in the frame listens once it says so: a new src,
     ;; or the same one started again
@@ -327,8 +402,8 @@
       (mf/set-ref-val! listening-ref false))
 
     ;; pinned, it shows the board of the selection (see `dwpp/pin-step`)
-    (mf/with-effect [follow? ready? selected current page-id objects]
-      (when follow?
+    (mf/with-effect [follow? ready? selected current page-id objects hidden]
+      (when (and follow? (not hidden))
         (let [board-id (dwpp/start-frame-id objects selected)
               step     (dwpp/pin-step {:board board-id
                                        :requested (mf/ref-val requested-ref)
@@ -361,10 +436,24 @@
                     "penpot:preview-ready"
                     (let [unsent (mf/ref-val unsent-ref)]
                       (mf/set-ref-val! listening-ref true)
+                      (mf/set-ref-val! refreshing-ref false)
                       (mf/set-ref-val! unsent-ref nil)
                       (doseq [[type data] (dwpp/ready-messages {:zoom zoom :interactions interactions
                                                                 :unsent unsent :follow? follow?})]
-                        (post! iframe type data)))
+                        (post! iframe type data))
+                      ;; closed while it loaded
+                      (when (mf/ref-val hidden-ref)
+                        (post! iframe "penpot:preview-hide"))
+                      (resync!))
+
+                    ;; it could not show what was edited
+                    "penpot:preview-stale"
+                    (do (mf/set-ref-val! missed-ref true)
+                        (resync!))
+
+                    "penpot:preview-refreshed"
+                    (do (mf/set-ref-val! refreshing-ref false)
+                        (resync!))
 
                     "penpot:preview-shown"
                     (do (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))
@@ -385,7 +474,9 @@
         #(.removeEventListener js/window "message" on-message)))
 
     [:div {:class (stl/css-case :window true
+                                :hidden hidden
                                 :dragging (some? (deref drag-frame*)))
+           :aria-hidden hidden
            :role "dialog"
            :aria-label (tr "workspace.preview.title")
            :style #js {"left" (dm/str (:x frame) "px")
@@ -535,8 +626,17 @@
               :on-lost-pointer-capture on-up}])]))
 
 (mf/defc prototype-preview*
-  "The preview of the prototype of the file `file-id`, while it is open."
+  "The preview of the prototype of the file `file-id`, while it is open;
+  closed, hidden, until it opens on another page."
   [{:keys [file-id]}]
-  (when-let [preview (mf/deref ref:preview)]
-    [:> preview-window* {:file-id file-id
-                         :preview preview}]))
+  (let [preview (mf/deref ref:preview)
+        kept*   (mf/use-state preview)
+        shown   (d/nilv preview (deref kept*))]
+    (mf/with-effect [preview]
+      (when (some? preview)
+        (reset! kept* preview)))
+    (when (some? shown)
+      [:> preview-window* {:key (dm/str (:page-id shown))
+                           :file-id file-id
+                           :preview shown
+                           :hidden (nil? preview)}])))

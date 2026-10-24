@@ -87,6 +87,14 @@
     (and follow? (some? unsent))
     (conj ["penpot:preview-go" {:frameId (dm/str unsent)}])))
 
+(defn edited-changes
+  "What `commit` (see `dch/commit`) changed in the file `file-id`, for the
+  view mode of the preview to show as it is made, before it is saved
+  (see `dv/apply-preview-changes`); nil for another file."
+  [{:keys [redo-changes] :as commit} file-id]
+  (when (and (= file-id (:file-id commit)) (seq redo-changes))
+    redo-changes))
+
 (defn open-preview
   "The preview open, from the board of the selection (see
   `start-frame-id`)."
@@ -101,6 +109,8 @@
                    :frame-id (start-frame-id objects selected)})))))
 
 (defn close-preview
+  "The preview closed: it stays loaded, hidden, to open again at once
+  (see `app.main.ui.workspace.prototype-preview`)."
   []
   (ptk/reify ::close-preview
     ptk/UpdateEvent

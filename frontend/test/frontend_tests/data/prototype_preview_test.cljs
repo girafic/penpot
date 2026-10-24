@@ -7,8 +7,11 @@
 (ns frontend-tests.data.prototype-preview-test
   "The preview of the prototype in the workspace: the board it starts
   at, the history of its screens in the view mode, the boards the
-  workspace sends it to and its zoom."
+  workspace sends it to, its zoom, what is edited as it is made, and
+  hidden while closed."
   (:require
+   [app.common.transit :as tr]
+   [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
    [app.main.data.workspace.prototype-preview :as dwpp]
@@ -244,3 +247,78 @@
         (unchecked-set global "name" name)
         (unchecked-set global "top" top)))))
 
+
+(def ^:private file-id (uuid/custom 3 4))
+(def ^:private board-c (uuid/custom 2 6))
+
+(defn- file-state
+  "The view mode as a preview of the page with `objects` of the file,
+  as fetched (see `dv/bundle-fetched`)."
+  []
+  (let [file  {:id file-id
+               :data {:pages [page-id]
+                      :pages-index {page-id {:id page-id :objects objects}}}}
+        query {:file-id (str file-id) :page-id (str page-id) :index "0"}]
+    {:route {:query-params query :params {:query query}}
+     :files {file-id file}
+     :viewer {:file file
+              :pages {page-id {:frames [{:id board-a} {:id board-b}]}}}
+     :viewer-preview {:back [] :forward [] :index 0}}))
+
+(def ^:private edits
+  "A board added and another renamed, in the workspace."
+  [{:type :add-obj :id board-c :page-id page-id :parent-id uuid/zero :frame-id uuid/zero
+    :obj (cts/setup-shape {:id board-c :type :frame :name "C" :x 0 :y 0 :width 100 :height 100
+                           :parent-id uuid/zero :frame-id uuid/zero})}
+   {:type :mod-obj :page-id page-id :id board-b
+    :operations [{:type :set :attr :name :val "Renamed"}]}])
+
+(t/deftest the-workspace-sends-what-it-edits-in-its-file
+  (t/is (= edits (dwpp/edited-changes {:file-id file-id :redo-changes edits} file-id)))
+  (t/is (nil? (dwpp/edited-changes {:file-id (uuid/next) :redo-changes edits} file-id))
+        "not what it edits in another file")
+  (t/is (nil? (dwpp/edited-changes {:file-id file-id :redo-changes []} file-id))
+        "nothing for a commit without changes")
+  (t/testing "as the view mode reads it again"
+    ;; a shape comes back as the renderer reads shapes, with what it holds
+    (let [read (tr/decode-str (tr/encode-str edits))]
+      (t/is (= (map (juxt :type :id) edits) (map (juxt :type :id) read)))
+      (t/is (= ["C" :frame 100 100] ((juxt :name :type :width :height) (get-in read [0 :obj]))))
+      (t/is (= (get edits 1) (get read 1))))))
+
+(t/deftest ^:async what-is-edited-shows-in-the-preview-as-it-is-made
+  (let [stale   (atom 0)
+        changes (tr/decode-str (tr/encode-str edits))
+        applied (dv/apply-preview-changes changes #(swap! stale inc))
+        state   (ptk/update applied (file-state))
+        events  (await (emits applied state))
+        broken  (dv/apply-preview-changes [{:type ::nope}] #(swap! stale inc))
+        kept    (ptk/update broken (file-state))
+        _       (ptk/effect applied state nil)]
+    (t/testing "the file the view mode shows, and the boards it lists"
+      (t/is (= "Renamed" (get-in state [:viewer :file :data :pages-index page-id :objects board-b :name])))
+      (t/is (some #{board-c} (map :id (get-in state [:viewer :pages page-id :frames]))))
+      (t/is (identical? (get-in state [:viewer :file]) (get-in state [:files file-id]))
+            "the files it reads the mains and sounds from too")
+      (t/is (= [::dv/update-page-position-data] (map ptk/type events)) "its texts laid out")
+      (t/is (zero? @stale)))
+    (t/testing "what does not apply: the view mode stays, and asks for what was saved"
+      (t/is (= (file-state) kept))
+      (ptk/effect broken kept nil)
+      (t/is (= 1 @stale))
+      (t/is (empty? (await (emits broken kept)))))))
+
+(t/deftest ^:async a-hidden-preview-plays-nothing
+  (let [hide   (dv/preview-hidden true)
+        show   (dv/preview-hidden false)
+        hidden (ptk/update hide (viewer-state 0 nil))]
+    (t/is (dv/preview-hidden? hidden))
+    (t/is (= [::dv/pause-timeline] (map ptk/type (await (emits hide hidden)))) "what plays stops")
+    (t/is (not (dv/preview-hidden? (ptk/update show hidden))))
+    (t/is (empty? (await (emits show hidden))) "shown, it plays as the board shows")
+    (t/is (= {} (ptk/update hide {})) "the view mode outside a preview has none")))
+
+(t/deftest ^:async a-refresh-says-when-it-is-done
+  (let [done (atom 0)]
+    (await (emits (dv/refresh-bundle #(swap! done inc)) {}))
+    (t/is (= 1 @done) "for the workspace to send what it missed meanwhile")))
