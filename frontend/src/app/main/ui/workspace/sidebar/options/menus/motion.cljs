@@ -23,6 +23,7 @@
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.animation-styles :as dwas]
+   [app.main.data.workspace.undo :as dwu]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu* dropdown-menu-item*]]
@@ -1413,6 +1414,24 @@
         on-easing-custom
         (mf/use-fn #(reset! custom-open* true))
 
+        ;; a drag of a handle of its curve is one undo step
+        undo-ref
+        (mf/use-ref nil)
+
+        on-easing-drag-start
+        (mf/use-fn
+         (fn []
+           (let [undo-id (js/Symbol)]
+             (mf/set-ref-val! undo-ref undo-id)
+             (st/emit! (dwu/start-undo-transaction undo-id)))))
+
+        on-easing-drag-end
+        (mf/use-fn
+         (fn []
+           (when-let [undo-id (mf/ref-val undo-ref)]
+             (mf/set-ref-val! undo-ref nil)
+             (st/emit! (dwu/commit-undo-transaction undo-id)))))
+
         easing-editor?
         (or (deref custom-open*)
             (contains? #{:custom-bezier :custom-spring} (easing/easing-entry easing)))
@@ -1430,6 +1449,10 @@
            (if draft?
              (on-remove)
              (st/emit! (dwa/remove-link shape-id property)))))]
+
+    ;; a drag cut short by the item going away still ends its undo step
+    (mf/with-effect []
+      on-easing-drag-end)
 
     [:div {:class (stl/css :link-item)}
      (if draft?
@@ -1510,7 +1533,9 @@
                                  :on-custom on-easing-custom}]]
               (when easing-editor?
                 [:> easing-curve-editor* {:easing easing
-                                          :on-change on-easing}])
+                                          :on-change on-easing
+                                          :on-change-start on-easing-drag-start
+                                          :on-change-end on-easing-drag-end}])
               [:div {:class (stl/css :link-range)
                      :title (tr "workspace.animation.link-clamp.hint")}
                [:> checkbox* {:id (dm/str "link-clamp-" (name property))

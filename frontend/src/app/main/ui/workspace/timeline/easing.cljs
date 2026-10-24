@@ -760,16 +760,21 @@
          (when-let [text (token-value-text value)]
            [:span {:class (stl/css :token-value) :title text} text])])]]))
 
+(def ^:private noop
+  (constantly nil))
+
 (mf/defc easing-curve-editor*
   "The editor of the custom `easing` (a cubic bezier or a spring) of a
-  preset animation or of a style entry, under its menu (see
-  `easing-menu*`): the graph with its handles to drag, then the values
-  of the curve or the bounce of the spring. A new easing goes to
+  preset animation, a style entry or the range of a link, under its menu
+  (see `easing-menu*`): the graph with its handles to drag, then the
+  values of the curve or the bounce of the spring. A new easing goes to
   `on-change`; a drag starts with `on-change-start` and ends with
-  `on-change-end`."
+  `on-change-end`, when given."
   [{:keys [easing disabled on-change on-change-start on-change-end]}]
-  (let [spring? (= :spring (:type easing))
-        curve   (cta/easing-curve easing)
+  (let [spring?         (= :spring (:type easing))
+        curve           (cta/easing-curve easing)
+        on-change-start (d/nilv on-change-start noop)
+        on-change-end   (d/nilv on-change-end noop)
 
         on-curve-change
         (mf/use-fn
