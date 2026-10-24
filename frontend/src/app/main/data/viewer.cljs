@@ -206,21 +206,44 @@
 (declare go-to-frame-by-index)
 (declare go-to-frame-auto)
 
+(defn- viewer-page
+  "The page `page-id` of `file` as the viewer shows it: its data, with
+  the boards it lists (`:frames`, not hidden in view mode) and all of
+  them (`:all-frames`)."
+  [file page-id]
+  (let [data (dm/get-in file [:data :pages-index page-id])]
+    (assoc data
+           :frames (ctt/get-viewer-frames (:objects data))
+           :all-frames (ctt/get-viewer-frames (:objects data) {:all-frames? true}))))
+
+(def ^:private page-change-types
+  #{:add-page :mod-page :del-page :mov-page})
+
+(defn- changed-page-ids
+  "The pages `changes` change: those of the shapes they change, and those
+  they add, change, move or remove."
+  [changes]
+  (into #{}
+        (keep (fn [{:keys [type page-id id page]}]
+                (or page-id
+                    (when (contains? page-change-types type)
+                      (or id (:id page))))))
+        changes))
+
 (defn- apply-changes
   "`state` with `changes` applied to the file the viewer shows, without
-  saving them, and the boards of its pages listed again."
+  saving them, and the boards of the pages they change listed again (see
+  `viewer-page`); the other pages stay as they are."
   [state changes]
-  (let [file (-> (dm/get-in state [:viewer :file])
-                 (update :data cpc/process-changes changes false))
-
-        pages
-        (->> (dm/get-in file [:data :pages])
-             (map (fn [page-id]
-                    (let [data (get-in file [:data :pages-index page-id])]
-                      [page-id (assoc data
-                                      :frames (ctt/get-viewer-frames (:objects data))
-                                      :all-frames (ctt/get-viewer-frames (:objects data) {:all-frames? true}))])))
-             (into {}))]
+  (let [file   (-> (dm/get-in state [:viewer :file])
+                   (update :data cpc/process-changes changes false))
+        listed (set (dm/get-in file [:data :pages]))
+        pages  (reduce (fn [pages page-id]
+                         (if (contains? listed page-id)
+                           (assoc pages page-id (viewer-page file page-id))
+                           (dissoc pages page-id)))
+                       (dm/get-in state [:viewer :pages])
+                       (changed-page-ids changes))]
 
     (-> state
         (assoc-in [:viewer :file] file)
@@ -305,13 +328,9 @@
   "`state` with the view-only `bundle` (see `load-bundle`) as what the
   viewer shows."
   [state {:keys [project file team share-links libraries users permissions thumbnails]}]
-  (let [pages   (->> (dm/get-in file [:data :pages])
-                     (map (fn [page-id]
-                            (let [data (get-in file [:data :pages-index page-id])]
-                              [page-id (assoc data
-                                              :frames (ctt/get-viewer-frames (:objects data))
-                                              :all-frames (ctt/get-viewer-frames (:objects data) {:all-frames? true}))])))
-                     (into {}))
+  (let [pages   (into {}
+                      (map (juxt identity (partial viewer-page file)))
+                      (dm/get-in file [:data :pages]))
         team-id (:id team)
         team    (assoc team :members users)]
     (-> state

@@ -380,3 +380,21 @@
     (run! tm/dispose! shown)
     (t/is (= 1 (count shown)) "shown: its after-delay interaction, timed")
     (t/is (empty? hidden) "hidden: none, until it shows again")))
+
+(t/deftest only-the-pages-edited-are-listed-again
+  (let [other   (uuid/custom 3 9)
+        added   (uuid/custom 3 10)
+        state   (-> (file-state)
+                    (update-in [:viewer :file :data :pages] conj other)
+                    (assoc-in [:viewer :file :data :pages-index other] {:id other :name "Other" :objects {}})
+                    (assoc-in [:viewer :pages other] {:id other :frames []}))
+        kept    (get-in state [:viewer :pages other])
+        edited  (ptk/update (dv/apply-preview-changes edits (fn [] nil)) state)
+        paged   (ptk/update (dv/apply-preview-changes [{:type :add-page :id added :name "Added"}
+                                                       {:type :del-page :id other}]
+                                                      (fn [] nil))
+                            state)]
+    (t/is (identical? kept (get-in edited [:viewer :pages other])) "another page stays as it is")
+    (t/is (some #{board-c} (map :id (get-in edited [:viewer :pages page-id :frames]))) "the one edited is listed again")
+    (t/is (contains? (get-in paged [:viewer :pages]) added) "a page added")
+    (t/is (not (contains? (get-in paged [:viewer :pages]) other)) "a page removed")))
