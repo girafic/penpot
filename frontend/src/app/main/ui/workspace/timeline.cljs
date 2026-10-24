@@ -978,16 +978,20 @@
                   :on-click on-path-click}
          (tr "workspace.animation.rides" path-name)]
 
-        ;; its first link (see `cta/links-of`), its source selected by a click
+        ;; its first link (see `cta/links-of`), its source selected by a
+        ;; click: short as the others, which property plays which in its
+        ;; title (and in the row of the property)
         (some? link)
         [:button {:type "button"
                   :class (stl/css :follow-chip)
-                  :title (tr "workspace.animation.links-hint")
+                  :title (dm/str (tr "workspace.animation.linked"
+                                     (labels/property-label (:property link) nil)
+                                     link-name
+                                     (labels/property-label (:source-property link) nil))
+                                 "\n"
+                                 (tr "workspace.animation.links-hint"))
                   :on-click on-link-click}
-         (tr "workspace.animation.linked"
-             (labels/property-label (:property link) nil)
-             link-name
-             (labels/property-label (:source-property link) nil))])
+         (tr "workspace.animation.linked-to" link-name)])
       ;; Out of the board, which still animates it (see `outside-ids`).
       (when outside?
         [:span {:class (stl/css :outside-hint)

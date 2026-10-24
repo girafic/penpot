@@ -7025,6 +7025,10 @@ msgid "workspace.animation.linked"
 msgstr "%s ← %s · %s"
 
 #: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.linked-to"
+msgstr "Linked to %s"
+
+#: src/app/main/ui/workspace/timeline.cljs
 msgid "workspace.animation.linked-row"
 msgstr "← %s"
 

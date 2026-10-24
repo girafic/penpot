@@ -741,8 +741,9 @@ $header-height: $ruler-height + $row-height;
 
 // Show / hide and lock / unlock, like the layers panel: shown under the
 // pointer and on selected layers; a hidden or locked row keeps its button.
-// Property, animation and audio rows keep room for them, so their other
-// controls stay in place. An audio row mutes its clips instead of hiding.
+// Every row keeps room for them, so what is before them (the chip of a
+// layer, the controls of a property) stays in place as they show. An audio
+// row mutes its clips instead of hiding.
 .row-toggles {
   display: flex;
   align-items: center;
@@ -762,6 +763,7 @@ $header-height: $ruler-height + $row-height;
   cursor: pointer;
 
   .has-state &,
+  .layer-row &,
   .property-row &,
   .animation-row &,
   .audio-row & {
