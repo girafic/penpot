@@ -1955,7 +1955,7 @@
                             (obj/set! link "input" (clj->js input))
                             (obj/set! link "output" (clj->js output))
                             (obj/set! link "clamp" clamp)
-                            (obj/set! link "easing" (name easing)))
+                            (obj/set! link "easing" (format-easing {:easing easing})))
                           link))
                       (cta/links-of (locate) shape-id)))))
 
@@ -1978,7 +1978,9 @@
                 input     (pair "input")
                 output    (pair "output")
                 clamp     (prop "clamp")
-                easing    (some-> (prop "easing") keyword)
+                ;; a curve, a bezier or a spring, as a keyframe's
+                easing-in (prop "easing")
+                easing    (some-> easing-in (parse-easing false) :easing)
                 objects   (u/locate-objects file-id page-id)
                 timeline  (or (locate) (cta/make-timeline {:board-id board-id}))
                 names     (str/join ", " (map #(dm/str "'" (get property-names %) "'") cta/link-properties))
@@ -2015,8 +2017,8 @@
                             (and (some? clamp) (not (boolean? clamp)))
                             "clamp should be a boolean"
 
-                            (and (some? easing) (not (contains? cta/link-easings easing)))
-                            (dm/str "easing should be one of " (str/join ", " (map #(dm/str "'" (name %) "'") (sort cta/link-easings))))
+                            (and (some? easing-in) (nil? easing))
+                            "Not a valid easing"
 
                             (not (cltl/can-link? objects timeline source-id))
                             "The source should be a layer of the board")]

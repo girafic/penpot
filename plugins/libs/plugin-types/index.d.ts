@@ -5606,7 +5606,8 @@ export interface Link {
   readonly clamp?: boolean;
 
   /**
-   * With a range: the curve it follows from one end to the other.
+   * With a range: the curve it follows from one end to the other, a
+   * preset name, a bezier or a spring.
    */
   readonly easing?: LinkEasing;
 }
@@ -5726,9 +5727,18 @@ export interface WiggleProps {
 export type TrimMode = 'together' | 'in-turn';
 
 /**
- * The curve a link with a range follows, see `LinkProps.easing`.
+ * The curve a link with a range follows, see `LinkProps.easing`: a curve
+ * a keyframe takes (see `MotionEasing`), but `hold`. A spring may swing
+ * past the end of the output, as a keyframe's past its value.
  */
-export type LinkEasing = 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
+export type LinkEasing =
+  | 'linear'
+  | 'ease'
+  | 'ease-in'
+  | 'ease-out'
+  | 'ease-in-out'
+  | { type: 'bezier'; curve: [number, number, number, number] }
+  | { type: 'spring'; stiffness: number; damping: number; mass: number };
 
 /**
  * A link to set with `Timeline.link`.
@@ -5794,8 +5804,15 @@ export interface LinkProps {
   clamp?: boolean;
 
   /**
-   * The curve from one end of the range to the other. `'linear'` by
-   * default.
+   * The curve from one end of the range to the other: a preset name, a
+   * bezier or a spring, as a keyframe's. `'linear'` by default.
+   *
+   * @example
+   * ```js
+   * timeline.link(needle, { property: 'rotation', source: knob, sourceProperty: 'x',
+   *   input: [0, 200], output: [0, 270],
+   *   easing: { type: 'spring', stiffness: 600, damping: 15, mass: 1 } });
+   * ```
    */
   easing?: LinkEasing;
 }

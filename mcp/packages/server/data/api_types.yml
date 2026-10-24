@@ -20098,7 +20098,8 @@ Link:
         readonly easing?: LinkEasing
         ```
 
-        With a range: the curve it follows from one end to the other.
+        With a range: the curve it follows from one end to the other, a
+        preset name, a bezier or a spring.
 Wiggle:
   overview: |-
     Interface Wiggle
@@ -20349,8 +20350,13 @@ LinkProps:
         easing?: LinkEasing
         ```
 
-        The curve from one end of the range to the other. `'linear'` by
-        default.
+        The curve from one end of the range to the other: a preset name, a
+        bezier or a spring, as a keyframe's. `'linear'` by default.
+
+        Example
+        ```
+        timeline.link(needle, { property: 'rotation', source: knob, sourceProperty: 'x',  input: [0, 200], output: [0, 270],  easing: { type: 'spring', stiffness: 600, damping: 15, mass: 1 } });
+        ```
 Ik:
   overview: |-
     Interface Ik
@@ -29951,10 +29957,19 @@ LinkEasing:
     =====================
 
     ```
-    LinkEasing: "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
+    LinkEasing:
+        | "linear"
+        | "ease"
+        | "ease-in"
+        | "ease-out"
+        | "ease-in-out"
+        | { type: "bezier"; curve: [number, number, number, number] }
+        | { type: "spring"; stiffness: number; damping: number; mass: number }
     ```
 
-    The curve a link with a range follows, see `LinkProps.easing`.
+    The curve a link with a range follows, see `LinkProps.easing`: a curve
+    a keyframe takes (see `MotionEasing`), but `hold`. A spring may swing
+    past the end of the output, as a keyframe's past its value.
 
     Referenced by: Link, LinkProps
   members: {}

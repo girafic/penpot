@@ -7009,6 +7009,17 @@
       (t/is (every? true? (map near? [-135 405] (map #(rot (ranged :clamp false) %) [0 1000])))))
     (t/testing "along a curve"
       (t/is (near? (* 270 (cta/easing-progress :ease-in 0.5)) (rot (ranged :easing :ease-in) 500))))
+    (t/testing "along a bezier or a spring, as a keyframe eases"
+      (let [bezier {:type :bezier :curve [0.34 1.56 0.64 1.0]}
+            spring {:type :spring :stiffness 600 :damping 15 :mass 1}]
+        (t/is (cta/valid-timeline? (ranged :easing bezier)))
+        (t/is (cta/valid-timeline? (ranged :easing spring)))
+        (t/is (near? (* 270 (cta/easing-progress bezier 0.5)) (rot (ranged :easing bezier) 500)))
+        ;; at a moment it samples (a sixtieth of a second apart)
+        (t/is (near? (* 270 (cta/easing-progress spring 0.5)) (rot (ranged :easing spring) 500)))
+        (t/is (> (reduce max (map #(rot (ranged :easing spring) %) (range 250 751 10))) 275)
+              "a spring swings past the end of its output")
+        (t/is (not (cta/valid-timeline? (ranged :easing :bounce))) "not a curve a keyframe knows")))
     (t/testing "a delay plays it later"
       (t/is (near? (rot (ranged) 400) (rot (ranged :delay 100) 500))))
     (t/testing "a range takes both ends"

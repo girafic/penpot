@@ -399,6 +399,15 @@
               "a clamp as absence")
         (t/is (= {:input [0 200] :output [0 270] :clamp true :easing "ease-in-out"}
                  (select-keys (link) [:input :output :clamp :easing])))
+        (t/testing "a bezier or a spring, as a keyframe's"
+          (.link timeline needle #js {:property "rotation" :source slider :input #js [0 200] :output #js [0 270]
+                                      :easing #js {:type "spring" :stiffness 600 :damping 15 :mass 1}})
+          (t/is (= {:type :spring :stiffness 600 :damping 15 :mass 1}
+                   (:easing (first (:links (stored-track store context board needle))))))
+          (t/is (= {:type "spring" :stiffness 600 :damping 15 :mass 1} (:easing (link))))
+          (.link timeline needle #js {:property "rotation" :source slider :input #js [0 200] :output #js [0 270]
+                                      :easing #js {:type "bezier" :curve #js [0.34 1.56 0.64 1]}})
+          (t/is (= {:type "bezier" :curve [0.34 1.56 0.64 1]} (:easing (link)))))
         (t/testing "what cannot map is refused"
           (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider :input #js [0 200]}))
                 "an input without an output")
@@ -408,7 +417,11 @@
                                                               :input #js [0 js/NaN] :output #js [0 1]}))
                 "a number that is none")
           (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider
-                                                              :input #js [0 1] :output #js [0 1] :easing "bounce"}))))))))
+                                                              :input #js [0 1] :output #js [0 1] :easing "bounce"})))
+          (t/is (thrown? js/Error (.link timeline needle #js {:property "rotation" :source slider
+                                                              :input #js [0 1] :output #js [0 1]
+                                                              :easing #js {:type "spring" :stiffness 600}}))
+                "a spring without its damping and mass"))))))
 
 (t/deftest the-light-of-a-board-takes-keyframes
   (thw/with-wasm-mocks*

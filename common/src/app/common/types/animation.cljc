@@ -476,21 +476,17 @@
   of one number each."
   [:x :y :width :height :rotation :scale-x :scale-y :opacity :rotate-x :rotate-y :translate-z :blur])
 
-(def link-easings
-  "The curves a link with a range maps its source along (see
-  `schema:link`)."
-  #{:linear :ease :ease-in :ease-out :ease-in-out})
-
 (def schema:link
   "How a property of a layer plays one of another layer of its board, its
   source (see `links-of`): `rest + factor × (source − source rest) +
   offset`, `:delay` ms after the source, so that linking never moves it
   at rest (an AE pick whip with a linear expression). With a range, the
   source going from the `:input` `[a b]` takes it from the `:output` `[c
-  d]` along the `:easing` curve, kept within them unless `:clamp` is false
-  (an AE `linear()` or `ease()` expression; factor and offset left
-  aside). A factor of 1, an offset and a delay of 0, a clamp and a linear
-  easing are stored as absence."
+  d]` along the `:easing` of a keyframe (a named curve, a bezier or a
+  spring, which may swing past the end of the output), the source kept
+  within the input unless `:clamp` is false (an AE `linear()` or `ease()`
+  expression; factor and offset left aside). A factor of 1, an offset and
+  a delay of 0, a clamp and a linear easing are stored as absence."
   [:map {:title "AnimationLink"}
    [:property [::sm/one-of (set link-properties)]]
    [:source ::sm/uuid]
@@ -501,7 +497,7 @@
    [:input {:optional true} [:tuple ::sm/safe-number ::sm/safe-number]]
    [:output {:optional true} [:tuple ::sm/safe-number ::sm/safe-number]]
    [:clamp {:optional true} :boolean]
-   [:easing {:optional true} [::sm/one-of link-easings]]])
+   [:easing {:optional true} schema:easing]])
 
 (def wiggle-properties
   "The properties a wiggle shakes (see `schema:wiggle`): those of one

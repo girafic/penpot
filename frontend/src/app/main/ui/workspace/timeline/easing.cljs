@@ -645,8 +645,9 @@
   token to `on-token`, and Custom bezier and Custom spring call
   `on-custom` too, to open their editor (see `easing-curve-editor*`);
   while it is open (`is-custom`) the menu names the easing custom, even
-  when it is still one of the named ones."
-  [{:keys [easing auto-easing token tokens is-custom disabled on-change on-token on-custom]}]
+  when it is still one of the named ones. `without-auto` leaves Auto out,
+  for an easing that is never one (the range of a link)."
+  [{:keys [easing auto-easing token tokens is-custom disabled without-auto on-change on-token on-custom]}]
   (let [open*     (mf/use-state false)
         open?     (deref open*)
         up*       (mf/use-state false)
@@ -729,7 +730,8 @@
                          :class (stl/css-case :preset-list true
                                               :field-list true
                                               :up up?)}
-      (for [{:keys [id easing]} field-curve-items]
+      (for [{:keys [id easing]} (cond->> field-curve-items
+                                  (true? without-auto) (remove #(= :auto (:id %))))]
         [:> easing-item* {:key (name id)
                           :entry id
                           ;; Auto is drawn as what it plays

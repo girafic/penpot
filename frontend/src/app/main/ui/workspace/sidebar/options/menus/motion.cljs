@@ -1398,10 +1398,24 @@
         on-output-from (mf/use-fn (mf/deps on-range-end) #(on-range-end :output 0 %))
         on-output-to   (mf/use-fn (mf/deps on-range-end) #(on-range-end :output 1 %))
 
+        ;; the curve of a range: a named one, a bezier or a spring, as a
+        ;; keyframe's; a custom one opens its editor under the menu
+        custom-open*
+        (mf/use-state false)
+
         on-easing
         (mf/use-fn
          (mf/deps shape-id property)
-         #(st/emit! (dwa/update-link shape-id property {:easing (keyword %)})))
+         (fn [easing]
+           (reset! custom-open* false)
+           (st/emit! (dwa/update-link shape-id property {:easing easing}))))
+
+        on-easing-custom
+        (mf/use-fn #(reset! custom-open* true))
+
+        easing-editor?
+        (or (deref custom-open*)
+            (contains? #{:custom-bezier :custom-spring} (easing/easing-entry easing)))
 
         on-clamp
         (mf/use-fn
@@ -1489,15 +1503,14 @@
                                     :value (second output)
                                     :on-change on-output-to}]]]
               [:> animation-row* {:label (tr "workspace.options.interaction-easing")}
-               [:> select* {:class (stl/css :follow-leader-select)
-                            :options [{:id "linear" :label (tr "workspace.options.interaction-easing-linear")}
-                                      {:id "ease" :label (tr "workspace.options.interaction-easing-ease")}
-                                      {:id "ease-in" :label (tr "workspace.options.interaction-easing-ease-in")}
-                                      {:id "ease-out" :label (tr "workspace.options.interaction-easing-ease-out")}
-                                      {:id "ease-in-out" :label (tr "workspace.options.interaction-easing-ease-in-out")}]
-                            :default-selected (name easing)
-                            :aria-label (tr "workspace.options.interaction-easing")
-                            :on-change on-easing}]]
+               [:> easing-menu* {:easing easing
+                                 :without-auto true
+                                 :is-custom easing-editor?
+                                 :on-change on-easing
+                                 :on-custom on-easing-custom}]]
+              (when easing-editor?
+                [:> easing-curve-editor* {:easing easing
+                                          :on-change on-easing}])
               [:div {:class (stl/css :link-range)
                      :title (tr "workspace.animation.link-clamp.hint")}
                [:> checkbox* {:id (dm/str "link-clamp-" (name property))
