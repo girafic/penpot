@@ -220,6 +220,15 @@
     (t/is (= [0.0 0.167 0.667 0.5] (mapv #(mth/precision (:opacity %) 3) lines))
           "every second half as opaque: dimmer, whatever the colours")
     (t/is (= [2.5 2.5 1 2.5] (mapv :width lines)) "the accent its own width"))
+  (t/testing "an accent on a striped line stands out"
+    (let [rect  (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 50})
+          spec  {:count 4 :spacing 10
+                 :inner-color "#000000" :inner-opacity 0 :outer-color "#ffffff" :outer-opacity 1
+                 :stripe-every 2 :stripe-dim 0.5
+                 :accents [{:line 4 :color "#ff0000"} {:line 2 :color "#00ff00" :opacity 0.9}]}
+          lines (gol/lines rect spec)]
+      (t/is (= [0.0 0.9 0.667 1.0] (mapv #(mth/precision (:opacity %) 3) lines))
+            "the fourth at the opacity of where it is, the second at its own")))
   (t/testing "what is not valid is refused"
     (let [valid? #(sm/validate cts/schema:offset-lines (merge gol/defaults %))]
       (t/is (valid? {:stripe-every 3 :stripe-dim 0.22 :accents [{:line 9 :color "#FF7A7A" :opacity 0.6}]}))

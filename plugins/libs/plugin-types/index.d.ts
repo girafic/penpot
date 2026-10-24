@@ -2827,7 +2827,8 @@ export interface OffsetLinesSettings {
   stripeEvery?: number | null;
   /**
    * How much dimmer the striped lines are: the share of their opacity
-   * they lose, 0 to 1. Defaults to 0.
+   * they lose, 0 to 1. A line with an accent is never dimmed. Defaults
+   * to 0.
    */
   stripeDim?: number;
   /**

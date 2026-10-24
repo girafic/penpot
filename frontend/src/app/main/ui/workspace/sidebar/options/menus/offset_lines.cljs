@@ -187,7 +187,7 @@
         [:> labelled-number* {:label "" :hint (tr "workspace.options.offset-lines.outer.hint")
                               :unit "%" :min 0 :max 100 :scale 100 :value (:outer-opacity spec) :disabled copy?
                               :on-change #(change :outer-opacity (mth/clamp % 0 1))}]
-        ;; the dark threads: every nth line back towards the inner colour
+        ;; the dark threads: every nth line dimmer
         [:> labelled-number* {:label (tr "workspace.options.offset-lines.stripes")
                               :hint (tr "workspace.options.offset-lines.stripes.hint")
                               :unit "" :min 0 :max 200 :value (or (:stripe-every spec) 0) :disabled copy?

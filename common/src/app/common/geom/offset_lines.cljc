@@ -461,7 +461,8 @@
   the inner side to the outer one it is at, but every `:stripe-every`th
   line dimmer, its opacity less by the share `:stripe-dim` (the dark
   threads of a light painting), and an accent of `:accents` for it,
-  `{:line :color :opacity :width}`, in place of what it gives."
+  `{:line :color :opacity :width}`, in place of what it gives: an accent
+  stands out, a stripe never dims it."
   [spec number n]
   (let [t        (if (> n 1) (/ (dec number) (dec n)) 1)
         every    (:stripe-every spec)
@@ -469,7 +470,8 @@
         opacity  (+ (:inner-opacity spec) (* t (- (:outer-opacity spec) (:inner-opacity spec))))
         accent   (d/seek #(= number (:line %)) (:accents spec))]
     (merge {:color   (mix (:inner-color spec) (:outer-color spec) t)
-            :opacity (cond-> opacity striped? (* (- 1 (:stripe-dim spec 0))))
+            :opacity (cond-> opacity
+                       (and striped? (nil? accent)) (* (- 1 (:stripe-dim spec 0))))
             :width   (:width spec)}
            (some-> accent (select-keys [:color :opacity :width])))))
 
