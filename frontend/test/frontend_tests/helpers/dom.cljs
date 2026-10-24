@@ -26,7 +26,10 @@
   "Call `f` with `{:root :document :window}`, a React root to render in
   and the DOM of jsdom that holds it, the global DOM meanwhile: the root
   unmounts and the globals are as they were after, once the promise `f`
-  returns, if any, has settled (it is returned then)."
+  returns, if any, has settled (it is returned then). The window of jsdom
+  closes then: what it queued (a `selectionchange` after the focus moved)
+  would reach the listeners React leaves on its document once there is no
+  global window any more (\"window is not defined\" in a later test)."
   [f]
   (let [window  (.-window (JSDOM. "<!doctype html><body><div id=\"root\"></div></body>"
                                   #js {:pretendToBeVisual true}))
@@ -52,7 +55,8 @@
                       (js-delete js/globalThis k)))
                   (unchecked-set js/globalThis "IS_REACT_ACT_ENVIRONMENT" act-env)
                   (set! globals/document app-doc)
-                  (set! globals/window app-win))
+                  (set! globals/window app-win)
+                  (.close window))
         result  (try
                   (f {:root root :document (.-document window) :window window})
                   (catch :default cause
