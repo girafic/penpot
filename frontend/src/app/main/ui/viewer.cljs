@@ -662,9 +662,12 @@
               parent   (.-parent js/window)
               origin   (.. js/window -location -origin)
 
+              ;; as it shows, unless it hid again meanwhile (the sound
+              ;; may make it wait)
               replay
               (fn []
-                (let [play #(st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id))]
+                (let [play #(when-not (dv/preview-hidden? @st/state)
+                              (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))]
                   (if board-sound?
                     (do (audio/unlock!)
                         (audio/when-running play 200))

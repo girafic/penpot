@@ -16,7 +16,9 @@
    [app.main.data.viewer :as dv]
    [app.main.data.workspace.prototype-preview :as dwpp]
    [app.main.router :as rt]
+   [app.main.ui.viewer.shapes]
    [app.util.storage :as storage]
+   [app.util.timers :as tm]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.async :as async]
@@ -352,3 +354,15 @@
     (t/is (false? (resync? {:refreshing? true})) "a fetch is under way")
     (t/is (false? (resync? {:saved? false})) "not saved yet")))
 
+(t/deftest no-prototype-timer-runs-in-a-hidden-preview
+  ;; a board that goes on to the next after a delay, as a slide does
+  (let [on-load #'app.main.ui.viewer.shapes/on-load
+        shape   {:id board-a
+                 :interactions [{:event-type :after-delay :delay 2000
+                                 :action-type :navigate :destination board-b}
+                                {:event-type :click :action-type :navigate :destination board-b}]}
+        shown   (on-load shape nil nil objects [] false)
+        hidden  (on-load shape nil nil objects [] true)]
+    (run! tm/dispose! shown)
+    (t/is (= 1 (count shown)) "shown: its after-delay interaction, timed")
+    (t/is (empty? hidden) "hidden: none, until it shows again")))

@@ -39,6 +39,9 @@
 (def ^:private ref:viewer-show-interactions
   (l/derived :show-interactions refs/viewer-local))
 
+(def ^:private ref:preview-hidden
+  (l/derived dv/preview-hidden? st/state))
+
 (defn- find-relative-to-base-frame
   [shape objects overlays-ids base-frame]
   (cond
@@ -277,9 +280,13 @@
         (deactivate-interaction interaction shape base-frame frame-offset objects overlays)))))
 
 (defn- on-load
-  [shape base-frame frame-offset objects overlays]
-  (let [interactions (->> (:interactions shape)
-                          (filter #(= (:event-type %) :after-delay)))]
+  "The timers of the after-delay interactions of `shape`, from now; none
+  while the preview of the prototype is `hidden?` (see
+  `dv/preview-hidden`): shown again, they start over."
+  [shape base-frame frame-offset objects overlays hidden?]
+  (let [interactions (when-not hidden?
+                       (->> (:interactions shape)
+                            (filter #(= (:event-type %) :after-delay))))]
     (loop [interactions (seq interactions)
            sems []]
       (if-let [interaction (first interactions)]
@@ -356,6 +363,7 @@
         frame-offset (mf/use-ctx frame-offset-ctx)
         show-interactions (mf/deref ref:viewer-show-interactions)
         overlays     (mf/deref refs/viewer-overlays)
+        hidden?      (mf/deref ref:preview-hidden)
         interactions (:interactions shape)
         {:keys [x y width height]} (:selrect shape)
 
@@ -371,8 +379,8 @@
         outline (mf/with-memo [objects shape]
                   (hotspot-outline (or objects all-objects) shape))]
 
-    (mf/with-effect []
-      (let [sems (on-load shape base-frame frame-offset all-objects overlays)]
+    (mf/with-effect [hidden?]
+      (let [sems (on-load shape base-frame frame-offset all-objects overlays hidden?)]
         (partial run! tm/dispose! sems)))
 
     (when (some? outline)
@@ -442,6 +450,7 @@
           frame-offset       (mf/use-ctx frame-offset-ctx)
           show-interactions  (mf/deref ref:viewer-show-interactions)
           overlays           (mf/deref refs/viewer-overlays)
+          hidden?            (mf/deref ref:preview-hidden)
           interactions       (:interactions shape)
           svg-element?       (and (= :svg-raw (:type shape))
                                   (not= :svg (get-in shape [:content :tag])))
@@ -466,8 +475,8 @@
           (mf/use-fn (mf/deps shape base-frame frame-offset all-objects)
                      #(on-pointer-leave % shape base-frame frame-offset all-objects overlays))]
 
-      (mf/with-effect []
-        (let [sems (on-load shape base-frame frame-offset objects overlays)]
+      (mf/with-effect [hidden?]
+        (let [sems (on-load shape base-frame frame-offset objects overlays hidden?)]
           (partial run! tm/dispose! sems)))
 
       (if-not svg-element?
