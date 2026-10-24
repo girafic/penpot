@@ -9642,7 +9642,7 @@ msgstr "Dim"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
 msgid "workspace.options.offset-lines.dim.hint"
-msgstr "How far the striped lines go back towards the inner colour"
+msgstr "How much dimmer the striped lines are"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
 msgid "workspace.options.offset-lines.stripes"

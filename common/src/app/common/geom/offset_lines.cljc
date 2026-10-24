@@ -459,18 +459,17 @@
   "`{:color :opacity :width}` of the line `number` (1 the innermost) of the
   `n` lines of `spec`: its colour and opacity the share of the way from
   the inner side to the outer one it is at, but every `:stripe-every`th
-  line's colour that much less `:stripe-dim` of the way (the dark threads
-  of a light painting), and an accent of `:accents` for it, `{:line
-  :color :opacity :width}`, in place of what it gives."
+  line dimmer, its opacity less by the share `:stripe-dim` (the dark
+  threads of a light painting), and an accent of `:accents` for it,
+  `{:line :color :opacity :width}`, in place of what it gives."
   [spec number n]
-  (let [t      (if (> n 1) (/ (dec number) (dec n)) 1)
-        every  (:stripe-every spec)
-        tc     (cond-> t
-                 (and (some? every) (zero? (mod number every)))
-                 (* (- 1 (:stripe-dim spec 0))))
-        accent (d/seek #(= number (:line %)) (:accents spec))]
-    (merge {:color   (mix (:inner-color spec) (:outer-color spec) tc)
-            :opacity (+ (:inner-opacity spec) (* t (- (:outer-opacity spec) (:inner-opacity spec))))
+  (let [t        (if (> n 1) (/ (dec number) (dec n)) 1)
+        every    (:stripe-every spec)
+        striped? (and (some? every) (zero? (mod number every)))
+        opacity  (+ (:inner-opacity spec) (* t (- (:outer-opacity spec) (:inner-opacity spec))))
+        accent   (d/seek #(= number (:line %)) (:accents spec))]
+    (merge {:color   (mix (:inner-color spec) (:outer-color spec) t)
+            :opacity (cond-> opacity striped? (* (- 1 (:stripe-dim spec 0))))
             :width   (:width spec)}
            (some-> accent (select-keys [:color :opacity :width])))))
 

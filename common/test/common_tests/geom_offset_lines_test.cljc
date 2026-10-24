@@ -215,9 +215,10 @@
                :accents [{:line 3 :color "#ff0000" :width 1}]}
         lines (gol/lines rect spec)]
     (t/is (= [1 2 3 4] (mapv :number lines)) "numbered from the inner side")
-    (t/is (= ["#000000" "#2b2b2b" "#ff0000" "#808080"] (mapv :color lines))
-          "every second half the way back to the inner colour, the third an accent")
-    (t/is (= [0.0 0.333 0.667 1.0] (mapv #(mth/precision (:opacity %) 3) lines)) "the stripes keep their opacity")
+    (t/is (= ["#000000" "#555555" "#ff0000" "#ffffff"] (mapv :color lines))
+          "the colour of where each is, the third an accent")
+    (t/is (= [0.0 0.167 0.667 0.5] (mapv #(mth/precision (:opacity %) 3) lines))
+          "every second half as opaque: dimmer, whatever the colours")
     (t/is (= [2.5 2.5 1 2.5] (mapv :width lines)) "the accent its own width"))
   (t/testing "what is not valid is refused"
     (let [valid? #(sm/validate cts/schema:offset-lines (merge gol/defaults %))]

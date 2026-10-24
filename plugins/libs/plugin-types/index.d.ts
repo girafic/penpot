@@ -2826,8 +2826,8 @@ export interface OffsetLinesSettings {
    */
   stripeEvery?: number | null;
   /**
-   * How far the striped lines go back towards the inner colour, 0 to 1.
-   * Defaults to 0.
+   * How much dimmer the striped lines are: the share of their opacity
+   * they lose, 0 to 1. Defaults to 0.
    */
   stripeDim?: number;
   /**
