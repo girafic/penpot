@@ -22,6 +22,7 @@
    [app.config :as cf]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
+   [app.main.data.viewer.preview :as dvp]
    [app.main.data.viewer.shortcuts :as sc]
    [app.main.features :as features]
    [app.main.fonts :as fonts]
@@ -583,7 +584,7 @@
         (when (and (some? clock) (cta/autoplay? clock) (= section :interactions))
           (let [board-id (:id frame)
                 ;; not while the preview is hidden: it plays as it shows
-                play     #(when (and @alive? (not (dv/preview-hidden? @st/state)))
+                play     #(when (and @alive? (not (dvp/preview-hidden? @st/state)))
                             (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))
                 ;; with sound, once the sound can play (see below); the
                 ;; board the view mode opens with comes without a
@@ -630,7 +631,7 @@
     ;; in the workspace.
     (mf/with-effect [preview index (:id frame) (count frames)]
       (when (and preview (some? index))
-        (st/emit! (dv/preview-screen index))
+        (st/emit! (dvp/preview-screen index))
         (when (some? frame)
           ;; where it is among the boards, for the arrows of the bar
           (.postMessage (.-parent js/window)
@@ -666,7 +667,7 @@
               ;; may make it wait)
               replay
               (fn []
-                (let [play #(when-not (dv/preview-hidden? @st/state)
+                (let [play #(when-not (dvp/preview-hidden? @st/state)
                               (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))]
                   (if board-sound?
                     (do (audio/unlock!)
@@ -683,8 +684,8 @@
                     "penpot:preview-stop"  (st/emit! (dv/stop-timeline))
                     "penpot:preview-sound" (do (audio/unlock!)
                                                (st/emit! (dv/toggle-audio-muted)))
-                    "penpot:preview-hide"  (st/emit! (dv/preview-hidden true))
-                    "penpot:preview-show"  (do (st/emit! (dv/preview-hidden false))
+                    "penpot:preview-hide"  (st/emit! (dvp/preview-hidden true))
+                    "penpot:preview-show"  (do (st/emit! (dvp/preview-hidden false))
                                                (when autoplay? (replay)))
                     nil)))]
           (.addEventListener js/window "message" on-message)
@@ -693,7 +694,7 @@
     ;; fitted or filled as it resizes; at 100 % as it is
     (mf/with-effect [preview (:viewport-size local) (:id frame)]
       (when (and preview (some? frame))
-        (st/emit! (dv/refit-preview))))
+        (st/emit! (dvp/refit-preview))))
 
     (mf/with-effect [preview]
       (when preview
@@ -707,7 +708,7 @@
                   (let [data (.-data event)]
                     (case (some-> data (unchecked-get "type"))
                       "penpot:preview-refresh"
-                      (st/emit! (dv/refresh-bundle
+                      (st/emit! (dvp/refresh-bundle
                                  #(.postMessage parent #js {:type "penpot:preview-refreshed"} origin)
                                  #(.postMessage parent #js {:type "penpot:preview-refreshed" :failed true} origin)))
                       ;; what is edited in the workspace, as it is made
@@ -717,16 +718,16 @@
                                        (t/decode-str (unchecked-get data "changes"))
                                        (catch :default _ nil))]
                         (if (vector? changes)
-                          (st/emit! (dv/apply-preview-changes changes on-stale))
+                          (st/emit! (dvp/apply-preview-changes changes on-stale))
                           (on-stale)))
-                      "penpot:preview-prev"    (st/emit! (dv/preview-board :prev))
-                      "penpot:preview-next"    (st/emit! (dv/preview-board :next))
+                      "penpot:preview-prev"    (st/emit! (dvp/preview-board :prev))
+                      "penpot:preview-next"    (st/emit! (dvp/preview-board :next))
                       ;; the board selected in the workspace
                       "penpot:preview-go"      (some->> (unchecked-get data "frameId")
                                                         (uuid/parse*)
                                                         (dv/preview-go)
                                                         (st/emit!))
-                      "penpot:preview-zoom"    (some-> (dv/preview-zoom (unchecked-get data "mode"))
+                      "penpot:preview-zoom"    (some-> (dvp/preview-zoom (unchecked-get data "mode"))
                                                        (st/emit!))
                       "penpot:preview-interactions"
                       (let [mode (keyword (unchecked-get data "mode"))]
@@ -1001,7 +1002,7 @@
                   :share-id share-id}]
       ;; before it shows a screen, which it then shows in its own history
       (when preview
-        (st/emit! (dv/start-preview)))
+        (st/emit! (dvp/start-preview)))
       (st/emit! (dv/initialize params))
       (fn []
         (st/emit! (dv/finalize params)))))

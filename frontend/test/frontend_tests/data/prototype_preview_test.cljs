@@ -14,6 +14,7 @@
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
+   [app.main.data.viewer.preview :as dvp]
    [app.main.data.workspace.prototype-preview :as dwpp]
    [app.main.repo :as rp]
    [app.main.router :as rt]
@@ -56,10 +57,10 @@
   "The state after the preview showed the screens `indexes`, one after
   the other."
   [state indexes]
-  (reduce (fn [state index] (ptk/update (dv/preview-screen index) state)) state indexes))
+  (reduce (fn [state index] (ptk/update (dvp/preview-screen index) state)) state indexes))
 
 (t/deftest the-preview-keeps-its-screens-in-a-history-of-its-own
-  (let [started (ptk/update (dv/start-preview) {})]
+  (let [started (ptk/update (dvp/start-preview) {})]
     (t/testing "its screens replace each other in the history of the browser"
       (t/is (true? (::rt/replace-only started)))
       (t/is (dv/preview? started))
@@ -73,22 +74,22 @@
     (t/testing "back goes to the screen before, which then shows without
                 adding to the history, and forth again"
       (let [state (screens started [0 2 5])
-            back  (ptk/update (dv/preview-step :back) state)
+            back  (ptk/update (dvp/preview-step :back) state)
             _     (t/is (= 2 (get-in back [:viewer-preview :going])))
             back  (screens back [2])
             _     (t/is (= {:back [0] :forward [5] :index 2} (:viewer-preview back)))
-            fwd   (screens (ptk/update (dv/preview-step :forward) back) [5])]
+            fwd   (screens (ptk/update (dvp/preview-step :forward) back) [5])]
         (t/is (= {:back [0 2] :forward [] :index 5} (:viewer-preview fwd)))))
 
     (t/testing "a new screen after going back drops the screens ahead"
       (let [state (-> (screens started [0 2 5])
-                      (as-> s (ptk/update (dv/preview-step :back) s))
+                      (as-> s (ptk/update (dvp/preview-step :back) s))
                       (screens [2 7]))]
         (t/is (= {:back [0 2] :forward [] :index 7} (:viewer-preview state)))))
 
     (t/testing "nothing before the first screen"
       (let [state (screens started [0])]
-        (t/is (= state (ptk/update (dv/preview-step :back) state)))))
+        (t/is (= state (ptk/update (dvp/preview-step :back) state)))))
 
     (t/testing "the view mode outside a preview keeps no history"
       (t/is (= {} (screens {} [0 2]))))))
@@ -118,7 +119,7 @@
         go-a    (dv/preview-go board-a)
         go-in   (dv/preview-go inner)
         waiting (ptk/update go-in state)
-        refresh (#'app.main.data.viewer/bundle-refreshed {})
+        refresh (#'app.main.data.viewer.preview/bundle-refreshed {})
         to-b    (await (emits go-b (ptk/update go-b state)))
         to-a    (await (emits go-a state))
         to-in   (await (emits go-in waiting))
@@ -143,7 +144,7 @@
       (t/is (empty? none) "waiting for none, nowhere"))))
 
 (t/deftest ^:async the-arrows-of-the-preview-go-to-the-board-before-and-after
-  (let [step (fn [direction index] (emits (dv/preview-board direction) (viewer-state index nil)))
+  (let [step (fn [direction index] (emits (dvp/preview-board direction) (viewer-state index nil)))
         to-b   (await (step :next 0))
         past   (await (step :next 1))
         to-a   (await (step :prev 1))
@@ -155,13 +156,13 @@
 
 (t/deftest ^:async the-preview-zooms-as-the-workspace-says
   (let [at     (fn [zoom-type] (assoc-in (viewer-state 0 nil) [:viewer-local :zoom-type] zoom-type))
-        fitted (await (emits (dv/refit-preview) (at :fit)))
-        filled (await (emits (dv/refit-preview) (at :fill)))
-        as-is  (await (emits (dv/refit-preview) (ptk/update dv/reset-zoom (at :fit))))]
-    (t/is (identical? dv/zoom-to-fit (dv/preview-zoom "fit")))
-    (t/is (identical? dv/zoom-to-fill (dv/preview-zoom "fill")))
-    (t/is (identical? dv/reset-zoom (dv/preview-zoom "100")))
-    (t/is (nil? (dv/preview-zoom "200")))
+        fitted (await (emits (dvp/refit-preview) (at :fit)))
+        filled (await (emits (dvp/refit-preview) (at :fill)))
+        as-is  (await (emits (dvp/refit-preview) (ptk/update dv/reset-zoom (at :fit))))]
+    (t/is (identical? dv/zoom-to-fit (dvp/preview-zoom "fit")))
+    (t/is (identical? dv/zoom-to-fill (dvp/preview-zoom "fill")))
+    (t/is (identical? dv/reset-zoom (dvp/preview-zoom "100")))
+    (t/is (nil? (dvp/preview-zoom "200")))
     (t/testing "fitted or filled again as it resizes; at its own size it stays"
       (t/is (= [dv/zoom-to-fit] fitted))
       (t/is (= [dv/zoom-to-fill] filled))
@@ -296,10 +297,10 @@
 (t/deftest ^:async what-is-edited-shows-in-the-preview-as-it-is-made
   (let [stale   (atom 0)
         changes (tr/decode-str (tr/encode-str edits))
-        applied (dv/apply-preview-changes changes #(swap! stale inc))
+        applied (dvp/apply-preview-changes changes #(swap! stale inc))
         state   (ptk/update applied (file-state))
         events  (await (emits applied state))
-        broken  (dv/apply-preview-changes [{:type ::nope}] #(swap! stale inc))
+        broken  (dvp/apply-preview-changes [{:type ::nope}] #(swap! stale inc))
         kept    (ptk/update broken (file-state))
         _       (ptk/effect applied state nil)]
     (t/testing "the file the view mode shows, and the boards it lists"
@@ -316,19 +317,19 @@
       (t/is (empty? (await (emits broken kept)))))))
 
 (t/deftest ^:async a-hidden-preview-plays-nothing
-  (let [hide   (dv/preview-hidden true)
-        show   (dv/preview-hidden false)
+  (let [hide   (dvp/preview-hidden true)
+        show   (dvp/preview-hidden false)
         hidden (ptk/update hide (viewer-state 0 nil))]
-    (t/is (dv/preview-hidden? hidden))
+    (t/is (dvp/preview-hidden? hidden))
     (t/is (= [::dv/pause-timeline] (map ptk/type (await (emits hide hidden)))) "what plays stops")
-    (t/is (not (dv/preview-hidden? (ptk/update show hidden))))
+    (t/is (not (dvp/preview-hidden? (ptk/update show hidden))))
     (t/is (empty? (await (emits show hidden))) "shown, it plays as the board shows")
     (t/is (= {} (ptk/update hide {})) "the view mode outside a preview has none")))
 
 (t/deftest ^:async a-refresh-says-when-it-is-done
   (let [done   (atom 0)
         failed (atom 0)]
-    (await (emits (dv/refresh-bundle #(swap! done inc) #(swap! failed inc)) {}))
+    (await (emits (dvp/refresh-bundle #(swap! done inc) #(swap! failed inc)) {}))
     (t/is (= [1 0] [@done @failed]) "for the workspace to send what it missed meanwhile")))
 
 (t/deftest ^:async a-refresh-that-fails-says-so
@@ -338,7 +339,7 @@
     (await
      (mock/with-mocks*
        {rp/cmd! (mock/stub (fn [& _] (rx/throw (ex-info "offline" {:type :network}))))}
-       (let [events (await (emits (dv/refresh-bundle #(swap! done inc) #(swap! failed inc)) state))]
+       (let [events (await (emits (dvp/refresh-bundle #(swap! done inc) #(swap! failed inc)) state))]
          (t/is (= [0 1] [@done @failed]) "the workspace keeps what it missed for its next save")
          (t/is (empty? events) "and nothing breaks in the view mode"))))))
 
@@ -389,10 +390,10 @@
                     (assoc-in [:viewer :file :data :pages-index other] {:id other :name "Other" :objects {}})
                     (assoc-in [:viewer :pages other] {:id other :frames []}))
         kept    (get-in state [:viewer :pages other])
-        edited  (ptk/update (dv/apply-preview-changes edits (fn [] nil)) state)
-        paged   (ptk/update (dv/apply-preview-changes [{:type :add-page :id added :name "Added"}
-                                                       {:type :del-page :id other}]
-                                                      (fn [] nil))
+        edited  (ptk/update (dvp/apply-preview-changes edits (fn [] nil)) state)
+        paged   (ptk/update (dvp/apply-preview-changes [{:type :add-page :id added :name "Added"}
+                                                        {:type :del-page :id other}]
+                                                       (fn [] nil))
                             state)]
     (t/is (identical? kept (get-in edited [:viewer :pages other])) "another page stays as it is")
     (t/is (some #{board-c} (map :id (get-in edited [:viewer :pages page-id :frames]))) "the one edited is listed again")

@@ -13,6 +13,7 @@
    [app.common.geom.tilt :as gtl]
    [app.common.types.shape.interactions :as ctsi]
    [app.main.data.viewer :as dv]
+   [app.main.data.viewer.preview :as dvp]
    [app.main.refs :as refs]
    [app.main.router :as rt]
    [app.main.store :as st]
@@ -40,7 +41,7 @@
   (l/derived :show-interactions refs/viewer-local))
 
 (def ^:private ref:preview-hidden
-  (l/derived dv/preview-hidden? st/state))
+  (l/derived dvp/preview-hidden? st/state))
 
 (defn- find-relative-to-base-frame
   [shape objects overlays-ids base-frame]
@@ -146,7 +147,7 @@
     :prev-screen
     ;; the preview of the prototype in the workspace, in its own history
     (st/emit! (if (dv/preview? @st/state)
-                (dv/preview-step :back)
+                (dvp/preview-step :back)
                 (rt/nav-back-local)))
 
     :open-url
@@ -282,7 +283,7 @@
 (defn- on-load
   "The timers of the after-delay interactions of `shape`, from now; none
   while the preview of the prototype is `hidden?` (see
-  `dv/preview-hidden`): shown again, they start over."
+  `dvp/preview-hidden`): shown again, they start over."
   [shape base-frame frame-offset objects overlays hidden?]
   (let [interactions (when-not hidden?
                        (->> (:interactions shape)

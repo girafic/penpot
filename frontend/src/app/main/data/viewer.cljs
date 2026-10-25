@@ -12,7 +12,6 @@
    [app.common.files.changes :as cpc]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
-   [app.common.logging :as log]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.schema :as sm]
@@ -230,7 +229,7 @@
                       (or id (:id page))))))
         changes))
 
-(defn- apply-changes
+(defn apply-changes
   "`state` with `changes` applied to the file the viewer shows, without
   saving them, and the boards of the pages they change listed again (see
   `viewer-page`); the other pages stay as they are."
@@ -324,7 +323,7 @@
         ;; Render wasm disabled, we do nothing
         (rx/empty)))))
 
-(defn- assoc-bundle
+(defn assoc-bundle
   "`state` with the view-only `bundle` (see `load-bundle`) as what the
   viewer shows."
   [state {:keys [project file team share-links libraries users permissions thumbnails]}]
@@ -350,7 +349,6 @@
 (declare preview?)
 (declare preview-frames)
 (declare preview-go)
-(declare pause-timeline)
 
 (defn bundle-fetched
   "The view mode showing `bundle`, at the board of the route. In the
@@ -397,86 +395,7 @@
   [state]
   (contains? state :viewer-preview))
 
-(defn start-preview
-  "The viewer as the preview of the prototype: its screens replace each
-  other in the history of the browser, which it shares with the
-  workspace, and go back and forth in a history of their own (see
-  `preview-screen`, `preview-step`)."
-  []
-  (ptk/reify ::start-preview
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (assoc ::rt/replace-only true)
-          (assoc :viewer-preview {:back [] :forward []})))))
-
-(defn preview-hidden?
-  "Whether the preview of the prototype is closed, loaded, hidden (see
-  `preview-hidden`)."
-  [state]
-  (true? (dm/get-in state [:viewer-preview :hidden?])))
-
-(defn preview-hidden
-  "The preview of the prototype closed (`hidden?`), loaded, hidden, to
-  show again at once: nothing plays in it then, or shown again."
-  [hidden?]
-  (ptk/reify ::preview-hidden
-    ptk/UpdateEvent
-    (update [_ state]
-      (d/update-when state :viewer-preview assoc :hidden? hidden?))
-
-    ptk/WatchEvent
-    (watch [_ _ _]
-      (if hidden?
-        (rx/of (pause-timeline))
-        (rx/empty)))))
-
-(defn preview-screen
-  "The screen at `index` on show in the preview: the one it leaves goes
-  to its history, unless it got there going back or forth in it."
-  [index]
-  (ptk/reify ::preview-screen
-    ptk/UpdateEvent
-    (update [_ state]
-      (d/update-when state :viewer-preview
-                     (fn [{:keys [going] :as history}]
-                       (let [current (:index history)]
-                         (cond
-                           (or (nil? current) (= index current))
-                           (assoc history :index index)
-
-                           (= index going)
-                           (-> history (assoc :index index) (dissoc :going))
-
-                           :else
-                           (-> history
-                               (update :back conj current)
-                               (assoc :forward [] :index index)))))))))
-
-(defn preview-step
-  "The preview back to the screen before (`:back`) or forth to the one
-  after (`:forward`), in its history."
-  [direction]
-  (ptk/reify ::preview-step
-    ptk/UpdateEvent
-    (update [_ state]
-      (d/update-when state :viewer-preview
-                     (fn [{:keys [back forward index] :as history}]
-                       (let [[from to] (if (= :back direction) [:back :forward] [:forward :back])
-                             target    (peek (if (= :back direction) back forward))]
-                         (if (and (some? target) (some? index))
-                           (-> history
-                               (update from pop)
-                               (update to conj index)
-                               (assoc :going target))
-                           history)))))
-
-    ptk/WatchEvent
-    (watch [_ state _]
-      (when-let [target (dm/get-in state [:viewer-preview :going])]
-        (rx/of (go-to-frame-by-index target))))))
-
-(defn- preview-frames
+(defn preview-frames
   "The boards the view mode in `state` lists on the page it shows: those
   saved, not hidden in view mode."
   [state]
@@ -486,7 +405,7 @@
 (defn preview-go
   "The preview to the board `frame-id`, the one selected in the workspace,
   when the view mode lists it (see `preview-frames`); else kept, to go
-  there once a refresh brings it (see `refresh-bundle`), unless another
+  there once a refresh brings it (see `dvp/refresh-bundle`), unless another
   board takes its place first. A board hidden in view mode is never
   gone to."
   [frame-id]
@@ -504,119 +423,6 @@
         (if (and (some? index) (not= index current))
           (rx/of (go-to-frame frame-id))
           (rx/empty))))))
-
-(defn preview-board
-  "The preview to the board before (`:prev`) or after (`:next`) the one
-  it shows, in the order the view mode lists them (see `preview-frames`),
-  as the arrows of its bar go: none before the first or after the last.
-  The screen it leaves goes to its history (see `preview-screen`)."
-  [direction]
-  (ptk/reify ::preview-board
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [current (some-> (rt/get-query-param (dm/get-in state [:route :query-params]) :index) parse-long)
-            target  (when (some? current) (if (= :prev direction) (dec current) (inc current)))]
-        (if (and (some? target) (< -1 target (count (preview-frames state))))
-          (rx/of (go-to-frame-by-index target))
-          (rx/empty))))))
-
-(defn preview-zoom
-  "The zoom of the preview as the workspace sets it: the board fitted in
-  it (\"fit\"), filling it (\"fill\") or at its own size (\"100\"); nil
-  for another `mode`."
-  [mode]
-  (case mode
-    "fit"  zoom-to-fit
-    "fill" zoom-to-fill
-    "100"  reset-zoom
-    nil))
-
-(defn refit-preview
-  "The board of the preview fitted or filled again as it resizes, as its
-  zoom says (see `preview-zoom`); at its own size it stays."
-  []
-  (ptk/reify ::refit-preview
-    ptk/WatchEvent
-    (watch [_ state _]
-      (case (dm/get-in state [:viewer-local :zoom-type])
-        :fit  (rx/of zoom-to-fit)
-        :fill (rx/of zoom-to-fill)
-        (rx/empty)))))
-
-(defn- bundle-refreshed
-  "The view mode showing `bundle`, and going to the board the preview
-  waits for (see `preview-go`), now that it may list it."
-  [bundle]
-  (ptk/reify ::bundle-refreshed
-    ptk/UpdateEvent
-    (update [_ state]
-      (assoc-bundle state bundle))
-
-    ptk/WatchEvent
-    (watch [_ state _]
-      (if-let [pending (dm/get-in state [:viewer-preview :pending])]
-        (rx/of (preview-go pending))
-        (rx/empty)))))
-
-(defn refresh-bundle
-  "The file shown fetched again, as it was saved last, the screen and the
-  overlays on it staying: the preview of the prototype, when it missed
-  what the workspace edited (see `apply-preview-changes`), once that is
-  saved. `on-refreshed` is called once it is done; `on-failed` in its
-  place when the fetch fails, which then shows nothing but a warning in
-  the log: the preview tries again once the workspace saves."
-  [on-refreshed on-failed]
-  (ptk/reify ::refresh-bundle
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [params   (rt/get-params state)
-            file-id  (some-> (rt/get-query-param params :file-id) uuid/parse*)
-            page-id  (some-> (rt/get-query-param params :page-id) uuid/parse*)
-            share-id (some-> (rt/get-query-param params :share-id) uuid/parse*)]
-        (->> (if (some? file-id)
-               (->> (load-bundle {:file-id file-id :share-id share-id})
-                    (rx/mapcat
-                     (fn [{:keys [fonts] :as bundle}]
-                       (rx/of (df/fonts-fetched fonts)
-                              (bundle-refreshed bundle)
-                              (update-page-position-data file-id page-id)))))
-               (rx/empty))
-             (rx/tap (fn [_] nil) (fn [_] nil) on-refreshed)
-             (rx/catch (fn [cause]
-                         (log/warn :hint "unable to refresh the preview" :cause cause)
-                         (on-failed)
-                         (rx/empty))))))))
-
-(defn apply-preview-changes
-  "The preview of the prototype showing `changes`, made in the workspace
-  and not saved yet, as they are made; `on-stale` is called when they
-  do not apply, for the workspace to refresh it once they are saved
-  (see `refresh-bundle`)."
-  [changes on-stale]
-  (let [applied? (volatile! true)]
-    (ptk/reify ::apply-preview-changes
-      ptk/UpdateEvent
-      (update [_ state]
-        (try
-          (apply-changes state changes)
-          (catch :default cause
-            (log/warn :hint "unable to apply the changes of the workspace" :cause cause)
-            (vreset! applied? false)
-            state)))
-
-      ptk/WatchEvent
-      (watch [_ state _]
-        (let [params  (rt/get-params state)
-              file-id (some-> (rt/get-query-param params :file-id) uuid/parse*)
-              page-id (some-> (rt/get-query-param params :page-id) uuid/parse*)]
-          (if (and @applied? (some? file-id))
-            (rx/of (update-page-position-data file-id page-id))
-            (rx/empty))))
-
-      ptk/EffectEvent
-      (effect [_ _ _]
-        (when-not @applied?
-          (on-stale))))))
 
 (defn fetch-comment-threads
   [{:keys [file-id page-id share-id] :as params}]

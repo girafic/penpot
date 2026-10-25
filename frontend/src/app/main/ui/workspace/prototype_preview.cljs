@@ -8,7 +8,7 @@
   "The preview of the prototype in a window over the workspace (Shift +
   Space, see `dwpp/toggle-preview`): the view mode of the page in a
   frame, once what is edited is saved, showing what is edited after as
-  it is made (see `dv/apply-preview-changes`), and what it missed (while
+  it is made (see `dvp/apply-preview-changes`), and what it missed (while
   it loaded, or could not show) once that is saved. Closed, it stays
   loaded, hidden, to show again at once, for a while (see
   `unload-delay`); another page of the workspace starts without it. A

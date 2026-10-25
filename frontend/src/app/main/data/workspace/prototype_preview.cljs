@@ -90,7 +90,7 @@
 (defn edited-changes
   "What `commit` (see `dch/commit`) changed in the file `file-id`, for the
   view mode of the preview to show as it is made, before it is saved
-  (see `dv/apply-preview-changes`): `{:changes :remote?}`, its changes
+  (see `dvp/apply-preview-changes`): `{:changes :remote?}`, its changes
   and whether another session made them; nil for another file."
   [{:keys [redo-changes source] :as commit} file-id]
   (when (and (= file-id (:file-id commit)) (seq redo-changes))
