@@ -118,6 +118,10 @@
         (when (not= style :svg)
           (obj/set! attrs "strokeDasharray" (calculate-dasharray style width dash gap)))
 
+        ;; where the dashes start along the stroke (Penpot Motion)
+        (when (and (= style :dashed) (some? (:stroke-dash-offset data)) (not= 0 (:stroke-dash-offset data)))
+          (obj/set! attrs "strokeDashoffset" (:stroke-dash-offset data)))
+
         ;; For simple line caps we use svg stroke-line-cap attribute. This
         ;; only works if all caps are the same and we are not using the tricks
         ;; for inner or outer strokes.

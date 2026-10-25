@@ -90,6 +90,7 @@
            on-stroke-width-side-change
            on-stroke-dash-change
            on-stroke-gap-change
+           on-stroke-dash-offset-change
            on-stroke-style-change
            on-stroke-alignment-change
            on-stroke-cap-start-change
@@ -254,6 +255,14 @@
         (mf/use-fn
          (mf/deps index on-stroke-gap-change)
          #(on-stroke-gap-change index %))
+
+        ;; where the dashes start along the stroke, which marches them
+        stroke-dash-offset (or (:stroke-dash-offset stroke) 0)
+
+        on-dash-offset-change
+        (mf/use-fn
+         (mf/deps index on-stroke-dash-offset-change)
+         #(on-stroke-dash-offset-change index %))
 
         stroke-alignment (or (:stroke-alignment stroke) :center)
 
@@ -584,10 +593,20 @@
                                     :on-focus on-focus
                                     :on-blur on-blur
                                     :attr :stroke-gap
-                                    :tooltip-placement "top-left"
                                     :class (stl/css :numeric-input-wrapper)
                                     :property (tr "workspace.options.stroke-gap")
-                                    :value stroke-gap}]])
+                                    :value stroke-gap}]
+        [:> numeric-input-wrapper* {:on-change on-dash-offset-change
+                                    :text-icon "OFFS"
+                                    :on-focus on-focus
+                                    :on-blur on-blur
+                                    :attr :stroke-dash-offset
+                                    :tooltip-placement "top-left"
+                                    :class (stl/css :numeric-input-wrapper)
+                                    :property (tr "workspace.options.stroke-dash-offset")
+                                    :value stroke-dash-offset}]
+        [:> keyframe-diamond* {:properties [:stroke-dash :stroke-gap :stroke-dash-offset]
+                               :index index}]])
 
      ;; Stroke Caps
      (when show-caps

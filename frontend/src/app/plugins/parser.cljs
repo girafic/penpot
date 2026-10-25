@@ -234,6 +234,9 @@
                    :stroke-alignment (-> (obj/get stroke "strokeAlignment") parse-keyword)
                    :stroke-cap-start (-> (obj/get stroke "strokeCapStart") parse-keyword)
                    :stroke-cap-end (-> (obj/get stroke "strokeCapEnd") parse-keyword)
+                   :stroke-dash (obj/get stroke "strokeDash")
+                   :stroke-gap (obj/get stroke "strokeGap")
+                   :stroke-dash-offset (obj/get stroke "strokeDashOffset")
                    :stroke-color-gradient (-> (obj/get stroke "strokeColorGradient") parse-gradient)
                    :stroke-image (-> (obj/get stroke "strokeImage") parse-image-data)})]
       (if (map? raw)

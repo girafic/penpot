@@ -71,6 +71,9 @@ pub struct Stroke {
     // default `width + 10` pattern to keep existing designs visually identical.
     pub dash: Option<f32>,
     pub gap: Option<f32>,
+    // Where the dash pattern starts along the stroke, px (the phase of the
+    // dash, as SVG's `stroke-dashoffset`): animating it marches the dashes.
+    pub dash_offset: f32,
     // Per-side widths in `Side` order. `None` means the uniform `width` applies
     // to all sides.
     pub widths: Option<[f32; 4]>,
@@ -252,6 +255,7 @@ impl Stroke {
             kind: StrokeKind::Center,
             dash,
             gap,
+            dash_offset: 0.,
             widths: None,
             trim: None,
         }
@@ -274,6 +278,7 @@ impl Stroke {
             kind: StrokeKind::Inner,
             dash,
             gap,
+            dash_offset: 0.,
             widths: None,
             trim: None,
         }
@@ -296,6 +301,7 @@ impl Stroke {
             kind: StrokeKind::Outer,
             dash,
             gap,
+            dash_offset: 0.,
             widths: None,
             trim: None,
         }
@@ -321,6 +327,7 @@ impl Stroke {
         if let Some(gap) = self.gap {
             self.gap = Some(gap * value);
         }
+        self.dash_offset *= value;
     }
 
     /// Returns the clip operation for dotted inner/outer strokes.
@@ -498,7 +505,7 @@ impl Stroke {
                 let (radius, advance) = self.dot_pattern()?;
                 Self::dot_effect(radius, advance)
             }
-            _ => skia::PathEffect::dash(&self.dash_pattern()?, 0.),
+            _ => skia::PathEffect::dash(&self.dash_pattern()?, self.dash_offset),
         }
     }
 
@@ -514,7 +521,7 @@ impl Stroke {
                 let (radius, _) = self.dot_pattern()?;
                 Self::dot_effect(radius, self.fitted_dot_advance(length)?)
             }
-            _ => skia::PathEffect::dash(&self.fitted_dash_pattern(length)?, 0.),
+            _ => skia::PathEffect::dash(&self.fitted_dash_pattern(length)?, self.dash_offset),
         }
     }
 
@@ -854,6 +861,35 @@ mod tests {
 
         stroke.style = StrokeStyle::Mixed;
         assert_eq!(stroke.dash_pattern(), Some(vec![9.0, 9.0, 5.0, 9.0]));
+    }
+
+    #[test]
+    fn the_dashes_start_at_their_offset() {
+        let mut stroke = solid_center(2.0);
+        stroke.style = StrokeStyle::Dashed;
+        stroke.dash = Some(6.0);
+        stroke.gap = Some(4.0);
+        // where the first dash of a 20 px line ends
+        let line = {
+            let mut pb = skia::PathBuilder::new();
+            pb.move_to((0.0, 0.0));
+            pb.line_to((20.0, 0.0));
+            pb.detach()
+        };
+        let first_dash_end = |stroke: &Stroke| {
+            let effect = stroke.path_effect()?;
+            let (mut dashes, _) =
+                effect.filter_path(&line, &skia::StrokeRec::new_hairline(), line.bounds())?;
+            dashes.detach().get_point(1).map(|p| p.x)
+        };
+        assert_eq!(first_dash_end(&stroke), Some(6.0));
+        // 3 px into the pattern: the rest of the first dash
+        stroke.dash_offset = 3.0;
+        assert_eq!(first_dash_end(&stroke), Some(3.0));
+        // a scale scales where they start, as their lengths
+        stroke.scale_content(2.0);
+        assert_eq!(stroke.dash_offset, 6.0);
+        assert_eq!(stroke.dash_pattern(), Some(vec![12.0, 8.0]));
     }
 
     #[test]

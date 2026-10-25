@@ -158,6 +158,9 @@
    [:stroke-width-left {:optional true} ::sm/non-negative-safe-number]
    [:stroke-dash {:optional true} ::sm/safe-number]
    [:stroke-gap {:optional true} ::sm/safe-number]
+   ;; where the dash pattern of a dashed stroke starts along it, px
+   ;; (Penpot Motion; 0 without)
+   [:stroke-dash-offset {:optional true} ::sm/safe-number]
    [:stroke-alignment {:optional true}
     [::sm/one-of #{:center :inner :outer}]]
    [:stroke-cap-start {:optional true}

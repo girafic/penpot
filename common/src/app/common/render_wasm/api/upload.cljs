@@ -42,7 +42,7 @@
 (def ^:const SECTION-STROKES 0x400)
 
 ;; Stroke header before RawFillData (must match upload_batch.rs).
-(def ^:const STROKE-HEADER-U8-SIZE 36)
+(def ^:const STROKE-HEADER-U8-SIZE 40)
 (def ^:const STROKE-ALIGN-CENTER 0)
 (def ^:const STROKE-ALIGN-INNER 1)
 (def ^:const STROKE-ALIGN-OUTER 2)
@@ -249,6 +249,7 @@
         cap-end   (-> stroke :stroke-cap-end sr/translate-stroke-cap)
         dash      (or (:stroke-dash stroke) -1)
         gap       (or (:stroke-gap stroke) -1)
+        dash-off  (or (:stroke-dash-offset stroke) 0)
 
         top       (or (:stroke-width-top stroke) width)
         right     (or (:stroke-width-right stroke) width)
@@ -269,6 +270,7 @@
     (buf/write-f32 dview (+ offset 24) right)
     (buf/write-f32 dview (+ offset 28) bottom)
     (buf/write-f32 dview (+ offset 32) left)
+    (buf/write-f32 dview (+ offset 36) dash-off)
     (write-stroke-fill! dview (+ offset STROKE-HEADER-U8-SIZE) stroke)
     (+ offset STROKE-HEADER-U8-SIZE types.fills.impl/FILL-U8-SIZE)))
 

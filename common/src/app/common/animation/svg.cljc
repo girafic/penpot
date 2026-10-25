@@ -102,7 +102,8 @@
       out)))
 
 (def ^:private svg-fill-properties #{:fill-color :fill-opacity})
-(def ^:private svg-stroke-properties #{:stroke-color :stroke-opacity :stroke-width})
+(def ^:private svg-stroke-properties
+  #{:stroke-color :stroke-opacity :stroke-width :stroke-dash :stroke-gap :stroke-dash-offset})
 (def ^:private svg-trim-properties #{:trim-start :trim-end :trim-offset})
 
 (defn- svg-clip-rest-id
@@ -165,6 +166,21 @@
   index for fills, strokes and shadows."
   [v index]
   (if (map? v) (get v index) v))
+
+(defn- svg-dash-declarations
+  "The dash pattern of the dashed `stroke` its dash, gap and offset in
+  `values` play (at `index`), the others as they rest (see
+  `cta/stroke-dash`); none when the stroke trims (`trimmed?`), whose trim
+  takes the dash of its vectors (see `svg-trim-declarations`)."
+  [stroke index values trimmed?]
+  (when (and (cta/dashed-stroke? stroke) (not trimmed?)
+             (some #(contains? values %) [:stroke-dash :stroke-gap :stroke-dash-offset]))
+    (let [[dash gap] (cta/stroke-dash stroke)
+          dash   (or (indexed-value (:stroke-dash values) index) dash)
+          gap    (or (indexed-value (:stroke-gap values) index) gap)
+          offset (or (indexed-value (:stroke-dash-offset values) index) (:stroke-dash-offset stroke) 0)]
+      [(str "stroke-dasharray: " (acss/fmt dash) " " (acss/fmt gap) ";")
+       (str "stroke-dashoffset: " (acss/fmt offset) ";")])))
 
 (defn trim-piece-class
   "The class of the element drawing the subpath `k` of a trimmed stroke
@@ -298,11 +314,14 @@
                            (str "stroke-width: " (acss/fmt (* factor w)) ";"))
                  decls  (fn [values from]
                           (let [color   (indexed-value (:stroke-color values) index)
-                                opacity (indexed-value (:stroke-opacity values) index)]
-                            (cond-> (if text? [] (vec (svg-trim-declarations values from)))
+                                opacity (indexed-value (:stroke-opacity values) index)
+                                trims   (when-not text? (svg-trim-declarations values from))]
+                            (cond-> (vec trims)
                               (some? color)   (conj (str "stroke: " color ";"))
                               (some? opacity) (conj (str "stroke-opacity: " (acss/fmt opacity) ";"))
-                              (some? (width values)) (conj (width values)))))
+                              (some? (width values)) (conj (width values))
+                              :always (into (svg-dash-declarations (get strokes index) index values
+                                                                   (or (seq trims) (seq pieces)))))))
                  reads  (cond-> svg-stroke-properties (not text?) (into svg-trim-properties))]
              (cond-> (into [[[paint] #(decls % 0) reads]]
                            (map-indexed (fn [k [from _]]

@@ -64,6 +64,9 @@
     :r1 :r2 :r3 :r4
     :fill-color :fill-opacity
     :stroke-color :stroke-opacity :stroke-width
+    ;; the dash pattern of a dashed stroke: its dash, its gap and where it
+    ;; starts along the stroke (see `dashed-stroke?`)
+    :stroke-dash :stroke-gap :stroke-dash-offset
     :shadow-offset-x :shadow-offset-y :shadow-blur
     :shadow-spread :shadow-color :shadow-opacity
     :blur :background-blur
@@ -122,7 +125,9 @@
          (zipmap (keys light-properties) (repeat :light))
          (zipmap camera-properties (repeat :camera))
          (zipmap [:fill-color :fill-opacity] (repeat :fill))
-         (zipmap [:stroke-color :stroke-opacity :stroke-width] (repeat :stroke))
+         (zipmap [:stroke-color :stroke-opacity :stroke-width
+                  :stroke-dash :stroke-gap :stroke-dash-offset]
+                 (repeat :stroke))
          (zipmap [:shadow-offset-x :shadow-offset-y :shadow-blur
                   :shadow-spread :shadow-color :shadow-opacity]
                  (repeat :shadow))
@@ -160,6 +165,7 @@
 (def indexed-properties
   #{:fill-color :fill-opacity
     :stroke-color :stroke-opacity :stroke-width
+    :stroke-dash :stroke-gap :stroke-dash-offset
     :shadow-offset-x :shadow-offset-y :shadow-blur
     :shadow-spread :shadow-color :shadow-opacity})
 
@@ -3157,9 +3163,25 @@
        (nil? (:stroke-color-gradient stroke))
        (nil? (:stroke-image stroke))))
 
+(defn dashed-stroke?
+  "A stroke drawn in dashes of its own length and gap (`:stroke-dash`,
+  `:stroke-gap`), which its dash keyframes play on; dotted and mixed
+  strokes take theirs from their width."
+  [stroke]
+  (= :dashed (:stroke-style stroke)))
+
+(defn stroke-dash
+  "The dash and gap of the dashed `stroke`, px: its own, or the width
+  plus 10 that a stroke without them draws."
+  [stroke]
+  (let [width (or (:stroke-width stroke) 1)]
+    [(or (:stroke-dash stroke) (+ width 10))
+     (or (:stroke-gap stroke) (+ width 10))]))
+
 (defn appearance-slots
   "The fill, stroke, shadow and blur slots of `shape` that can take
-  keyframes. Gradients and images are skipped."
+  keyframes. Gradients and images are skipped; the dash pattern of a
+  dashed stroke takes them in any paint."
   [shape]
   (let [fills   (as-vec (:fills shape))
         strokes (as-vec (:strokes shape))
@@ -3174,9 +3196,15 @@
        fills)
       (keep-indexed
        (fn [index stroke]
-         (when (solid-color-stroke? stroke)
-           {:group :stroke :index index
-            :properties [:stroke-color :stroke-opacity :stroke-width]}))
+         (let [properties (cond-> []
+                            (solid-color-stroke? stroke)
+                            (into [:stroke-color :stroke-opacity :stroke-width])
+
+                            (dashed-stroke? stroke)
+                            (into [:stroke-dash :stroke-gap :stroke-dash-offset]))]
+           (when (seq properties)
+             {:group :stroke :index index
+              :properties properties})))
        strokes)
       (map-indexed
        (fn [index _]
@@ -3242,7 +3270,10 @@
       (patch-indexed
        (cond-> {}
          (contains? values :stroke-width) (assoc :stroke-width (:stroke-width values)))
-       nil)))
+       nil)
+      (patch-indexed
+       (select-keys values [:stroke-dash :stroke-gap :stroke-dash-offset])
+       dashed-stroke?)))
 
 (defn- apply-shadow-color
   [shadow index colors opacities]
@@ -3423,7 +3454,8 @@
       (has? values :fill-color :fill-opacity)
       (ctm/change-property :fills (apply-fills (paint-fills shape) values))
 
-      (has? values :stroke-color :stroke-opacity :stroke-width)
+      (has? values :stroke-color :stroke-opacity :stroke-width
+            :stroke-dash :stroke-gap :stroke-dash-offset)
       (ctm/change-property :strokes (apply-strokes (:strokes shape) values))
 
       (has? values :shadow-offset-x :shadow-offset-y :shadow-blur
@@ -4590,6 +4622,9 @@
     :stroke-width
     (some? (get (as-vec (:strokes shape)) index))
 
+    (:stroke-dash :stroke-gap :stroke-dash-offset)
+    (dashed-stroke? (get (as-vec (:strokes shape)) index))
+
     (:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-spread :shadow-color :shadow-opacity)
     (some? (get (as-vec (:shadow shape)) index))
 
@@ -4911,12 +4946,17 @@
        (as-vec (:fills shape)))
       (reduce-kv
        (fn [m index stroke]
-         (if (solid-color-stroke? stroke)
-           (-> m
-               (put :stroke-color index (:stroke-color stroke))
-               (put :stroke-opacity index (or (:stroke-opacity stroke) 1))
-               (put :stroke-width index (or (:stroke-width stroke) 0)))
-           m))
+         (let [[dash gap] (stroke-dash stroke)]
+           (cond-> m
+             (solid-color-stroke? stroke)
+             (-> (put :stroke-color index (:stroke-color stroke))
+                 (put :stroke-opacity index (or (:stroke-opacity stroke) 1))
+                 (put :stroke-width index (or (:stroke-width stroke) 0)))
+
+             (dashed-stroke? stroke)
+             (-> (put :stroke-dash index dash)
+                 (put :stroke-gap index gap)
+                 (put :stroke-dash-offset index (or (:stroke-dash-offset stroke) 0))))))
        $
        (as-vec (:strokes shape)))
       (reduce-kv

@@ -278,21 +278,27 @@
 
 (defn- lottie-dashes
   "The dash pattern of a stroke of `style` and `width`, as the canvas
-  draws it."
-  [{:keys [stroke-style stroke-width stroke-dash stroke-gap]}]
+  draws it; of a dashed one, its dash, gap and offset playing their
+  keyframes (`dash-kfs`, `gap-kfs`, `offset-kfs`)."
+  [{:keys [stroke-style stroke-width stroke-dash stroke-gap stroke-dash-offset]} dash-kfs gap-kfs offset-kfs]
   (let [w       (or stroke-width 1)
         pattern (case stroke-style
                   :dotted [0 (+ w 5)]
                   :dashed [(or stroke-dash (+ w 10)) (or stroke-gap (+ w 10))]
                   :mixed  [(+ w 5) (+ w 5) (+ w 1) (+ w 5)]
-                  nil)]
+                  nil)
+        dashed? (= :dashed stroke-style)]
     (when (seq pattern)
       (conj (vec (map-indexed (fn [i length]
-                                (if (even? i)
-                                  {:n "d" :nm "dash" :v {:a 0 :k length}}
-                                  {:n "g" :nm "gap" :v {:a 0 :k length}}))
+                                (cond
+                                  (and dashed? (zero? i)) {:n "d" :nm "dash" :v (lottie-prop-1d dash-kfs identity length)}
+                                  dashed?                 {:n "g" :nm "gap" :v (lottie-prop-1d gap-kfs identity length)}
+                                  (even? i)               {:n "d" :nm "dash" :v {:a 0 :k length}}
+                                  :else                   {:n "g" :nm "gap" :v {:a 0 :k length}}))
                               pattern))
-            {:n "o" :nm "offset" :v {:a 0 :k 0}}))))
+            {:n "o" :nm "offset" :v (if dashed?
+                                      (lottie-prop-1d offset-kfs identity (or stroke-dash-offset 0))
+                                      {:a 0 :k 0})}))))
 
 (defn- lottie-stroke-items
   "The Lottie strokes of `shape`, top-most first, each with the keyframes
@@ -309,7 +315,10 @@
             (when (and (not (:hidden stroke))
                        (or (cta/solid-color-stroke? stroke) (seq color-kfs)))
               (let [cap    (:stroke-cap-start stroke)
-                    dashes (lottie-dashes stroke)]
+                    dashes (lottie-dashes stroke
+                                          (slot-kfs by-prop :stroke-dash index)
+                                          (slot-kfs by-prop :stroke-gap index)
+                                          (slot-kfs by-prop :stroke-dash-offset index))]
                 (cond-> {:ty "st" :nm (str "stroke " index)
                          :c (lottie-color-prop color-kfs (hex->rgb01 (or (:stroke-color stroke)
                                                                          (:value (first color-kfs))

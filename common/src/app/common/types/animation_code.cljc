@@ -52,6 +52,9 @@
    :stroke-color "strokeColor"
    :stroke-opacity "strokeOpacity"
    :stroke-width "strokeWidth"
+   :stroke-dash "strokeDash"
+   :stroke-gap "strokeGap"
+   :stroke-dash-offset "strokeDashOffset"
    :shadow-offset-x "shadowOffsetX"
    :shadow-offset-y "shadowOffsetY"
    :shadow-blur "shadowBlur"
@@ -88,6 +91,7 @@
    :opacity :r1 :r2 :r3 :r4
    :fill-color :fill-opacity
    :stroke-color :stroke-opacity :stroke-width
+   :stroke-dash :stroke-gap :stroke-dash-offset
    :shadow-offset-x :shadow-offset-y :shadow-blur
    :shadow-spread :shadow-color :shadow-opacity
    :blur :background-blur

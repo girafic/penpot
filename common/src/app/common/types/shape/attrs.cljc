@@ -61,6 +61,7 @@
             :stroke-width
             :stroke-dash
             :stroke-gap
+            :stroke-dash-offset
             :stroke-color
             :stroke-color-ref-id
             :stroke-color-ref-file
@@ -179,6 +180,7 @@
            :stroke-width
            :stroke-dash
            :stroke-gap
+           :stroke-dash-offset
            :stroke-color
            :stroke-color-ref-id
            :stroke-color-ref-file
@@ -241,6 +243,7 @@
              :stroke-width
              :stroke-dash
              :stroke-gap
+             :stroke-dash-offset
              :stroke-color
              :stroke-color-ref-id
              :stroke-color-ref-file
@@ -303,6 +306,7 @@
            :stroke-width
            :stroke-dash
            :stroke-gap
+           :stroke-dash-offset
            :stroke-color
            :stroke-color-ref-id
            :stroke-color-ref-file
@@ -364,6 +368,7 @@
            :stroke-width
            :stroke-dash
            :stroke-gap
+           :stroke-dash-offset
            :stroke-color
            :stroke-color-ref-id
            :stroke-color-ref-file
@@ -494,6 +499,7 @@
               :stroke-width
               :stroke-dash
               :stroke-gap
+              :stroke-dash-offset
               :stroke-color
               :stroke-color-ref-id
               :stroke-color-ref-file
@@ -556,6 +562,7 @@
            :stroke-width
            :stroke-dash
            :stroke-gap
+           :stroke-dash-offset
            :stroke-color
            :stroke-color-ref-id
            :stroke-color-ref-file

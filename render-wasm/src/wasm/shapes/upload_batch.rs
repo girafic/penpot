@@ -407,6 +407,7 @@ fn parse_strokes(cur: &mut Cursor<'_>) -> Result<Vec<Stroke>> {
         let right = cur.f32()?;
         let bottom = cur.f32()?;
         let left = cur.f32()?;
+        let dash_offset = cur.f32()?;
         let fill_bytes = cur.take(RAW_FILL_DATA_SIZE)?;
         let fill = RawFillData::try_from(fill_bytes)
             .map_err(|e| Error::CriticalError(format!("upload_batch stroke fill: {e}")))?;
@@ -446,6 +447,7 @@ fn parse_strokes(cur: &mut Cursor<'_>) -> Result<Vec<Stroke>> {
         if has_sides {
             stroke.widths = Some([top, right, bottom, left]);
         }
+        stroke.dash_offset = dash_offset;
         stroke.fill = fill.into();
         strokes.push(stroke);
     }

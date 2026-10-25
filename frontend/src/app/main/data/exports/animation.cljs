@@ -648,6 +648,9 @@
     fit the board's;
   - `:gif/alpha` and `:mp4/alpha`, a board that shows through (see
     `see-through?`): GIF has no partial transparency, MP4 none at all;
+  - `:svg/dash`, a stroke whose dash pattern plays (see
+    `cta/dashed-stroke?`) and that trims too: an SVG draws a trim by the
+    dash of its vectors, so the trim plays and the dashes stay out;
   - `:lottie/three-d` and `:svg/three-d`, a layer that tilts or comes
     out of the plane (see `app.common.geom.tilt`), at rest or as it
     plays: the players of
@@ -754,7 +757,13 @@
            [:gif/alpha #{:gif} (boolean clear?)]
            [:mp4/alpha #{:mp4} (boolean clear?)]
            [:lottie/three-d lottie-formats (boolean tilted?)]
-           [:svg/three-d #{:svg} (boolean tilted?)]]]
+           [:svg/three-d #{:svg} (boolean tilted?)]
+           [:svg/dash #{:svg}
+            (boolean (some (fn [[_ {:keys [keyframes]}]]
+                             (let [props (into #{} (map :property) keyframes)]
+                               (and (some props [:stroke-dash :stroke-gap :stroke-dash-offset])
+                                    (some props [:trim-start :trim-end :trim-offset]))))
+                           (:tracks resolved)))]]]
       (reduce (fn [issues [kind formats on?]]
                 (if on?
                   (reduce #(update %1 %2 (fnil conj []) kind) issues formats)

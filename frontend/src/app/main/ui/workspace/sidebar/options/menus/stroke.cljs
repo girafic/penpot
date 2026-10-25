@@ -36,6 +36,7 @@
    :stroke-width
    :stroke-dash
    :stroke-gap
+   :stroke-dash-offset
    :stroke-color
    :stroke-color-ref-id
    :stroke-color-ref-file
@@ -207,6 +208,11 @@
             (st/emit! (udw/trigger-bounding-box-cloaking ids))
             (st/emit! (dc/change-stroke-attrs ids {:stroke-gap value} index))))
 
+        on-stroke-dash-offset-change
+        (fn [index value]
+          (when-not (str/empty? value)
+            (st/emit! (dc/change-stroke-attrs ids {:stroke-dash-offset value} index))))
+
         on-stroke-cap-start-change
         (fn [index value]
           (st/emit! (udw/trigger-bounding-box-cloaking ids))
@@ -301,6 +307,7 @@
                               :on-stroke-width-side-change on-stroke-width-side-change
                               :on-stroke-dash-change on-stroke-dash-change
                               :on-stroke-gap-change on-stroke-gap-change
+                              :on-stroke-dash-offset-change on-stroke-dash-offset-change
                               :on-stroke-style-change on-stroke-style-change
                               :on-stroke-alignment-change on-stroke-alignment-change
                               :on-stroke-cap-start-change on-stroke-cap-start-change

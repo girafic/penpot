@@ -7426,3 +7426,65 @@
   (t/is (= [:opacity :blur :background-blur :unknown]
            (mapv cta/property-area [:opacity :blur :background-blur :unknown]))
         "the others are areas of their own"))
+
+(t/deftest a-dashed-stroke-plays-its-dash-gap-and-offset
+  ;; a dashed square, its dashes growing and marching along it
+  (let [stroke  {:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2 :stroke-style :dashed
+                 :stroke-alignment :center :stroke-dash 4 :stroke-gap 4}
+        shape   (assoc (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100}) :strokes [stroke])
+        sid     (:id shape)
+        tl      (-> (mk-timeline)
+                    (assoc :duration 1000)
+                    (cta/add-keyframe sid {:time 0 :property :stroke-dash :index 0 :value 4 :easing :linear})
+                    (cta/add-keyframe sid {:time 1000 :property :stroke-dash :index 0 :value 12})
+                    (cta/add-keyframe sid {:time 0 :property :stroke-dash-offset :index 0 :value 0 :easing :linear})
+                    (cta/add-keyframe sid {:time 1000 :property :stroke-dash-offset :index 0 :value 40}))
+        at      (fn [t] (-> (ctaf/timeline->modif-tree tl {sid shape} t)
+                            (get-in [sid :modifiers])
+                            (cta/appearance-changes)
+                            (get-in [:strokes 0])))]
+    (t/testing "its dash and offset, mixed"
+      (t/is (close? 8 (:stroke-dash (at 500))))
+      (t/is (close? 20 (:stroke-dash-offset (at 500))))
+      (t/is (= 4 (:stroke-gap (at 500))) "the gap as it is"))
+    (t/testing "a dashed stroke takes them, others do not"
+      (t/is (true? (cta/fits-keyframe? shape {:property :stroke-gap :index 0})))
+      (t/is (false? (cta/fits-keyframe? (assoc-in shape [:strokes 0 :stroke-style] :solid)
+                                        {:property :stroke-gap :index 0})))
+      (t/is (= [:stroke-color :stroke-opacity :stroke-width :stroke-dash :stroke-gap :stroke-dash-offset]
+               (:properties (d/seek #(= :stroke (:group %)) (cta/appearance-slots shape))))))
+    (t/testing "the dash and gap a stroke without them draws"
+      (t/is (= [12 12] (cta/stroke-dash {:stroke-style :dashed :stroke-width 2}))))
+    (t/is (= [:stroke :stroke :stroke] (mapv cta/property-area [:stroke-dash :stroke-gap :stroke-dash-offset])))))
+
+(t/deftest the-dashes-march-in-svg-and-lottie
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        bid    (:id board)
+        shape  (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20
+                                 :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                            :stroke-style :dashed :stroke-alignment :center
+                                            :stroke-dash 6}]})
+        sid    (:id shape)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe sid {:time 0 :property :stroke-dash-offset :index 0 :value 0})
+                   (cta/add-keyframe sid {:time 1000 :property :stroke-dash-offset :index 0 :value 24}))
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}]
+    (t/testing "SVG: its dash, gap (12 by default) and offset"
+      (let [css (asvg/svg-appearance-css tl objects)]
+        (t/is (re-find #"stroke-dasharray: 6 12; stroke-dashoffset: 0;" css))
+        (t/is (re-find #"stroke-dasharray: 6 12; stroke-dashoffset: 24;" css))))
+    (t/testing "SVG: a trim takes the dash of its vectors"
+      (let [trimmed (-> tl
+                        (cta/add-keyframe sid {:time 0 :property :trim-end :value 0})
+                        (cta/add-keyframe sid {:time 1000 :property :trim-end :value 1}))
+            css     (asvg/svg-appearance-css trimmed objects)]
+        (t/is (not (re-find #"stroke-dasharray: 6 12" css)))))
+    (t/testing "Lottie: its offset plays, dash and gap as they are"
+      (let [L      (alottie/timeline->lottie tl {bid board sid shape})
+            stroke (d/seek #(= "st" (:ty %)) (get-in (first (:layers L)) [:shapes 0 :it]))
+            [d g o] (:d stroke)]
+        (t/is (= ["d" 6] [(:n d) (get-in d [:v :k])]))
+        (t/is (= ["g" 12] [(:n g) (get-in g [:v :k])]))
+        (t/is (= 1 (get-in o [:v :a])))
+        (t/is (= [24] (get-in o [:v :k 1 :s])))))))

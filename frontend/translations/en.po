@@ -7202,6 +7202,22 @@ msgstr "Stroke %s opacity"
 msgid "workspace.animation.stroke-width"
 msgstr "Stroke %s width"
 
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.stroke-dash"
+msgstr "Stroke %s dash"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.stroke-gap"
+msgstr "Stroke %s gap"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.stroke-dash-offset"
+msgstr "Stroke %s dash offset"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-dash-offset"
+msgstr "Dash offset"
+
 msgid "workspace.animation.shadow-x"
 msgstr "Shadow %s X"
 
@@ -8740,6 +8756,14 @@ msgstr "3D rotation · Flat in %s"
 
 msgid "workspace.options.export.issue.svg-three-d.text"
 msgstr "An %s draws tilted layers, and layers in depth, as they lie flat, without the light and the depth cues of the board: SVG has no perspective."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.svg-dash"
+msgstr "Dashes and trim · Trim only in %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.svg-dash.text"
+msgstr "An %s draws the trim of a stroke with its dash pattern, so a stroke whose dashes play and that trims too plays its trim and draws its dashes solid."
 
 msgid "workspace.options.export.issue.lottie-matte"
 msgstr "Luminance inverted mask · May not play in %s"

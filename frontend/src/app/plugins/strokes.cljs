@@ -78,6 +78,19 @@
        {:get (fn [] (cts/side-width @state :stroke-width-left))
         :set (fn [v] (set-side-width! state :stroke-width-left v on-change! per-side-allowed? not-valid))}
 
+       ;; the dash pattern of a dashed stroke (Penpot Motion animates it)
+       :strokeDash
+       {:get (fn [] (:stroke-dash @state))
+        :set (fn [v] (swap! state assoc :stroke-dash v) (on-change! [:stroke-dash]))}
+
+       :strokeGap
+       {:get (fn [] (:stroke-gap @state))
+        :set (fn [v] (swap! state assoc :stroke-gap v) (on-change! [:stroke-gap]))}
+
+       :strokeDashOffset
+       {:get (fn [] (:stroke-dash-offset @state))
+        :set (fn [v] (swap! state assoc :stroke-dash-offset v) (on-change! [:stroke-dash-offset]))}
+
        :strokeAlignment
        {:get (fn [] (format/format-key (:stroke-alignment @state)))
         :set (fn [v] (swap! state assoc :stroke-alignment (parser/parse-keyword v)) (on-change! [:stroke-alignment]))}

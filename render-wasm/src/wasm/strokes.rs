@@ -77,20 +77,23 @@ pub extern "C" fn add_shape_center_stroke(
     cap_end: u8,
     dash: f32,
     gap: f32,
+    dash_offset: f32,
 ) {
     let stroke_style = RawStrokeStyle::from(style);
     let cap_start = RawStrokeCap::from(cap_start);
     let cap_end = RawStrokeCap::from(cap_end);
 
     with_current_shape_mut!(state, |shape: &mut Shape| {
-        shape.add_stroke(shapes::Stroke::new_center_stroke(
+        let mut stroke = shapes::Stroke::new_center_stroke(
             width,
             stroke_style.into(),
             cap_start.try_into().ok(),
             cap_end.try_into().ok(),
             decode_optional_f32(dash),
             decode_optional_f32(gap),
-        ));
+        );
+        stroke.dash_offset = dash_offset;
+        shape.add_stroke(stroke);
     });
 }
 
@@ -102,20 +105,23 @@ pub extern "C" fn add_shape_inner_stroke(
     cap_end: u8,
     dash: f32,
     gap: f32,
+    dash_offset: f32,
 ) {
     let stroke_style = RawStrokeStyle::from(style);
     let cap_start = RawStrokeCap::from(cap_start);
     let cap_end = RawStrokeCap::from(cap_end);
 
     with_current_shape_mut!(state, |shape: &mut Shape| {
-        shape.add_stroke(shapes::Stroke::new_inner_stroke(
+        let mut stroke = shapes::Stroke::new_inner_stroke(
             width,
             stroke_style.into(),
             cap_start.try_into().ok(),
             cap_end.try_into().ok(),
             decode_optional_f32(dash),
             decode_optional_f32(gap),
-        ));
+        );
+        stroke.dash_offset = dash_offset;
+        shape.add_stroke(stroke);
     });
 }
 
@@ -127,20 +133,23 @@ pub extern "C" fn add_shape_outer_stroke(
     cap_end: u8,
     dash: f32,
     gap: f32,
+    dash_offset: f32,
 ) {
     let stroke_style = RawStrokeStyle::from(style);
     let cap_start = RawStrokeCap::from(cap_start);
     let cap_end = RawStrokeCap::from(cap_end);
 
     with_current_shape_mut!(state, |shape: &mut Shape| {
-        shape.add_stroke(shapes::Stroke::new_outer_stroke(
+        let mut stroke = shapes::Stroke::new_outer_stroke(
             width,
             stroke_style.into(),
             cap_start.try_into().ok(),
             cap_end.try_into().ok(),
             decode_optional_f32(dash),
             decode_optional_f32(gap),
-        ));
+        );
+        stroke.dash_offset = dash_offset;
+        shape.add_stroke(stroke);
     });
 }
 

@@ -91,13 +91,14 @@
                    ;; to its default dash pattern when no override is stored.
                    dash      (or (:stroke-dash stroke) -1)
                    gap       (or (:stroke-gap stroke) -1)
+                   dash-off  (or (:stroke-dash-offset stroke) 0)
                    offset    (mem/alloc types.fills.impl/FILL-U8-SIZE)
                    heap      (mem/get-heap-u8)
                    dview     (js/DataView. (.-buffer heap))]
                (case align
-                 :inner (h/call wasm/internal-module "_add_shape_inner_stroke" width style cap-start cap-end dash gap)
-                 :outer (h/call wasm/internal-module "_add_shape_outer_stroke" width style cap-start cap-end dash gap)
-                 (h/call wasm/internal-module "_add_shape_center_stroke" width style cap-start cap-end dash gap))
+                 :inner (h/call wasm/internal-module "_add_shape_inner_stroke" width style cap-start cap-end dash gap dash-off)
+                 :outer (h/call wasm/internal-module "_add_shape_outer_stroke" width style cap-start cap-end dash gap dash-off)
+                 (h/call wasm/internal-module "_add_shape_center_stroke" width style cap-start cap-end dash gap dash-off))
 
                ;; Per-side widths (rects/frames). Sides falling back to the
                ;; uniform width; skipped when all sides end up equal, so the

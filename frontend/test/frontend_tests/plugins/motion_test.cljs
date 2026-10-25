@@ -1641,3 +1641,19 @@
            (t/is (nil? (.-appliedTokens fade)))
            (set! (.-easing from) "linear")
            (t/is (nil? (.-appliedTokens from)))))))))
+
+(t/deftest a-dashed-stroke-marches-its-dashes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js timeline         (.addTimeline board)]
+        (set! (.-strokes rect) #js [#js {:strokeColor "#000000" :strokeWidth 2 :strokeStyle "dashed"
+                                         :strokeDash 6 :strokeGap 4 :strokeDashOffset 3}])
+        (let [^js stroke (aget (.-strokes rect) 0)]
+          (t/is (= [6 4 3] [(.-strokeDash stroke) (.-strokeGap stroke) (.-strokeDashOffset stroke)])
+                "the dash pattern of a stroke, read back"))
+        (.addKeyframe timeline rect #js {:property "strokeDashOffset" :index 0 :time 0 :value 0 :easing "linear"})
+        (.addKeyframe timeline rect #js {:property "strokeDashOffset" :index 0 :time 1000 :value 20})
+        (t/is (= #{:stroke-dash-offset} (into #{} (map :property) (:keyframes (stored-track store context board rect)))))
+        (t/is (mth/close? 10 (.valueAt timeline rect "strokeDashOffset" 500 0)) "they march")))))

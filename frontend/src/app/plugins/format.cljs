@@ -214,6 +214,7 @@
            stroke-opacity stroke-style stroke-width stroke-alignment
            stroke-width-top stroke-width-right stroke-width-bottom
            stroke-width-left stroke-cap-start stroke-cap-end
+           stroke-dash stroke-gap stroke-dash-offset
            stroke-color-gradient stroke-image] :as stroke}]
 
   (when (some? stroke)
@@ -232,6 +233,9 @@
           :strokeAlignment (format-key stroke-alignment)
           :strokeCapStart (format-key stroke-cap-start)
           :strokeCapEnd (format-key stroke-cap-end)
+          :strokeDash stroke-dash
+          :strokeGap stroke-gap
+          :strokeDashOffset stroke-dash-offset
           :strokeColorGradient (format-gradient stroke-color-gradient)
           :strokeImage (format-image stroke-image)})))
 

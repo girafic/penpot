@@ -6263,6 +6263,9 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  * - `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
  * - `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
  *   `#ff6600`.
+ * - `strokeDash`, `strokeGap`, `strokeDashOffset`: the dash pattern of a
+ *   `dashed` stroke (see `Stroke.strokeDash`), in pixels; other strokes
+ *   do not take them.
  * - `trimStart`, `trimEnd`, `trimOffset`: a fraction of the outline (0 to
  *   1) the strokes are drawn along, to draw a line on. On a group they
  *   trim the layers in it (see `Timeline.setTrimMode`).
@@ -6308,6 +6311,9 @@ export type AnimatableProperty =
   | 'strokeColor'
   | 'strokeOpacity'
   | 'strokeWidth'
+  | 'strokeDash'
+  | 'strokeGap'
+  | 'strokeDashOffset'
   | 'shadowOffsetX'
   | 'shadowOffsetY'
   | 'shadowBlur'
@@ -7514,6 +7520,22 @@ export interface Stroke {
    * Boards and rectangles only; other shape types raise a validation error.
    */
   strokeWidthLeft?: number;
+  /**
+   * The length of the dashes of a `dashed` stroke, px. Without it the
+   * stroke draws dashes of its width plus 10.
+   */
+  strokeDash?: number;
+  /**
+   * The gap between the dashes of a `dashed` stroke, px. Without it the
+   * stroke draws gaps of its width plus 10.
+   */
+  strokeGap?: number;
+  /**
+   * Where the dash pattern of a `dashed` stroke starts along it, px, as
+   * SVG's `stroke-dashoffset`: animating it (`strokeDashOffset`
+   * keyframes) marches the dashes. 0 by default. Penpot Motion.
+   */
+  strokeDashOffset?: number;
   /**
    * The optional alignment of the stroke relative to the shape's boundary.
    */
