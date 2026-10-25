@@ -122,3 +122,50 @@
                     (dws/select-shapes (into (d/ordered-set) [group-id])))
                   (dwu/commit-undo-transaction undo-id))
            (rx/empty)))))))
+
+(defn keeps-group?
+  "Whether the group of offset lines `group` of `objects` stays once they
+  are removed (see `remove-offset-lines`): it holds more than their
+  source and lines, has no source any more, or a timeline of
+  `timelines` animates it; else its source takes its place."
+  [objects timelines group]
+  (let [{:keys [source lines]} (gol/layers-of objects group)
+        others (remove (set (conj lines source)) (:shapes group))]
+    (boolean (or (nil? source)
+                 (seq others)
+                 (some #(contains? (:tracks %) (:id group)) (vals timelines))))))
+
+(defn remove-offset-lines
+  "The offset lines of the group `group-id` removed, in one undo step:
+  its lines go and its source shows again, in place of the group unless
+  the group stays (see `keeps-group?`). Nothing for a group without
+  offset lines or in a copy of a component, which takes them from its
+  main."
+  [group-id]
+  (ptk/reify ::remove-offset-lines
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [page-id (:current-page-id state)
+            page    (dsh/lookup-page state page-id)
+            objects (:objects page)
+            group   (get objects group-id)
+            ;; without a source, the lines by their role
+            {:keys [source lines]}
+            (or (gol/layers-of objects group)
+                {:lines (filterv #(= :line (get-in objects [% :offset-line])) (:shapes group))})
+            keep?   (keeps-group? objects (:timelines page) group)
+            changes (-> (pcb/empty-changes it page-id)
+                        (pcb/with-objects objects)
+                        (pcb/remove-objects lines)
+                        (cond-> (some? source)
+                          (pcb/update-shapes [source] #(-> % (assoc :hidden false) (dissoc :offset-line))))
+                        (pcb/update-shapes [group-id] #(dissoc % :offset-lines))
+                        (pcb/resize-parents [group-id]))
+            undo-id (js/Symbol)]
+        (if (and (some? (:offset-lines group)) (not (ctk/in-component-copy? group)))
+          (rx/of (dwu/start-undo-transaction undo-id)
+                 (dch/commit-changes changes)
+                 (when-not keep?
+                   (dwg/ungroup-shapes [group-id] :change-selection? true))
+                 (dwu/commit-undo-transaction undo-id))
+          (rx/empty))))))

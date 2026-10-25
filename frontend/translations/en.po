@@ -9561,6 +9561,10 @@ msgid "workspace.options.offset-lines.add"
 msgstr "Make offset lines of the outline"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
+msgid "workspace.options.offset-lines.remove"
+msgstr "Remove the offset lines, the outline stays"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/offset_lines.cljs
 msgid "workspace.options.offset-lines.copy"
 msgstr "A copy takes its offset lines from its main component: change them there"
 

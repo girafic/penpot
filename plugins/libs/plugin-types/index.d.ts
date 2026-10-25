@@ -2767,20 +2767,24 @@ export interface Group extends ShapeBase {
    * `null` when it holds none (see `Path.makeOffsetLines`). Setting any of
    * the settings makes the lines again from the source as it is now; the
    * others stay, and so do other layers in the group. A copy of the group
-   * makes its lines from its own source. Setting it is not valid on a group
-   * without offset lines, on one whose source is gone (its `source` is then
-   * `null`), or on a copy of a component, which takes them from its main.
-   * Requires `content:write` permission to set.
+   * makes its lines from its own source. Setting `null` removes them: the
+   * lines go and the source shows again, in place of the group unless the
+   * group holds other layers or plays an animation of its own. Setting it
+   * is not valid on a group without offset lines, on a copy of a component,
+   * which takes them from its main, or, but to `null`, on one whose source
+   * is gone (its `source` is then `null`). Requires `content:write`
+   * permission to set.
    *
    * @example
    * ```js
    * const lines = path.makeOffsetLines({ count: 12 });
    * lines.offsetLines = { spacing: 6, outerColor: '#FFD27A', stripeEvery: 3, stripeDim: 0.2 };
    * lines.offsetLines = { accents: [{ line: 5, color: '#FF7A7A', width: 1.5 }] };
+   * lines.offsetLines = null;
    * ```
    */
   get offsetLines(): OffsetLines | null;
-  set offsetLines(value: OffsetLinesSettings);
+  set offsetLines(value: OffsetLinesSettings | null);
 }
 
 /**

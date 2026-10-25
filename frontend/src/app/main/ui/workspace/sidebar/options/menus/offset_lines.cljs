@@ -127,8 +127,9 @@
 
 (mf/defc offset-lines-menu*
   "Of the single selected `shape`: the + that makes offset lines of it,
-  or, of a group of them, how they are made; in a copy of a component
-  read-only, and a word when their source is gone."
+  or, of a group of them, how they are made and the − that removes them;
+  in a copy of a component read-only, and a word when their source is
+  gone."
   [{:keys [shape]}]
   (let [objects   (mf/deref refs/workspace-page-objects)
         spec      (some->> (:offset-lines shape) (merge gol/defaults))
@@ -138,7 +139,8 @@
         [shown? toggle-shown show] (use-section-open :offset-lines)
         on-add    (mf/use-fn (mf/deps id show) (fn [] (show) (st/emit! (dwol/make-offset-lines id))))
         change    (mf/use-fn (mf/deps id) (fn [k v] (st/emit! (dwol/set-offset-lines id {k v}))))
-        on-update (mf/use-fn (mf/deps id) #(st/emit! (dwol/set-offset-lines id)))]
+        on-update (mf/use-fn (mf/deps id) #(st/emit! (dwol/set-offset-lines id)))
+        on-remove (mf/use-fn (mf/deps id) #(st/emit! (dwol/remove-offset-lines id)))]
     [:section {:class (stl/css :offset-lines)
                :aria-label (tr "workspace.options.offset-lines")}
      [:> title-bar* {:collapsable (some? spec)
@@ -146,11 +148,17 @@
                      :on-collapsed toggle-shown
                      :title (tr "workspace.options.offset-lines")
                      :class (stl/css :title)}
-      (when (and (nil? spec) (not copy?))
-        [:> icon-button* {:variant "ghost"
-                          :aria-label (tr "workspace.options.offset-lines.add")
-                          :on-click on-add
-                          :icon i/add}])]
+      ;; made, or removed: the lines go, their source shows again
+      (when-not copy?
+        (if (nil? spec)
+          [:> icon-button* {:variant "ghost"
+                            :aria-label (tr "workspace.options.offset-lines.add")
+                            :on-click on-add
+                            :icon i/add}]
+          [:> icon-button* {:variant "ghost"
+                            :aria-label (tr "workspace.options.offset-lines.remove")
+                            :on-click on-remove
+                            :icon i/remove}]))]
      (cond
        (or (nil? spec) (not shown?))
        nil

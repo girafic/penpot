@@ -150,3 +150,40 @@
           (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:accents #js [#js {:line 0 :color "#ffffff"}]})))
           (t/is (thrown? js/Error (set! (.-offsetLines group) #js {:accents "red"}))))))))
 
+
+(defn- page-objects
+  "The objects of the page of `context` in the live store."
+  [store ^js context]
+  (get-in @store [:files (aget (. context -currentFile) "$id") :data :pages-index
+                  (aget (. context -currentPage) "$id") :objects]))
+
+(t/deftest offset-lines-go-and-their-source-shows-again
+  (thw/with-wasm-mocks*
+    (fn []
+      (t/testing "the outline takes the place of the group"
+        (let [[store context ^js group ^js path] (offset-lines-of-a-rect)]
+          (set! (.-offsetLines group) nil)
+          (let [source (stored store context path)]
+            (t/is (some? source))
+            (t/is (false? (:hidden source)) "it shows again")
+            (t/is (nil? (:offset-line source)) "with no role left"))
+          (t/is (nil? (stored store context group)) "the group is gone")
+          (t/is (not-any? #(= :line (:offset-line %)) (vals (page-objects store context))) "and its lines")))
+
+      (t/testing "a group that holds more stays, without its lines"
+        (let [[store context ^js group ^js path] (offset-lines-of-a-rect)
+              ^js rect (.createRectangle context)]
+          (.appendChild group rect)
+          (set! (.-offsetLines group) nil)
+          (t/is (nil? (:offset-lines (stored store context group))))
+          (t/is (= #{(aget path "$id") (aget rect "$id")} (set (:shapes (stored store context group)))))
+          (t/is (nil? (.-offsetLines group)))
+          (t/is (thrown? js/Error (set! (.-offsetLines group) nil)) "none left to remove"))))))
+
+(t/deftest a-group-of-offset-lines-stays-when-it-holds-more-or-plays
+  (let [group   {:id :group :shapes [:src :line]}
+        objects {:src {:id :src :offset-line :source} :line {:id :line :offset-line :line}}]
+    (t/is (false? (dwol/keeps-group? objects {} group)) "its source takes its place")
+    (t/is (true? (dwol/keeps-group? objects {} (update group :shapes conj :rect))) "it holds more")
+    (t/is (true? (dwol/keeps-group? objects {:board {:tracks {:group {}}}} group)) "a timeline animates it")
+    (t/is (true? (dwol/keeps-group? {} {} group)) "its source is gone")))

@@ -2174,7 +2174,8 @@
                    (st/emit! (dwg/set-mask-mode (:id shape) mode)))))}
 
             ;; how its offset lines are made from their source (see
-            ;; `gol/lines`); setting them makes them again
+            ;; `gol/lines`); setting them makes them again, setting
+            ;; null removes them
             {:name "offsetLines"
              :get
              (fn [self]
@@ -2210,17 +2211,21 @@
                    (ctk/in-component-copy? shape)
                    (u/not-valid plugin-id :offsetLines "A copy of a component takes its offset lines from its main")
 
-                   (nil? (gol/layers-of (u/locate-objects file-id page-id) shape))
-                   (u/not-valid plugin-id :offsetLines "The path the lines are made from is gone")
-
-                   (nil? settings)
-                   (u/not-valid plugin-id :offsetLines value)
-
                    (not (r/check-permission plugin-id "content:write"))
                    (u/not-valid plugin-id :offsetLines "Plugin doesn't have 'content:write' permission")
 
                    (not (u/page-active? page-id))
                    (u/not-valid plugin-id :offsetLines "Cannot modify a page that is not currently active")
+
+                   ;; the lines go, their source shows again
+                   (nil? value)
+                   (st/emit! (dwol/remove-offset-lines (:id shape)))
+
+                   (nil? (gol/layers-of (u/locate-objects file-id page-id) shape))
+                   (u/not-valid plugin-id :offsetLines "The path the lines are made from is gone")
+
+                   (nil? settings)
+                   (u/not-valid plugin-id :offsetLines value)
 
                    :else
                    (st/emit! (dwol/set-offset-lines (:id shape) settings)))))}))
