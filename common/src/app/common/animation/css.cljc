@@ -85,6 +85,65 @@
     (let [[r g b] (clr/hex->rgb hex)]
       (str "rgba(" (int r) ", " (int g) ", " (int b) ", " (fmt opacity) ")"))))
 
+(defn- css-gradient
+  "The gradient `gradient` of a box `width` by `height` as CSS draws it,
+  as the canvas does, in pixels: a linear one `{:type :angle :stops}`, its
+  angle (degrees) and each stop `[colour share]`, the share of the line
+  of the gradient CSS draws through the middle of the box; a radial one
+  `{:type :rx :ry :cx :cy :stops}`, an ellipse (px) along the axes of the
+  box nearest its own (CSS turns none), each stop a share of its radius."
+  [{:keys [type start-x start-y end-x end-y width] :as gradient} box-width box-height]
+  (let [w     (double (or box-width 0))
+        h     (double (or box-height 0))
+        sx    (* start-x w)
+        sy    (* start-y h)
+        dx    (- (* end-x w) sx)
+        dy    (- (* end-y h) sy)
+        stops (cta/gradient-stops gradient)
+        color #(css-color (:color %) (:opacity %))]
+    (if (= :radial type)
+      (let [r     (mth/hypot dx dy)
+            other (* r (or width 1))
+            [rx ry] (if (>= (mth/abs dx) (mth/abs dy)) [r other] [other r])]
+        {:type :radial :rx rx :ry ry :cx sx :cy sy
+         :stops (mapv #(vector (color %) (* 100 (:offset %))) stops)})
+      (let [angle (if (and (mth/almost-zero? dx) (mth/almost-zero? dy))
+                    180
+                    (mth/degrees (mth/atan2 dx (- dy))))
+            rad   (mth/radians angle)
+            ux    (mth/sin rad)
+            uy    (- (mth/cos rad))
+            line  (max 1e-6 (+ (mth/abs (* w ux)) (mth/abs (* h uy))))
+            share (fn [offset]
+                    (let [qx (- (+ sx (* offset dx)) (/ w 2))
+                          qy (- (+ sy (* offset dy)) (/ h 2))]
+                      (* 100 (+ 0.5 (/ (+ (* qx ux) (* qy uy)) line)))))]
+        {:type :linear :angle angle
+         :stops (mapv #(vector (color %) (share (:offset %))) stops)}))))
+
+(defn css-gradient-image
+  "The CSS `background-image` of a gradient (see `css-gradient`)."
+  [{:keys [type angle rx ry cx cy stops]}]
+  (let [stops (str/join ", " (map (fn [[color share]] (str color " " (fmt share) "%")) stops))]
+    (if (= :radial type)
+      (str "radial-gradient(" (fmt rx) "px " (fmt ry) "px at " (fmt cx) "px " (fmt cy) "px, " stops ")")
+      (str "linear-gradient(" (fmt angle) "deg, " stops ")"))))
+
+(defn- css-gradient-vars
+  "The declarations of the custom properties that draw a gradient (see
+  `css-gradient`), which CSS plays as it can not a `background-image`
+  (see `gradient-css`)."
+  [{:keys [type angle rx ry cx cy stops]}]
+  (into (if (= :radial type)
+          [(str "--penpot-gradient-rx: " (fmt rx) "px;") (str "--penpot-gradient-ry: " (fmt ry) "px;")
+           (str "--penpot-gradient-cx: " (fmt cx) "px;") (str "--penpot-gradient-cy: " (fmt cy) "px;")]
+          [(str "--penpot-gradient-angle: " (fmt angle) "deg;")])
+        (mapcat (fn [k [color share]]
+                  [(str "--penpot-gradient-color-" k ": " color ";")
+                   (str "--penpot-gradient-at-" k ": " (fmt share) "%;")])
+                (range)
+                stops)))
+
 (defn- css-box-shadow
   [shadow]
   (str (when (= :inner-shadow (:style shadow)) "inset ")
@@ -108,7 +167,8 @@
   from its rest pose, when its position, size, scale or rotation plays;
   then, for the properties `values` holds, `:opacity`, `:border-radius`
   (the four corners in px), `:background-color` and `:border-color` (CSS
-  colours of the first solid fill and stroke), `:border-width` (px) (of a
+  colours of the first solid fill and stroke), `:gradient` (the first
+  gradient fill, see `css-gradient`), `:border-width` (px) (of a
   text, `:color`, `:text-stroke-color` and `:text-stroke-width`: it paints
   its glyphs in the fills of its spans, see `cta/paint-fills`),
   `:box-shadow` (the CSS of its visible shadows), `:blur` and
@@ -174,7 +234,10 @@
         strokes (cta/apply-strokes (:strokes shape) values)
         shadows (cta/apply-shadows (:shadow shape) values)
         fill    (d/seek cta/solid-color-fill? fills)
-        stroke  (d/seek cta/solid-color-stroke? strokes)]
+        stroke  (d/seek cta/solid-color-stroke? strokes)
+        ;; a text paints its glyphs, which CSS paints in a colour
+        grad    (when (and (not text?) (contains? values :fill-gradient))
+                  (d/seek cta/gradient-fill? fills))]
     (cond-> {}
       (some #(contains? values %) css-transform-properties)
       (assoc :translate-x (if (contains? values :x) (- (+ (:x origin) (:x values)) base-x) 0)
@@ -192,6 +255,9 @@
 
       (and fill (cta/has? values :fill-color :fill-opacity))
       (assoc (if text? :color :background-color) (css-color (:fill-color fill) (or (:fill-opacity fill) 1)))
+
+      (some? grad)
+      (assoc :gradient (css-gradient (:fill-color-gradient grad) (:width selrect) (:height selrect)))
 
       (and stroke (cta/has? values :stroke-color :stroke-opacity))
       (assoc (if text? :text-stroke-color :border-color) (css-color (:stroke-color stroke) (or (:stroke-opacity stroke) 1)))
@@ -307,6 +373,9 @@
 
       (contains? frame :background-color)
       (conj (str "background-color: " background-color ";"))
+
+      (contains? frame :gradient)
+      (into (css-gradient-vars (:gradient frame)))
 
       (contains? frame :border-color)
       (conj (str "border-color: " border-color ";"))
@@ -432,15 +501,26 @@
             (vswap! cache assoc t v)
             v)))))
 
+(defn- gradient-numbers
+  "The numbers of a gradient: its points, its width, and the offset, the
+  channels and the opacity of each stop."
+  [{:keys [start-x start-y end-x end-y width] :as gradient}]
+  (into (mapv double [start-x start-y end-x end-y width])
+        (mapcat (fn [{:keys [offset color opacity]}]
+                  (into [(double offset)] (conj (mapv double (clr/hex->rgb color)) (double opacity)))))
+        (cta/gradient-stops gradient)))
+
 (defn value-numbers
   "The numbers of `values` (see `values-at`), in an order of their own: a
-  colour as its channels, an indexed value by index."
+  colour as its channels, a gradient as `gradient-numbers`, an indexed
+  value by index."
   [values]
   (into []
         (mapcat (fn [[_ v]]
                   (cond
                     (number? v)                                [(double v)]
                     (and (string? v) (str/starts-with? v "#")) (mapv double (clr/hex->rgb v))
+                    (and (map? v) (contains? v :stops))        (gradient-numbers v)
                     (map? v)                                   (value-numbers v)
                     :else                                      [])))
         (sort-by (comp str key) values)))
@@ -554,6 +634,54 @@
   [text]
   (str "/* " (str/replace (str text) "*/" "* /") " */"))
 
+(defn- gradient-rule
+  "What the rule of `shape` adds when `track` of `timeline` plays its
+  first gradient fill (see `css-gradient`): `[declarations count type]`,
+  its `background-image` of the custom properties its `@keyframes` play
+  (see `css-gradient-vars`) and their values at rest, which reduced
+  motion shows, with as many stops as it plays; nil else."
+  [timeline shape track]
+  (let [fills (cta/as-vec (:fills shape))
+        index (d/index-of-pred fills cta/gradient-fill?)]
+    (when (and (some? index)
+               (not= :text (:type shape))
+               (some #(and (= :fill-gradient (:property %)) (= index (:index %))) (:keyframes track)))
+      (let [played (get-in ((shape-values timeline (:id shape)) 0) [:fill-gradient index])
+            rest   (:fill-color-gradient (get fills index))
+            rest   (cond-> rest
+                     (some? played) (assoc :stops (cta/pad-stops rest played)))
+            {:keys [type stops] :as css} (css-gradient rest (dm/get-in shape [:selrect :width])
+                                                       (dm/get-in shape [:selrect :height]))
+            stops  (str/join ", " (map #(str "var(--penpot-gradient-color-" % ") var(--penpot-gradient-at-" % ")")
+                                       (range (count stops))))]
+        [(conj (css-gradient-vars css)
+               (if (= :radial type)
+                 (str "background-image: radial-gradient(var(--penpot-gradient-rx) var(--penpot-gradient-ry)"
+                      " at var(--penpot-gradient-cx) var(--penpot-gradient-cy), " stops ");")
+                 (str "background-image: linear-gradient(var(--penpot-gradient-angle), " stops ");")))
+         (count (:stops css))
+         type]))))
+
+(defn- gradient-properties
+  "The `@property` rules of the custom properties that draw the gradients
+  of `gradients` (see `gradient-rule`), so CSS plays them: they hold a
+  colour, a share, an angle or a length, not a string."
+  [gradients]
+  (let [most  (reduce max 0 (map second gradients))
+        types (into #{} (map #(nth % 2)) gradients)
+        prop  (fn [name syntax initial]
+                (str "@property --penpot-gradient-" name " {\n  syntax: \"" syntax "\";\n"
+                     "  inherits: false;\n  initial-value: " initial ";\n}"))]
+    (str/join "\n\n"
+              (concat
+               (when (contains? types :linear) [(prop "angle" "<angle>" "180deg")])
+               (when (contains? types :radial)
+                 (map #(prop % "<length>" "0px") ["rx" "ry" "cx" "cy"]))
+               (mapcat (fn [k]
+                         [(prop (str "color-" k) "<color>" "transparent")
+                          (prop (str "at-" k) "<percentage>" "0%")])
+                       (range most))))))
+
 (defn timeline->css
   "Generate a CSS string (`@keyframes` blocks + per-shape `animation`
   rules) for `timeline`, using the base geometry from `objects`. Pure.
@@ -653,7 +781,9 @@
                                                       (get objects sid))]
                                   (let [kf-name  (str "penpot-anim-" sid)
                                         selector (selector shape)
-                                        comment  (css-comment (or (:name shape) sid))]
+                                        comment  (css-comment (or (:name shape) sid))
+                                        ;; an SVG plays its gradients by SMIL
+                                        gradient (when-not svg? (gradient-rule timeline shape track))]
                                     [selector
                                      (str comment "\n"
                                           (track->keyframes-css timeline shape track kf-name
@@ -666,12 +796,18 @@
                                           selector " {\n  animation: " kf-name " "
                                           duration "ms linear " iter ";\n"
                                           "  transform-origin: "
-                                          (origin shape track) ";\n}")]))))
+                                          (origin shape track) ";\n"
+                                          (str/join "" (map #(str "  " % "\n") (first gradient)))
+                                          "}")
+                                     gradient]))))
                         (:tracks timeline))
+         gradients (keep #(nth % 2) rules)
          rules    (into rules unit-rules)]
      (if (empty? rules)
        ""
-       (str (str/join "\n\n" (map second rules))
+       (str (when (seq gradients)
+              (str (gradient-properties gradients) "\n\n"))
+            (str/join "\n\n" (map second rules))
             "\n\n@media (prefers-reduced-motion: reduce) {\n  "
             (str/join ",\n  " (map first rules))
             " {\n    animation: none;\n  }\n}")))))

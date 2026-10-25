@@ -7193,6 +7193,9 @@ msgstr "Fill %s"
 msgid "workspace.animation.fill-opacity"
 msgstr "Fill %s opacity"
 
+msgid "workspace.animation.fill-gradient"
+msgstr "Fill %s gradient"
+
 msgid "workspace.animation.stroke"
 msgstr "Stroke %s"
 

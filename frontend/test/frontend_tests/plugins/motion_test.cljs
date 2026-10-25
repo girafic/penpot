@@ -1657,3 +1657,31 @@
         (.addKeyframe timeline rect #js {:property "strokeDashOffset" :index 0 :time 1000 :value 20})
         (t/is (= #{:stroke-dash-offset} (into #{} (map :property) (:keyframes (stored-track store context board rect)))))
         (t/is (mth/close? 10 (.valueAt timeline rect "strokeDashOffset" 500 0)) "they march")))))
+
+(t/deftest a-gradient-fill-blends-its-gradients
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js timeline         (.addTimeline board)
+            gradient             (fn [a b end-x]
+                                   #js {:type "linear" :startX 0 :startY 0 :endX end-x :endY 0 :width 1
+                                        :stops #js [#js {:color a :opacity 1 :offset 0}
+                                                    #js {:color b :opacity 1 :offset 1}]})]
+        (set! (.-fills rect) #js [#js {:fillColorGradient (gradient "#ff0000" "#0000ff" 1)}])
+        (.addKeyframe timeline rect #js {:property "fillGradient" :index 0 :time 0
+                                         :value (gradient "#ff0000" "#0000ff" 1) :easing "linear"})
+        (.addKeyframe timeline rect #js {:property "fillGradient" :index 0 :time 1000
+                                         :value (gradient "#0000ff" "#ff0000" 0)})
+        (t/is (= #{:fill-gradient} (into #{} (map :property) (:keyframes (stored-track store context board rect)))))
+        (t/is (= :linear (-> (stored-track store context board rect) :keyframes first :value :type))
+              "kept as Penpot's gradient")
+        (let [^js half (.valueAt timeline rect "fillGradient" 500 0)]
+          (t/is (= "linear" (.-type half)))
+          (t/is (mth/close? 0.5 (.-endX half)) "its points blend")
+          (t/is (= 2 (alength (.-stops half)))))
+        (t/is (= "#0000ff" (-> (.-keyframes timeline) (aget 1) .-value .-stops (aget 0) .-color))
+              "a keyframe gives it back as a Gradient")
+        (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "fillGradient" :index 0 :time 500
+                                                                 :value "#ff0000"}))
+              "a colour is no gradient")))))

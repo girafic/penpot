@@ -495,6 +495,11 @@
        [:> keyframe-diamond* {:properties [:fill-color :fill-opacity]
                               :index index}])
 
+     (when (and (= origin :fill)
+                (some? (:gradient color)))
+       [:> keyframe-diamond* {:properties [:fill-gradient]
+                              :index index}])
+
      (when (some? on-remove)
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "settings.remove-color")

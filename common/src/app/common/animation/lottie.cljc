@@ -345,21 +345,38 @@
 
 (defn- lottie-gradient-fill
   "A Lottie gradient fill of `gradient` over the box `[x y width height]`,
-  where the gradient points are fractions of the box."
-  [{:keys [type start-x start-y end-x end-y stops]} opacity rule [x y width height]]
-  (let [stops (sort-by :offset stops)
-        point (fn [px py] [(+ x (* px width)) (+ y (* py height))])]
+  where the gradient points are fractions of the box, playing the
+  gradients of the keyframes `kfs` (static for one, see `lottie-prop-1d`,
+  or what they all have alike).
+  Lottie keeps the count of stops: each has the most any has (see
+  `cta/pad-stops`). The type is the one it starts with."
+  [gradient kfs opacity rule [x y width height]]
+  (let [kfs    (cta/sort-keyframes kfs)
+        first' (if (seq kfs) (:value (first kfs)) gradient)
+        most   (apply max-key #(count (:stops %)) first' (map :value kfs))
+        stops  (fn [g]
+                 (if (= (count (:stops g)) (count (:stops most)))
+                   (cta/gradient-stops g)
+                   (cta/pad-stops g most)))
+        colors (fn [g]
+                 (let [stops (stops g)]
+                   (vec (concat (mapcat (fn [{:keys [offset color]}]
+                                          (cons offset (hex->rgb01 color)))
+                                        stops)
+                                (mapcat (fn [{:keys [offset opacity]}]
+                                          [offset opacity])
+                                        stops)))))
+        point  (fn [px py] [(+ x (* px width)) (+ y (* py height))])
+        prop   (fn [value-fn]
+                 (if (apply = (value-fn first') (map (comp value-fn :value) kfs))
+                   {:a 0 :k (value-fn first')}
+                   {:a 1 :k (lottie-keyframes kfs value-fn)}))]
     {:ty "gf" :nm "gradient" :r rule
-     :t (if (= type :radial) 2 1)
-     :s {:a 0 :k (point start-x start-y)}
-     :e {:a 0 :k (point end-x end-y)}
-     :g {:p (count stops)
-         :k {:a 0 :k (vec (concat (mapcat (fn [{:keys [offset color]}]
-                                            (cons offset (hex->rgb01 color)))
-                                          stops)
-                                  (mapcat (fn [{:keys [offset opacity]}]
-                                            [offset (or opacity 1)])
-                                          stops)))}}
+     :t (if (= :radial (:type first')) 2 1)
+     :s (prop #(point (:start-x %) (:start-y %)))
+     :e (prop #(point (:end-x %) (:end-y %)))
+     :g {:p (count (:stops most))
+         :k (prop colors)}
      :o {:a 0 :k (* 100.0 (or opacity 1))}}))
 
 (defn- lottie-fill-items
@@ -378,8 +395,9 @@
                :o (lottie-prop-1d (slot-kfs by-prop :fill-opacity index) (fn [v] (* 100.0 v))
                                   (* 100.0 (or (:fill-opacity fill) 1)))}
 
-              (some? (:fill-color-gradient fill))
-              (lottie-gradient-fill (:fill-color-gradient fill) (:fill-opacity fill) rule box))))
+              (cta/gradient-fill? fill)
+              (lottie-gradient-fill (:fill-color-gradient fill) (slot-kfs by-prop :fill-gradient index)
+                                    (:fill-opacity fill) rule box))))
          (remove nil?)
          (vec))))
 

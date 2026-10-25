@@ -18390,7 +18390,7 @@ Timeline:
             property: AnimatableProperty,
             time: number,
             index?: number,
-        ): string | number | null;
+        ): string | number | Gradient | null;
         clear(shape: Shape): void;
         originOf(shape: Shape): { x: number; y: number };
         setOrigin(shape: Shape, origin: { x: number; y: number }): void;
@@ -18746,7 +18746,7 @@ Timeline:
             property: AnimatableProperty,
             time: number,
             index?: number,
-        ): string | number | null
+        ): string | number | Gradient | null
         ```
 
         The value the animation gives `property` of `shape` at `time`, or `null`
@@ -18767,7 +18767,7 @@ Timeline:
 
           For fills, strokes and shadows: which one (0 by default).
 
-        Returns string | number | null
+        Returns string | number | Gradient | null
       clear: |-
         ```
         clear(shape: Shape): void
@@ -19483,7 +19483,7 @@ TimelineJsonKeyframe:
     ```
     interface TimelineJsonKeyframe {
         time: number;
-        value: string | number;
+        value: string | number | Gradient;
         easing?: TimelineJsonEasing;
         tokens?: KeyframeTokens;
         pathIn?: number;
@@ -19502,7 +19502,7 @@ TimelineJsonKeyframe:
         When it is.
       value: |-
         ```
-        value: string | number
+        value: string | number | Gradient
         ```
 
         The value of the property then, see `AnimatableProperty`.
@@ -20993,7 +20993,7 @@ KeyframeProps:
     interface KeyframeProps {
         property: AnimatableProperty;
         time: number;
-        value: string | number;
+        value: string | number | Gradient;
         easing?: MotionEasing;
         index?: number;
         appliedTokens?: KeyframeTokens;
@@ -21019,11 +21019,12 @@ KeyframeProps:
         the timeline dock.
       value: |-
         ```
-        value: string | number
+        value: string | number | Gradient
         ```
 
         The value of the property then: a number, a hexadecimal color for the
-        colors, or an SVG path for `path` (see `AnimatableProperty`).
+        colors, a `Gradient` for `fillGradient`, or an SVG path for `path`
+        (see `AnimatableProperty`).
       easing: |-
         ```
         easing?: MotionEasing
@@ -21078,7 +21079,7 @@ Keyframe:
         property: AnimatableProperty;
         index?: number;
         time: number;
-        value: string | number;
+        value: string | number | Gradient;
         fixedStart: boolean;
         easing: MotionEasing;
         appliedTokens: KeyframeTokens | undefined;
@@ -21122,7 +21123,7 @@ Keyframe:
         (see `KeyframeProps.time`).
       value: |-
         ```
-        value: string | number
+        value: string | number | Gradient
         ```
 
         The value of the property then, see `AnimatableProperty`.
@@ -21533,7 +21534,7 @@ KeyframesStyleEntryKeyframe:
     ```
     interface KeyframesStyleEntryKeyframe {
         time: number;
-        value: string | number;
+        value: string | number | Gradient;
         easing?: MotionEasing;
         appliedTokens?: KeyframeTokens;
         pathIn?: number;
@@ -21552,12 +21553,12 @@ KeyframesStyleEntryKeyframe:
         When, in milliseconds from the start of its entry.
       value: |-
         ```
-        value: string | number
+        value: string | number | Gradient
         ```
 
         The value of the property then, relative to the layer that plays it
-        (see `KeyframesStyleEntry`): a number, or a hexadecimal color for the
-        colors.
+        (see `KeyframesStyleEntry`): a number, a hexadecimal color for the
+        colors, or a `Gradient` for `fillGradient`.
       easing: |-
         ```
         easing?: MotionEasing
@@ -29609,7 +29610,7 @@ Gradient:
     }
     ```
 
-    Referenced by: Color, Fill, LibraryColor, Stroke
+    Referenced by: Color, Fill, Keyframe, KeyframeProps, KeyframesStyleEntryKeyframe, LibraryColor, Stroke, Timeline, TimelineJsonKeyframe
   members:
     Properties:
       type: |-
@@ -30111,6 +30112,7 @@ AnimatableProperty:
         | "borderRadiusBottomLeft"
         | "fillColor"
         | "fillOpacity"
+        | "fillGradient"
         | "strokeColor"
         | "strokeOpacity"
         | "strokeWidth"
@@ -30154,6 +30156,13 @@ AnimatableProperty:
     * `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
     * `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
       `#ff6600`.
+    * `fillGradient`: a `Gradient`, the whole gradient of a gradient fill:
+      its points, width and stops (color, opacity and offset each) blend
+      from one keyframe to the next. Gradients of fewer stops get stops
+      that draw as they do, so each stop goes to the nearest of the next;
+      a change from linear to radial holds until the keyframe. Only fills
+      that are gradients take it (`fillColor` and `fillOpacity` only flat
+      ones).
     * `strokeDash`, `strokeGap`, `strokeDashOffset`: the dash pattern of a
       `dashed` stroke (see `Stroke.strokeDash`), in pixels; other strokes
       do not take them.

@@ -55,6 +55,7 @@
    [app.main.ui.workspace.timeline.lanes :as lanes]
    [app.main.ui.workspace.timeline.recording :refer [recording-controls* recording-row-index]]
    [app.util.audio :as audio]
+   [app.util.color :as uc]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
    [app.util.dom.normalize-wheel :as nw]
@@ -792,6 +793,14 @@
       (= :content property)
       [:span {:class (stl/css :row-value :row-outline)}
        (tr "workspace.animation.path-nodes" (outline-nodes keyframe value))]
+
+      ;; a gradient, which the gradient editor of the fill edits
+      (= :fill-gradient property)
+      [:div {:class (stl/css-case :row-color true :disabled disabled?)
+             :title (or hint (uc/gradient-type->string (:type value)))}
+       (when (some? value)
+         [:> swatch* {:background {:gradient value :opacity 1}
+                      :size "small"}])]
 
       (cta/color-property? property)
       [:div {:class (stl/css-case :row-color true :disabled disabled?)

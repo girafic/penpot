@@ -565,3 +565,33 @@
                           [:text-stroke-width :border-width]))
           "the stroke of its glyphs")))
 
+
+(t/deftest gradients-play-in-css-react-and-json
+  (let [g      (fn [a b & {:as attrs}]
+                 (merge {:type :linear :start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5 :width 1
+                         :stops [{:color a :opacity 1 :offset 0} {:color b :opacity 1 :offset 1}]}
+                        attrs))
+        from   (g "#ff0000" "#0000ff")
+        to     (g "#00ff00" "#ff0000" :start-x 0.5 :start-y 0 :end-x 0.5 :end-y 1)
+        [objects code] (board-scene #(-> %
+                                         (cta/add-keyframe (thi/id :a) {:time 0 :property :fill-gradient :index 0 :value from})
+                                         (cta/add-keyframe (thi/id :a) {:time 600 :property :fill-gradient :index 0 :value to})))
+        objects (assoc-in objects [(thi/id :a) :fills] [{:fill-color-gradient from :fill-opacity 1}])]
+    (t/testing "React: motion.dev blends the background image"
+      (let [react (ctac/motion-react code objects :class-name #(:name %))]
+        (t/is (cstr/includes? react "initial={{ backgroundImage: \"linear-gradient(90deg, #ff0000 0%, #0000ff 100%)\" }}"))
+        (t/is (cstr/includes? react "\"linear-gradient(180deg, #00ff00 0%, #ff0000 100%)\""))))
+    (t/testing "CSS: registered custom properties, which CSS plays"
+      (let [css (acss/timeline->css (:timeline code) objects)]
+        (t/is (cstr/includes? css "@property --penpot-gradient-color-1 {"))
+        (t/is (cstr/includes? css "syntax: \"<color>\";"))
+        (t/is (cstr/includes? css "--penpot-gradient-angle: 90deg;"))
+        (t/is (cstr/includes? css "--penpot-gradient-angle: 180deg;"))
+        (t/is (cstr/includes? css (str "background-image: linear-gradient(var(--penpot-gradient-angle), "
+                                       "var(--penpot-gradient-color-0) var(--penpot-gradient-at-0), "
+                                       "var(--penpot-gradient-color-1) var(--penpot-gradient-at-1));")))))
+    (t/testing "JSON: the gradient as the plugin API gives it"
+      (let [doc   (ctac/motion-json code objects)
+            value (get-in (property-json (layer-json doc :a) "fillGradient") ["keyframes" 0 "value"])]
+        (t/is (= "linear" (get value "type")))
+        (t/is (= {"color" "#ff0000" "opacity" 1 "offset" 0} (get-in value ["stops" 0])))))))

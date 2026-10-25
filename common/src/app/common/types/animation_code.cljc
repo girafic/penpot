@@ -49,6 +49,7 @@
    :r4 "borderRadiusBottomLeft"
    :fill-color "fillColor"
    :fill-opacity "fillOpacity"
+   :fill-gradient "fillGradient"
    :stroke-color "strokeColor"
    :stroke-opacity "strokeOpacity"
    :stroke-width "strokeWidth"
@@ -89,7 +90,7 @@
    :perspective :perspective-x :perspective-y
    :light-angle :light-height :light-ambient
    :opacity :r1 :r2 :r3 :r4
-   :fill-color :fill-opacity
+   :fill-color :fill-opacity :fill-gradient
    :stroke-color :stroke-opacity :stroke-width
    :stroke-dash :stroke-gap :stroke-dash-offset
    :shadow-offset-x :shadow-offset-y :shadow-blur
@@ -158,14 +159,31 @@
       (long v)
       v)))
 
+(defn- json-gradient
+  "A gradient as JSON, with the names of the plugin API."
+  [{:keys [type start-x start-y end-x end-y width stops]}]
+  (d/ordered-map "type" (name type)
+                 "startX" (json-number start-x)
+                 "startY" (json-number start-y)
+                 "endX" (json-number end-x)
+                 "endY" (json-number end-y)
+                 "width" (json-number width)
+                 "stops" (mapv (fn [{:keys [color opacity offset]}]
+                                 (d/ordered-map "color" color
+                                                "opacity" (json-number (or opacity 1))
+                                                "offset" (json-number offset)))
+                               stops)))
+
 (defn- json-value
   "A value as JSON: a number rounded, an outline (see `ctao/outline-of`)
-  as its SVG path, in the own frame of its path, the others as they are."
+  as its SVG path, in the own frame of its path, a gradient as the plugin
+  API gives it, the others as they are."
   [v]
   (cond
-    (number? v)        (json-number v)
-    (path/content? v)  (str v)
-    :else              v))
+    (number? v)                         (json-number v)
+    (path/content? v)                   (str v)
+    (and (map? v) (contains? v :stops)) (json-gradient v)
+    :else                               v))
 
 (defn- json-easing
   "The easing of the segment `keyframe` (or a preset) starts, as the JSON
@@ -374,6 +392,7 @@
    ["opacity" #{:opacity :scene} :opacity]
    ["borderRadius" #{:r1 :r2 :r3 :r4} :border-radius]
    ["backgroundColor" #{:fill-color :fill-opacity} :background-color]
+   ["backgroundImage" #{:fill-gradient} :gradient]
    ["borderColor" #{:stroke-color :stroke-opacity} :border-color]
    ["borderWidth" #{:stroke-width} :border-width]
    ["boxShadow" #{:shadow-offset-x :shadow-offset-y :shadow-blur
@@ -383,13 +402,15 @@
 
 (def ^:private text-react-values
   "`react-values` of a text, which paints its glyphs in its fills and
-  strokes: its colour and the stroke of its glyphs."
-  (mapv (fn [[value-name _ _ :as entry]]
-          (case value-name
-            "backgroundColor" ["color" #{:fill-color :fill-opacity} :color]
-            "borderColor"     ["WebkitTextStrokeColor" #{:stroke-color :stroke-opacity} :text-stroke-color]
-            "borderWidth"     ["WebkitTextStrokeWidth" #{:stroke-width} :text-stroke-width]
-            entry))
+  strokes: its colour and the stroke of its glyphs, no gradient."
+  (into []
+        (comp (remove #(= "backgroundImage" (first %)))
+              (map (fn [[value-name _ _ :as entry]]
+                     (case value-name
+                       "backgroundColor" ["color" #{:fill-color :fill-opacity} :color]
+                       "borderColor"     ["WebkitTextStrokeColor" #{:stroke-color :stroke-opacity} :text-stroke-color]
+                       "borderWidth"     ["WebkitTextStrokeWidth" #{:stroke-width} :text-stroke-width]
+                       entry))))
         react-values))
 
 (def ^:private segment-samples
@@ -417,6 +438,8 @@
     "borderRadius" (str "\"" (str/join " " (map #(str (react-number %) "px") v)) "\"")
     ("backgroundColor" "borderColor" "boxShadow" "color" "WebkitTextStrokeColor" "perspectiveOrigin") (str "\"" v "\"")
     "filter"         (str "\"" v "\"")
+    ;; motion.dev blends two of as many stops, number by number
+    "backgroundImage" (str "\"" (if (some? v) (acss/css-gradient-image v) "none") "\"")
     "backdropFilter" (str "\"blur(" (react-number v) "px)\"")
     (react-number v)))
 

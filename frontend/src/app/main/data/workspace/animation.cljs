@@ -471,6 +471,7 @@
      :r4       (or (:r4 shape) 0)
      :fill-color     (:fill-color (item-at (:fills shape) index))
      :fill-opacity   (or (:fill-opacity (item-at (:fills shape) index)) 1)
+     :fill-gradient  (:fill-color-gradient (item-at (:fills shape) index))
      :stroke-color   (:stroke-color (item-at (:strokes shape) index))
      :stroke-opacity (or (:stroke-opacity (item-at (:strokes shape) index)) 1)
      :stroke-width   (or (:stroke-width (item-at (:strokes shape) index)) 0)
@@ -504,7 +505,7 @@
   [:light-angle :light-height :light-ambient])
 
 (def appearance-properties
-  [:fill-color :fill-opacity
+  [:fill-color :fill-opacity :fill-gradient
    :stroke-color :stroke-opacity :stroke-width
    :stroke-dash :stroke-gap :stroke-dash-offset
    :shadow-offset-x :shadow-offset-y :shadow-blur

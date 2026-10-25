@@ -1254,6 +1254,112 @@
     (t/is (some? (:fill-color-gradient (second fills))))
     (t/is (nil? (:fill-color (second fills))))))
 
+(defn- linear-gradient
+  [stops & {:as attrs}]
+  (merge {:type :linear :start-x 0 :start-y 0 :end-x 1 :end-y 0 :width 1
+          :stops stops}
+         attrs))
+
+(t/deftest a-gradient-fill-plays-its-keyframes
+  (let [from  (linear-gradient [{:color "#ff0000" :opacity 1 :offset 0}
+                                {:color "#0000ff" :opacity 1 :offset 1}])
+        to    (linear-gradient [{:color "#0000ff" :opacity 0 :offset 0.2}
+                                {:color "#ff0000" :opacity 1 :offset 1}]
+                               :end-x 0 :end-y 1 :width 0.5)
+        shape (cts/setup-shape
+               {:type :rect :x 0 :y 0 :width 100 :height 100
+                :fills [{:fill-color "#00ff00" :fill-opacity 1}
+                        {:fill-color-gradient from}]})
+        sid   (:id shape)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 0 :property :fill-gradient :index 1 :value from})
+                  (cta/add-keyframe sid {:time 1000 :property :fill-gradient :index 1 :value to}))
+        tree  (ctaf/timeline->modif-tree tl {sid shape} 500)
+        shape' (ctm/apply-structure-modifiers shape (get-in tree [sid :modifiers]))
+        fills (vec (:fills shape'))
+        grad  (:fill-color-gradient (second fills))]
+    (t/testing "the solid fill stays as it is"
+      (t/is (= "#00ff00" (:fill-color (first fills)))))
+    (t/testing "the points and the width mix"
+      (t/is (mth/close? 0.5 (:end-x grad) 0.001))
+      (t/is (mth/close? 0.5 (:end-y grad) 0.001))
+      (t/is (mth/close? 0.75 (:width grad) 0.001)))
+    (t/testing "stop by stop: colour, opacity and offset"
+      (t/is (hex-close? "#800080" (get-in grad [:stops 0 :color])))
+      (t/is (mth/close? 0.5 (get-in grad [:stops 0 :opacity]) 0.001))
+      (t/is (mth/close? 0.1 (get-in grad [:stops 0 :offset]) 0.001)))
+    (t/testing "a gradient keyframe fits a gradient fill only"
+      (t/is (cta/fits-keyframe? shape {:property :fill-gradient :index 1}))
+      (t/is (not (cta/fits-keyframe? shape {:property :fill-gradient :index 0})))
+      (t/is (cta/keyframe-value-fits? {:property :fill-gradient :value to}))
+      (t/is (not (cta/keyframe-value-fits? {:property :fill-gradient :value "#ff0000"}))))))
+
+(t/deftest a-gradient-edited-at-the-playhead-is-a-keyframe
+  (let [from    (linear-gradient [{:color "#ff0000" :opacity 1 :offset 0}
+                                  {:color "#0000ff" :opacity 1 :offset 1}])
+        to      (assoc from :end-x 0 :end-y 1)
+        edited  (assoc-in from [:stops 0 :color] "#00ff00")
+        shape   (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10
+                                  :fills [{:fill-color-gradient from}]})
+        sid     (:id shape)
+        objects {sid shape}
+        tl      (-> (mk-timeline)
+                    (cta/add-keyframe sid {:time 0 :property :fill-gradient :index 0 :value from})
+                    (cta/add-keyframe sid {:time 1000 :property :fill-gradient :index 0 :value to}))
+        after   (assoc-in objects [sid :fills 0 :fill-color-gradient] edited)
+        tl'     (cta/record-edit tl objects after 500)
+        kf      (d/seek #(= 500 (:time %)) (get-in tl' [:tracks sid :keyframes]))]
+    (t/is (= :fill-gradient (:property kf)))
+    (t/is (= edited (:value kf)))
+    (t/testing "auto-keyframe records a gradient not animated yet"
+      (let [tl''  (cta/record-unanimated (mk-timeline) objects after [sid] 500)
+            kfs   (get-in tl'' [:tracks sid :keyframes])]
+        (t/is (= [[0 from] [500 edited]] (mapv (juxt :time :value) (sort-by :time kfs))))))))
+
+(t/deftest gradients-of-other-stop-counts-blend
+  (let [two   (linear-gradient [{:color "#000000" :offset 0}
+                                {:color "#ffffff" :offset 1}])
+        three (linear-gradient [{:color "#000000" :offset 0}
+                                {:color "#ff0000" :offset 0.5}
+                                {:color "#ffffff" :offset 1}])
+        half  (cta/lerp-gradient two three 0.5)]
+    (t/testing "the gradient with fewer stops gets its colours at the others' offsets"
+      (t/is (= 3 (count (:stops half))))
+      (t/is (= [0.0 0.5 1.0] (mapv #(double (:offset %)) (:stops half))))
+      ;; grey (#808080) half way to red
+      (t/is (hex-close? "#c04040" (get-in half [:stops 1 :color]))))
+    (t/testing "at the ends it is the one or the other"
+      (t/is (hex-close? "#808080" (get-in (cta/lerp-gradient two three 0) [:stops 1 :color])))
+      (t/is (hex-close? "#ff0000" (get-in (cta/lerp-gradient two three 1) [:stops 1 :color]))))
+    (t/testing "a change of type holds until the next keyframe"
+      (let [radial (assoc three :type :radial)]
+        (t/is (= :linear (:type (cta/lerp-gradient two radial 0.9))))
+        (t/is (= radial (cta/lerp-gradient two radial 1)))))
+    (t/testing "a gradient keeps its own stops, those it gets draw as it does"
+      (let [own    (linear-gradient [{:color "#000000" :offset 0.2}
+                                     {:color "#ffffff" :offset 0.8}])
+            padded (cta/pad-stops own three)]
+        (t/is (= [0.2 0.5 0.8] (mapv #(double (:offset %)) padded)))
+        (t/is (hex-close? "#808080" (:color (second padded))))
+        (t/is (= (cta/gradient-stops own) (cta/pad-stops own two)))))
+    (t/testing "every frame of a row has as many stops as its keyframe with most"
+      (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10
+                                    :fills [{:fill-color-gradient two}]})
+            sid   (:id shape)
+            tl    (-> (mk-timeline)
+                      (cta/add-keyframe sid {:time 0 :property :fill-gradient :index 0 :value two})
+                      (cta/add-keyframe sid {:time 500 :property :fill-gradient :index 0
+                                             :value (assoc-in two [:stops 0 :color] "#ff0000")})
+                      (cta/add-keyframe sid {:time 1000 :property :fill-gradient :index 0 :value three}))
+            stops #(count (get-in (cta/values-at tl %) [sid :fill-gradient 0 :stops]))]
+        (t/is (= [3 3 3 3 3] (mapv stops [0 250 500 750 1000])))))
+    (t/testing "a spring overshoot keeps opacities and offsets in range"
+      (let [over (cta/lerp-gradient two (linear-gradient [{:color "#000000" :opacity 0 :offset 0.5}
+                                                          {:color "#ffffff" :offset 1}])
+                                    1.3)]
+        (t/is (<= 0 (get-in over [:stops 0 :opacity]) 1))
+        (t/is (<= 0 (get-in over [:stops 0 :offset]) 1))))))
+
 (t/deftest shadow-offset-and-blur-follow-time
   (let [shape (cts/setup-shape
                {:type :rect :x 0 :y 0 :width 100 :height 100
@@ -7456,6 +7562,70 @@
     (t/testing "the dash and gap a stroke without them draws"
       (t/is (= [12 12] (cta/stroke-dash {:stroke-style :dashed :stroke-width 2}))))
     (t/is (= [:stroke :stroke :stroke] (mapv cta/property-area [:stroke-dash :stroke-gap :stroke-dash-offset])))))
+
+(t/deftest gradients-play-in-svg-and-lottie
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        bid    (:id board)
+        from   (linear-gradient [{:color "#ff0000" :opacity 1 :offset 0}
+                                 {:color "#0000ff" :opacity 1 :offset 1}])
+        to     (linear-gradient [{:color "#0000ff" :opacity 1 :offset 0}
+                                 {:color "#00ff00" :opacity 0.5 :offset 0.5}
+                                 {:color "#ff0000" :opacity 1 :offset 1}]
+                                :end-x 0 :end-y 1)
+        shape  (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20
+                                 :fills [{:fill-color-gradient from :fill-opacity 1}]})
+        sid    (:id shape)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe sid {:time 0 :property :fill-gradient :index 0 :value from})
+                   (cta/add-keyframe sid {:time 1000 :property :fill-gradient :index 0 :value to}))
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        markup (str "<g id=\"shape-" sid "\"><defs>"
+                    "<linearGradient id=\"fill-color-gradient-r1-0\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\">"
+                    "<stop offset=\"0\" stop-color=\"#ff0000\" stop-opacity=\"1\"></stop>"
+                    "<stop offset=\"1\" stop-color=\"#0000ff\" stop-opacity=\"1\"></stop>"
+                    "</linearGradient></defs>"
+                    "<rect fill=\"url(#fill-color-gradient-r1-0)\"></rect></g>")]
+    (t/testing "SVG: SMIL plays the points and as many stops as the gradient with most"
+      (let [svg (asvg/timeline->svg tl objects {sid {:markup markup}})]
+        (t/is (str/includes? svg "<animate attributeName=\"x2\""))
+        (t/is (str/includes? svg "<animate attributeName=\"y2\""))
+        (t/is (not (str/includes? svg "<animate attributeName=\"x1\"")))
+        (t/is (str/includes? svg "<animate attributeName=\"stop-color\""))
+        (t/is (str/includes? svg "<animate attributeName=\"stop-opacity\""))
+        (t/testing "beside a copy at rest, for reduced motion"
+          (t/is (= 5 (count (re-seq #"<stop " svg))))
+          (t/is (str/includes? svg "fill-color-gradient-r1-0-rest")))))
+    (t/testing "SVG: a radial one turns and widens on its transform, but on a path"
+      (let [radial  #(assoc % :type :radial)
+            objects (assoc-in objects [sid :fills 0 :fill-color-gradient] (radial from))
+            tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                        (cta/add-keyframe sid {:time 0 :property :fill-gradient :index 0 :value (radial from)})
+                        (cta/add-keyframe sid {:time 1000 :property :fill-gradient :index 0 :value (radial to)}))
+            svg     (asvg/timeline->svg tl objects
+                                        {sid {:markup (-> markup
+                                                          (str/replace "linearGradient" "radialGradient"))}})
+            track   (get-in tl [:tracks sid])]
+        (t/is (str/includes? svg "<animateTransform type=\"rotate\" additive=\"sum\" attributeName=\"gradientTransform\""))
+        (t/is (str/includes? svg "<animate attributeName=\"r\""))
+        (t/is (not (asvg/svg-gradient-static? (get objects sid) track)))
+        (t/is (asvg/svg-gradient-static? (assoc (get objects sid) :type :path) track))))
+    (t/testing "SVG: a change of type, or a text, keeps it as it rests"
+      (let [typed (cta/add-keyframe tl sid {:time 500 :property :fill-gradient :index 0
+                                            :value (assoc to :type :radial)})]
+        (t/is (asvg/svg-gradient-static? shape (get-in typed [:tracks sid])))
+        (t/is (asvg/svg-gradient-static? (assoc shape :type :text) (get-in tl [:tracks sid])))
+        (t/is (not (asvg/svg-gradient-static? shape (get-in tl [:tracks sid]))))))
+    (t/testing "Lottie: its points and stops play, as many stops in each"
+      (let [L    (alottie/timeline->lottie tl {bid board sid shape})
+            fill (d/seek #(= "gf" (:ty %)) (get-in (first (:layers L)) [:shapes 0 :it]))]
+        (t/is (= 3 (get-in fill [:g :p])))
+        (t/is (= 1 (get-in fill [:g :k :a])))
+        (t/is (= 1 (get-in fill [:e :a])))
+        (t/is (= 0 (get-in fill [:s :a])))
+        ;; 3 stops: offset and RGB, then offset and opacity
+        (t/is (= 18 (count (get-in fill [:g :k :k 0 :s]))))
+        (t/is (= 18 (count (get-in fill [:g :k :k 1 :s]))))))))
 
 (t/deftest the-dashes-march-in-svg-and-lottie
   (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})

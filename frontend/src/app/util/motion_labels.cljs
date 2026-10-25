@@ -54,6 +54,7 @@
       :opacity (tr "workspace.options.opacity")
       :fill-color (tr "workspace.animation.fill" n)
       :fill-opacity (tr "workspace.animation.fill-opacity" n)
+      :fill-gradient (tr "workspace.animation.fill-gradient" n)
       :stroke-color (tr "workspace.animation.stroke" n)
       :stroke-opacity (tr "workspace.animation.stroke-opacity" n)
       :stroke-width (tr "workspace.animation.stroke-width" n)

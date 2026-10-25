@@ -4705,7 +4705,7 @@ export interface Timeline {
     property: AnimatableProperty,
     time: number,
     index?: number,
-  ): number | string | null;
+  ): number | string | Gradient | null;
 
   /**
    * Removes the keyframes and preset animations of `shape`.
@@ -5184,7 +5184,7 @@ export interface TimelineJsonKeyframe {
   /**
    * The value of the property then, see `AnimatableProperty`.
    */
-  value: number | string;
+  value: number | string | Gradient;
 
   /**
    * How the value goes on from here to the next keyframe; the last
@@ -6263,6 +6263,13 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  * - `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
  * - `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
  *   `#ff6600`.
+ * - `fillGradient`: a `Gradient`, the whole gradient of a gradient fill:
+ *   its points, width and stops (color, opacity and offset each) blend
+ *   from one keyframe to the next. Gradients of fewer stops get stops
+ *   that draw as they do, so each stop goes to the nearest of the next;
+ *   a change from linear to radial holds until the keyframe. Only fills
+ *   that are gradients take it (`fillColor` and `fillOpacity` only flat
+ *   ones).
  * - `strokeDash`, `strokeGap`, `strokeDashOffset`: the dash pattern of a
  *   `dashed` stroke (see `Stroke.strokeDash`), in pixels; other strokes
  *   do not take them.
@@ -6308,6 +6315,7 @@ export type AnimatableProperty =
   | 'borderRadiusBottomLeft'
   | 'fillColor'
   | 'fillOpacity'
+  | 'fillGradient'
   | 'strokeColor'
   | 'strokeOpacity'
   | 'strokeWidth'
@@ -6365,9 +6373,10 @@ export interface KeyframeProps {
   time: number;
   /**
    * The value of the property then: a number, a hexadecimal color for the
-   * colors, or an SVG path for `path` (see `AnimatableProperty`).
+   * colors, a `Gradient` for `fillGradient`, or an SVG path for `path`
+   * (see `AnimatableProperty`).
    */
-  value: number | string;
+  value: number | string | Gradient;
   /**
    * How the value goes on from here to the next keyframe (`ease` by
    * default).
@@ -6419,7 +6428,7 @@ export interface Keyframe {
   /**
    * The value of the property then, see `AnimatableProperty`.
    */
-  value: number | string;
+  value: number | string | Gradient;
   /**
    * For a `path` keyframe, whether its first point and the way it goes
    * round were set by hand. Penpot pairs the points of consecutive path
@@ -6788,10 +6797,10 @@ export interface KeyframesStyleEntryKeyframe {
   time: number;
   /**
    * The value of the property then, relative to the layer that plays it
-   * (see `KeyframesStyleEntry`): a number, or a hexadecimal color for the
-   * colors.
+   * (see `KeyframesStyleEntry`): a number, a hexadecimal color for the
+   * colors, or a `Gradient` for `fillGradient`.
    */
-  value: number | string;
+  value: number | string | Gradient;
   /**
    * How the value goes on from here to the next keyframe (`ease` by
    * default).

@@ -573,16 +573,19 @@
 (defn- svg-static?
   "Whether `track` animates on `shape` what an SVG keeps as it rests: the
   trim of a text not `outlined?` (see `outline-texts`), which the SVG
-  renderer draws as text, which takes no length of its path. CSS plays
-  the rest on its vectors, the strokes of a text too, SMIL its shadows
-  and what CSS can not on outlines (see `asvg/svg-filter-shadows?`,
-  `asvg/svg-smil-corners?`, `aexp/svg-outline-sized?`)."
+  renderer draws as text, which takes no length of its path, and some of
+  its gradients (see `asvg/svg-gradient-static?`). CSS plays the rest on
+  its vectors, the strokes of a text too, SMIL its shadows, its
+  gradients and what CSS can not on outlines (see
+  `asvg/svg-filter-shadows?`, `asvg/svg-smil-corners?`,
+  `aexp/svg-outline-sized?`)."
   [shape track outlined?]
   (boolean
-   (and (= :text (:type shape))
-        (not outlined?)
-        (some #(#{:trim-start :trim-end :trim-offset} (:property %))
-              (:keyframes track)))))
+   (or (and (= :text (:type shape))
+            (not outlined?)
+            (some #(#{:trim-start :trim-end :trim-offset} (:property %))
+                  (:keyframes track)))
+       (asvg/svg-gradient-static? shape track))))
 
 (defn- shown
   "The items of `items` (a shadow, a stroke, a blur, or a vector of them)

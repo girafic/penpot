@@ -63,6 +63,9 @@
     :light-angle :light-height :light-ambient
     :r1 :r2 :r3 :r4
     :fill-color :fill-opacity
+    ;; a gradient fill, whole: its stops, its points and its width (see
+    ;; `lerp-gradient`)
+    :fill-gradient
     :stroke-color :stroke-opacity :stroke-width
     ;; the dash pattern of a dashed stroke: its dash, its gap and where it
     ;; starts along the stroke (see `dashed-stroke?`)
@@ -124,7 +127,7 @@
                  (repeat :geometry))
          (zipmap (keys light-properties) (repeat :light))
          (zipmap camera-properties (repeat :camera))
-         (zipmap [:fill-color :fill-opacity] (repeat :fill))
+         (zipmap [:fill-color :fill-opacity :fill-gradient] (repeat :fill))
          (zipmap [:stroke-color :stroke-opacity :stroke-width
                   :stroke-dash :stroke-gap :stroke-dash-offset]
                  (repeat :stroke))
@@ -163,7 +166,7 @@
                light-properties)))
 
 (def indexed-properties
-  #{:fill-color :fill-opacity
+  #{:fill-color :fill-opacity :fill-gradient
     :stroke-color :stroke-opacity :stroke-width
     :stroke-dash :stroke-gap :stroke-dash-offset
     :shadow-offset-x :shadow-offset-y :shadow-blur
@@ -273,7 +276,8 @@
     (into [:map {:title "ValueKeyframe"}
            ;; all but the outline, the progress along a path too
            [:property [::sm/one-of (disj animatable-properties :content)]]
-           [:value [:or ::sm/safe-number clr/schema:hex-color]]
+           ;; a gradient for `:fill-gradient`
+           [:value [:or ::sm/safe-number clr/schema:hex-color clr/schema:gradient]]
            ;; Motion path: for `:x` and `:y`, how far along its axis the
            ;; curve leaves the keyframe towards the next one (`:path-out`)
            ;; and comes into it from the previous one (`:path-in`), like the
@@ -337,7 +341,7 @@
   `:time` counted from the start of the entry."
   [:map {:title "AnimationStyleEntryKeyframe"}
    [:time ::sm/safe-int]
-   [:value [:or ::sm/safe-number clr/schema:hex-color]]
+   [:value [:or ::sm/safe-number clr/schema:hex-color clr/schema:gradient]]
    [:easing {:optional true} schema:easing]
    [:interpolation {:optional true} [::sm/one-of interpolation-types]]
    [:path-in {:optional true} ::sm/safe-number]
@@ -2558,12 +2562,118 @@
                    (clamp-byte (lerp fg tg t))
                    (clamp-byte (lerp fb tb t))])))
 
+(defn- gradient-value?
+  [v]
+  (and (map? v) (contains? v :stops)))
+
+(defn gradient-stops
+  "The stops of `gradient` by their offset, each with its opacity."
+  [gradient]
+  (->> (:stops gradient)
+       (map #(update % :opacity (fn [o] (or o 1))))
+       (sort-by :offset)
+       (vec)))
+
+(defn- stop-slots
+  "The slots of the sorted offsets `ref` that the sorted offsets `own`, as
+  many or fewer, take: in order, as near their offsets as can be."
+  [own ref]
+  (let [c    (count own)
+        n    (count ref)
+        memo (volatile! {})
+        best (fn best [i j]
+               (if-let [found (find @memo [i j])]
+                 (val found)
+                 (let [result
+                       (cond
+                         (= i c)               [0 []]
+                         (> (- c i) (- n j))   nil
+                         :else
+                         (let [take (when-let [[cost slots] (best (inc i) (inc j))]
+                                      [(+ cost (mth/abs (- (nth own i) (nth ref j))))
+                                       (into [j] slots)])
+                               skip (best i (inc j))]
+                           (cond
+                             (nil? take)                    skip
+                             (nil? skip)                    take
+                             (<= (first take) (first skip)) take
+                             :else                          skip)))]
+                   (vswap! memo assoc [i j] result)
+                   result)))]
+    (second (best 0 0))))
+
+(defn pad-stops
+  "The stops of `gradient` (see `gradient-stops`), as many as those of
+  `reference` when it has fewer: its own in the slots of the stops of the
+  reference nearest them (see `stop-slots`), and in the others stops that
+  draw as it does, its colour at the offset of the reference there, kept
+  between its own around. So a gradient blends into one of more stops,
+  each of its stops going to the nearest of the other."
+  [gradient reference]
+  (let [own (gradient-stops gradient)
+        ref (gradient-stops reference)]
+    (if (>= (count own) (count ref))
+      own
+      (let [slots   (stop-slots (mapv :offset own) (mapv :offset ref))
+            by-slot (zipmap slots own)]
+        (mapv (fn [j]
+                (or (get by-slot j)
+                    (let [before (some->> (filter #(< % j) slots) (last) (get by-slot))
+                          after  (some->> (filter #(> % j) slots) (first) (get by-slot))
+                          offset (mth/clamp (:offset (nth ref j))
+                                            (if before (:offset before) 0)
+                                            (if after (:offset after) 1))]
+                      (-> (clr/interpolate-gradient own offset)
+                          (select-keys [:color :opacity :offset])))))
+              (range (count ref)))))))
+
+(defn- evened-gradient-row
+  "`keyframes`, the time-sorted keyframes of a row of gradients, each
+  with as many stops as the one with most (see `pad-stops`), so each
+  blends into the next stop by stop and every frame has as many."
+  [keyframes]
+  (let [most (:value (apply max-key #(count (:stops (:value %))) keyframes))
+        n    (count (:stops most))]
+    (if (every? #(= n (count (:stops (:value %)))) keyframes)
+      keyframes
+      (mapv (fn [kf]
+              (cond-> kf
+                (< (count (:stops (:value kf))) n)
+                (assoc-in [:value :stops] (pad-stops (:value kf) most))))
+            keyframes))))
+
+(defn lerp-gradient
+  "The gradient `t` of the way from `from` to `to`: its points and width,
+  and stop by stop (as many in each, see `pad-stops`) the colour in RGB,
+  the opacity and the offset. One of another type (linear, radial) holds
+  until `to`."
+  [from to t]
+  (if (not= (:type from) (:type to))
+    (if (>= t 1) to from)
+    (let [a   (pad-stops from to)
+          b   (pad-stops to from)
+          num   (fn [k] (lerp (get from k 0) (get to k 0) t))]
+      (assoc from
+             :start-x (num :start-x) :start-y (num :start-y)
+             :end-x (num :end-x) :end-y (num :end-y)
+             :width (num :width)
+             :stops (->> (map (fn [sa sb]
+                                {:color   (lerp-color (:color sa) (:color sb) t)
+                                 :opacity (mth/clamp (lerp (:opacity sa) (:opacity sb) t) 0 1)
+                                 :offset  (mth/clamp (lerp (:offset sa) (:offset sb) t) 0 1)})
+                              a b)
+                         (sort-by :offset)
+                         (vec))))))
+
 (defn- lerp-value
   [from to t]
   (cond
     ;; outlines of one structure (see `match-outlines`), else the first
     (path/content? from)
     (or (when (path/content? to) (path/lerp from to t)) from)
+
+    (gradient-value? from)
+    (if (gradient-value? to) (lerp-gradient from to t) from)
 
     (or (string? from) (string? to))
     (lerp-color from to t)
@@ -2675,7 +2785,9 @@
   "Return `{shape-id {property value}}` with the interpolated value of
   every animated property of every track of `timeline` at `time` (ms).
   Indexed properties (fill, stroke, shadow) nest as `{index value}`. The
-  outlines of a path morph into each other (see `match-outlines`)."
+  outlines of a path morph into each other (see `match-outlines`), and
+  the gradients of a fill have as many stops all along (see
+  `evened-gradient-row`)."
   [timeline time]
   (reduce-kv
    (fn [acc shape-id track]
@@ -2684,7 +2796,8 @@
            values   (reduce-kv
                      (fn [m [property index] keyframes]
                        (let [keyframes (cond-> (sort-keyframes keyframes)
-                                         (= :content property) (->> (matched-row [shape-id index])))
+                                         (= :content property) (->> (matched-row [shape-id index]))
+                                         (= :fill-gradient property) (evened-gradient-row))
                              time      (if (contains? loops (slot-key property index))
                                          (loop-time keyframes time)
                                          time)
@@ -3156,6 +3269,11 @@
        (nil? (:fill-color-gradient fill))
        (nil? (:fill-image fill))))
 
+(defn gradient-fill?
+  "A fill that is a gradient, which its `:fill-gradient` keyframes play."
+  [fill]
+  (some? (:fill-color-gradient fill)))
+
 (defn solid-color-stroke?
   "A stroke that is a flat colour (not a gradient or an image)."
   [stroke]
@@ -3180,8 +3298,9 @@
 
 (defn appearance-slots
   "The fill, stroke, shadow and blur slots of `shape` that can take
-  keyframes. Gradients and images are skipped; the dash pattern of a
-  dashed stroke takes them in any paint."
+  keyframes: a flat fill its colour and opacity, a gradient one its
+  gradient (`:fill-gradient`), images none; the dash pattern of a dashed
+  stroke takes them in any paint."
   [shape]
   (let [fills   (as-vec (:fills shape))
         strokes (as-vec (:strokes shape))
@@ -3190,9 +3309,14 @@
      (concat
       (keep-indexed
        (fn [index fill]
-         (when (solid-color-fill? fill)
+         (cond
+           (solid-color-fill? fill)
            {:group :fill :index index
-            :properties [:fill-color :fill-opacity]}))
+            :properties [:fill-color :fill-opacity]}
+
+           (gradient-fill? fill)
+           {:group :fill :index index
+            :properties [:fill-gradient]}))
        fills)
       (keep-indexed
        (fn [index stroke]
@@ -3253,11 +3377,16 @@
 
 (defn apply-fills
   [fills values]
-  (patch-indexed fills
-                 (cond-> {}
-                   (contains? values :fill-color) (assoc :fill-color (:fill-color values))
-                   (contains? values :fill-opacity) (assoc :fill-opacity (:fill-opacity values)))
-                 solid-color-fill?))
+  (-> fills
+      (patch-indexed
+       (cond-> {}
+         (contains? values :fill-color) (assoc :fill-color (:fill-color values))
+         (contains? values :fill-opacity) (assoc :fill-opacity (:fill-opacity values)))
+       solid-color-fill?)
+      (patch-indexed
+       (cond-> {}
+         (contains? values :fill-gradient) (assoc :fill-color-gradient (:fill-gradient values)))
+       gradient-fill?)))
 
 (defn apply-strokes
   [strokes values]
@@ -3451,7 +3580,7 @@
       (contains? values :r4)
       (ctm/change-property :r4 (:r4 values))
 
-      (has? values :fill-color :fill-opacity)
+      (has? values :fill-color :fill-opacity :fill-gradient)
       (ctm/change-property :fills (apply-fills (paint-fills shape) values))
 
       (has? values :stroke-color :stroke-opacity :stroke-width
@@ -4616,6 +4745,9 @@
     (:fill-color :fill-opacity)
     (boolean (solid-color-fill? (get (as-vec (:fills shape)) index)))
 
+    :fill-gradient
+    (gradient-fill? (get (as-vec (:fills shape)) index))
+
     (:stroke-color :stroke-opacity)
     (boolean (solid-color-stroke? (get (as-vec (:strokes shape)) index)))
 
@@ -4652,15 +4784,20 @@
 
     true))
 
+(def ^:private valid-gradient?
+  (sm/lazy-validator clr/schema:gradient))
+
 (defn keyframe-value-fits?
   "Whether the value of `keyframe` is of the kind its property takes: a
   hex colour for a colour, an outline (see `ctao/outline-fits?`) for the
-  outline of a path, a finite number for the others."
+  outline of a path, a gradient for a gradient fill, a finite number for
+  the others."
   [{:keys [property value]}]
   (cond
-    (color-property? property) (clr/hex-color-string? value)
-    (= :content property)      (ctao/outline-fits? value)
-    :else                      (mth/finite? value)))
+    (color-property? property)   (clr/hex-color-string? value)
+    (= :content property)        (ctao/outline-fits? value)
+    (= :fill-gradient property)  (valid-gradient? value)
+    :else                        (mth/finite? value)))
 
 (defn- relative-value
   "`value` of `property`, of a layer resting at `from`, for a layer
@@ -4925,7 +5062,7 @@
   [property old new]
   (cond
     (or (nil? old) (nil? new)) true
-    (color-property? property) (= old new)
+    (or (color-property? property) (= :fill-gradient property)) (= old new)
     :else (mth/close? old new)))
 
 (defn- appearance-slot-values
@@ -4937,11 +5074,16 @@
     (as-> {} $
       (reduce-kv
        (fn [m index fill]
-         (if (solid-color-fill? fill)
+         (cond
+           (solid-color-fill? fill)
            (-> m
                (put :fill-color index (:fill-color fill))
                (put :fill-opacity index (or (:fill-opacity fill) 1)))
-           m))
+
+           (gradient-fill? fill)
+           (put m :fill-gradient index (:fill-color-gradient fill))
+
+           :else m))
        $
        (as-vec (:fills shape)))
       (reduce-kv
