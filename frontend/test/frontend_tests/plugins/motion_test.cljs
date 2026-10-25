@@ -1685,3 +1685,19 @@
         (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "fillGradient" :index 0 :time 500
                                                                  :value "#ff0000"}))
               "a colour is no gradient")))))
+
+(t/deftest the-type-style-of-a-text-takes-keyframes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            ^js board           (.createBoard context)
+            ^js text            (.createText context "Hello")
+            ^js timeline        (do (.appendChild board text) (.addTimeline board))]
+        (.addKeyframe timeline text #js {:property "fontSize" :time 0 :value 14 :easing "linear"})
+        (.addKeyframe timeline text #js {:property "fontSize" :time 1000 :value 28})
+        (.addKeyframe timeline text #js {:property "fontWeight" :time 0 :value 400})
+        (t/is (= #{:font-size :font-weight}
+                 (into #{} (map :property) (:keyframes (stored-track store context board text)))))
+        (t/is (mth/close? 21 (.valueAt timeline text "fontSize" 500)) "the size plays")
+        (t/is (thrown? js/Error (.addKeyframe timeline text #js {:property "lineHeight" :time 0 :value "tall"}))
+              "a number")))))

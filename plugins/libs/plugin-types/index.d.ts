@@ -6273,6 +6273,14 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  * - `strokeDash`, `strokeGap`, `strokeDashOffset`: the dash pattern of a
  *   `dashed` stroke (see `Stroke.strokeDash`), in pixels; other strokes
  *   do not take them.
+ * - `fontSize`, `letterSpacing`, `lineHeight`, `fontWeight`: the type
+ *   style of a text layer. `fontSize` is the size of its first span, in
+ *   pixels: the other spans keep their share of it. `letterSpacing`
+ *   (pixels) and `lineHeight` (a share of the size, like `1.2`) set all
+ *   its spans and paragraphs. `fontWeight` (100 to 900) sets all its
+ *   spans in the face of their font nearest it, so it changes in steps
+ *   from one weight the font has to the next. Only text layers take
+ *   them; the text is laid out again as they play.
  * - `trimStart`, `trimEnd`, `trimOffset`: a fraction of the outline (0 to
  *   1) the strokes are drawn along, to draw a line on. On a group they
  *   trim the layers in it (see `Timeline.setTrimMode`).
@@ -6330,6 +6338,10 @@ export type AnimatableProperty =
   | 'shadowOpacity'
   | 'blur'
   | 'backgroundBlur'
+  | 'fontSize'
+  | 'letterSpacing'
+  | 'lineHeight'
+  | 'fontWeight'
   | 'trimStart'
   | 'trimEnd'
   | 'trimOffset'

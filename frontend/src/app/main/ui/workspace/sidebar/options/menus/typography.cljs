@@ -32,6 +32,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.icons :as deprecated-icon]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -624,6 +625,8 @@
            :max txt/font-size-max
            :on-change on-font-size-change
            :on-blur on-blur}])]
+      ;; in motion mode, the keyframe of the size at the playhead
+      [:> keyframe-diamond* {:properties [:font-size]}]
 
       [:div {:class (stl/css :font-variant-options)
              :title (tr "inspect.attributes.typography.font-style")}
@@ -650,7 +653,8 @@
            :default-value font-variant-value
            :options variant-options
            :on-change on-font-variant-change
-           :on-blur on-blur}])]]]))
+           :on-blur on-blur}])]
+      [:> keyframe-diamond* {:properties [:font-weight]}]]]))
 
 (mf/defc spacing-options*
   [{:keys [values on-change on-blur]}]
@@ -680,6 +684,7 @@
         :is-nillable (= :multiple line-height)
         :on-change #(handle-change % :line-height)
         :on-blur on-blur}]]
+     [:> keyframe-diamond* {:properties [:line-height]}]
 
      [:div {:class (stl/css :letter-spacing)
             :title (tr "inspect.attributes.typography.letter-spacing")}
@@ -698,7 +703,8 @@
         :placeholder (if (= :multiple letter-spacing) (tr "settings.multiple") "--")
         :on-change #(handle-change % :letter-spacing)
         :is-nillable (= :multiple letter-spacing)
-        :on-blur on-blur}]]]))
+        :on-blur on-blur}]]
+     [:> keyframe-diamond* {:properties [:letter-spacing]}]]))
 
 (mf/defc text-transform-options*
   [{:keys [values on-change on-blur]}]

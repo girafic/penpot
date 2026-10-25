@@ -7658,3 +7658,95 @@
         (t/is (= ["g" 12] [(:n g) (get-in g [:v :k])]))
         (t/is (= 1 (get-in o [:v :a])))
         (t/is (= [24] (get-in o [:v :k 1 :s])))))))
+
+(defn- styled-text
+  "A text of a paragraph of two spans, of 20 px and 10 px."
+  []
+  (let [span (fn [text size]
+               {:text text :font-id "sourcesanspro" :font-family "sourcesanspro"
+                :font-variant-id "regular" :font-size size :font-weight "400"
+                :font-style "normal" :line-height "1.2" :letter-spacing "0"})]
+    (cts/setup-shape
+     {:type :text :x 0 :y 0 :width 100 :height 40
+      :content {:type "root"
+                :children [{:type "paragraph-set"
+                            :children [{:type "paragraph" :font-size "20" :line-height "1.2"
+                                        :letter-spacing "0"
+                                        :children [(span "Big" "20") (span "small" "10")]}]}]}})))
+
+(defn- played-text
+  [tl shape time]
+  (let [tree (ctaf/timeline->modif-tree tl {(:id shape) shape} time)]
+    (ctm/apply-structure-modifiers shape (get-in tree [(:id shape) :modifiers]))))
+
+(defn- spans-of
+  [shape]
+  (vec (txt/node-seq txt/is-text-node? (:content shape))))
+
+(t/deftest the-type-style-of-a-text-plays
+  (let [shape (styled-text)
+        sid   (:id shape)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 0 :property :font-size :value 20 :easing :linear})
+                  (cta/add-keyframe sid {:time 1000 :property :font-size :value 40})
+                  (cta/add-keyframe sid {:time 0 :property :letter-spacing :value 0 :easing :linear})
+                  (cta/add-keyframe sid {:time 1000 :property :letter-spacing :value 4})
+                  (cta/add-keyframe sid {:time 0 :property :line-height :value 1.2 :easing :linear})
+                  (cta/add-keyframe sid {:time 1000 :property :line-height :value 2}))
+        half  (played-text tl shape 500)
+        [big small] (spans-of half)
+        para  (first (txt/node-seq txt/is-paragraph-node? (:content half)))]
+    (t/testing "the first span plays the size, the others keep their share"
+      (t/is (= ["30" "15"] [(:font-size big) (:font-size small)]))
+      (t/is (= "30" (:font-size para))))
+    (t/testing "letters and lines of all spans and paragraphs"
+      (t/is (= ["2" "2" "2"] (mapv :letter-spacing [big small para])))
+      (t/is (= ["1.6" "1.6" "1.6"] (mapv :line-height [big small para]))))
+    (t/testing "its words stay"
+      (t/is (= ["Big" "small"] (mapv :text [big small]))))
+    (t/testing "the values at rest are those of its first span"
+      (t/is (= [20.0 0.0 1.2 400.0]
+               (mapv #(double (cta/text-style-rest shape %)) cta/text-style-properties))))
+    (t/testing "only texts take them"
+      (t/is (cta/fits-keyframe? shape {:property :font-size}))
+      (t/is (not (cta/fits-keyframe? (assoc shape :type :rect) {:property :font-weight}))))))
+
+(t/deftest the-weight-of-a-text-steps-to-the-faces-of-its-font
+  (let [shape (styled-text)
+        sid   (:id shape)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 0 :property :font-weight :value 400 :easing :linear})
+                  (cta/add-keyframe sid {:time 1000 :property :font-weight :value 700}))
+        faces (fn [_ style weight]
+                (let [w (if (< weight 550) "400" "700")]
+                  {:font-variant-id (if (= "400" w) "regular" w) :font-weight w :font-style style}))]
+    (try
+      (cta/set-font-weight-face! faces)
+      (t/is (= ["regular" "400"] ((juxt :font-variant-id :font-weight) (first (spans-of (played-text tl shape 400))))))
+      (t/is (= ["700" "700"] ((juxt :font-variant-id :font-weight) (first (spans-of (played-text tl shape 600))))))
+      (finally
+        (cta/set-font-weight-face! nil)))
+    (t/testing "without the faces, the weight alone"
+      (t/is (= "700" (:font-weight (first (spans-of (played-text tl shape 1000)))))))))
+
+(t/deftest an-edit-of-the-type-style-is-a-keyframe
+  (let [shape   (styled-text)
+        sid     (:id shape)
+        objects {sid shape}
+        resized (fn [size] (assoc-in objects [sid :content :children 0 :children 0 :children 0 :font-size] size))
+        tl      (-> (mk-timeline)
+                    (cta/add-keyframe sid {:time 0 :property :font-size :value 20})
+                    (cta/add-keyframe sid {:time 1000 :property :font-size :value 40}))
+        kf-at   (fn [tl time property]
+                  (d/seek #(and (= time (:time %)) (= property (:property %)))
+                          (get-in tl [:tracks sid :keyframes])))]
+    (t/is (= 24.0 (double (:value (kf-at (cta/record-edit tl objects (resized "24") 500) 500 :font-size))))
+          "an animated size records at the playhead")
+    (t/testing "with auto-keyframe, a style edit records, a change of words not"
+      (let [tl' (cta/record-unanimated (mk-timeline) objects (resized "24") [sid] 500)]
+        (t/is (= [[0 20.0] [500 24.0]]
+                 (mapv (juxt :time (comp double :value))
+                       (sort-by :time (filter #(= :font-size (:property %)) (get-in tl' [:tracks sid :keyframes])))))))
+      (let [reworded (assoc-in objects [sid :content :children 0 :children 0 :children 0 :text] "Huge")]
+        (t/is (empty? (get-in (cta/record-unanimated (mk-timeline) objects reworded [sid] 500)
+                              [:tracks sid :keyframes])))))))

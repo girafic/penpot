@@ -73,6 +73,9 @@
    :end-interactive wasm-gesture/try-end-interactive-transform!
    ;; none without WASM, which lays out no text then
    :text-faces-pending #(if (wasm.api/initialized?) (text-faces-pending %) #{})
+   ;; the faces of texts as their animations show them, which none has yet
+   :load-text-faces #(when (wasm.api/initialized?)
+                       (vec (wasm.fonts/store-fonts (mapcat (comp wasm.fonts/get-content-fonts :content) %))))
    :relayout-text wasm.fonts/force-update-text-layout})
 
 (defn- property-ops
@@ -653,6 +656,9 @@
     dash of its vectors, so the trim plays and the dashes stay out;
   - `:svg/gradient`, gradients an SVG keeps as they rest (see
     `asvg/svg-gradient-static?`);
+  - `:text-style`, the type style of a text (see
+    `cta/text-style-properties`), which no markup format plays: its
+    texts are drawn, or outlined, as they rest;
   - `:lottie/three-d` and `:svg/three-d`, a layer that tilts or comes
     out of the plane (see `app.common.geom.tilt`), at rest or as it
     plays: the players of
@@ -770,7 +776,9 @@
             (boolean (some (fn [[id track]]
                              (when-let [shape (get objects id)]
                                (asvg/svg-gradient-static? shape track)))
-                           (:tracks resolved)))]]]
+                           (:tracks resolved)))]
+           [:text-style markup-formats
+            (boolean (some animated cta/text-style-properties))]]]
       (reduce (fn [issues [kind formats on?]]
                 (if on?
                   (reduce #(update %1 %2 (fnil conj []) kind) issues formats)
@@ -2259,9 +2267,12 @@
   glyphs missing. It checks every few ms, and rejects with
   `:export-cancelled` once `cancelled?` is true. `pending` and `relayout`
   are those of the bridge (see `default-bridge`): it waits for nothing
-  without them."
-  [objects board-ids & {:keys [timeout-ms cancelled? pending relayout]
+  without them. `played`, the texts as their animations show them (see
+  `played-texts`), whose faces it loads with `load` and waits for too."
+  [objects board-ids & {:keys [timeout-ms cancelled? pending relayout played load]
                         :or {timeout-ms fonts-wait-ms}}]
+  (when (and (seq played) (some? load))
+    (load played))
   (let [pending  (or pending (constantly #{}))
         relayout (or relayout (constantly nil))
         texts    (into []
@@ -2269,6 +2280,8 @@
                              (filter cfh/text-shape?)
                              (remove :hidden))
                        board-ids)
+        pending  (let [played (vec played)]
+                   #(pending (into % played)))
         deadline (+ (js/Date.now) timeout-ms)]
     (if (empty? (pending texts))
       (js/Promise.resolve nil)
@@ -2286,6 +2299,27 @@
                      :else
                      (js/setTimeout check 50)))]
            (check)))))))
+
+(defn played-texts
+  "The texts of the boards `board-ids` of `page` in each weight their
+  animations play (see `cta/apply-text-style`), every hundred between
+  their keyframes too, which an export lays them out in."
+  [page files board-ids]
+  (let [objects (:objects page)]
+    (into []
+          (mapcat
+           (fn [board-id]
+             (when-let [tl (dwa/board-export-timeline page files board-id)]
+               (mapcat (fn [[id {:keys [keyframes]}]]
+                         (let [text    (get objects id)
+                               weights (keep #(when (= :font-weight (:property %)) (:value %)) keyframes)]
+                           (when (and (cfh/text-shape? text) (seq weights))
+                             (let [lo (mth/floor (reduce min weights))
+                                   hi (mth/ceil (reduce max weights))]
+                               (map #(assoc text :content (cta/apply-text-style text {:font-weight %}))
+                                    (distinct (concat weights (range lo (inc hi) 100))))))))
+                       (:tracks tl)))))
+          board-ids)))
 
 (defn restore-canvas!
   "Show the animation at the playhead again after an export in place,
@@ -2322,7 +2356,10 @@
     (-> (texts-laid-out (:objects (dsh/lookup-page state page-id)) (map :board-id boards)
                         :cancelled? #(deref cancelled)
                         :pending (:text-faces-pending bridge)
-                        :relayout (:relayout-text bridge))
+                        :relayout (:relayout-text bridge)
+                        :load (:load-text-faces bridge)
+                        :played (played-texts (dsh/lookup-page state page-id) (dsh/lookup-libraries state)
+                                              (map :board-id boards)))
         (.then
          (fn [_]
            (when @cancelled

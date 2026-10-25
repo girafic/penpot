@@ -64,6 +64,10 @@
    :shadow-opacity "shadowOpacity"
    :blur "blur"
    :background-blur "backgroundBlur"
+   :font-size "fontSize"
+   :letter-spacing "letterSpacing"
+   :line-height "lineHeight"
+   :font-weight "fontWeight"
    :trim-start "trimStart"
    :trim-end "trimEnd"
    :trim-offset "trimOffset"
@@ -96,6 +100,7 @@
    :shadow-offset-x :shadow-offset-y :shadow-blur
    :shadow-spread :shadow-color :shadow-opacity
    :blur :background-blur
+   :font-size :letter-spacing :line-height :font-weight
    :trim-start :trim-end :trim-offset
    :content])
 
@@ -398,7 +403,11 @@
    ["boxShadow" #{:shadow-offset-x :shadow-offset-y :shadow-blur
                   :shadow-spread :shadow-color :shadow-opacity} :box-shadow]
    ["filter" #{:blur :scene} :filter]
-   ["backdropFilter" #{:background-blur} :backdrop-blur]])
+   ["backdropFilter" #{:background-blur} :backdrop-blur]
+   ["fontSize" #{:font-size} :font-size]
+   ["letterSpacing" #{:letter-spacing} :letter-spacing]
+   ["lineHeight" #{:line-height} :line-height]
+   ["fontWeight" #{:font-weight} :font-weight]])
 
 (def ^:private text-react-values
   "`react-values` of a text, which paints its glyphs in its fills and

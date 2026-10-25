@@ -487,6 +487,9 @@
      :shadow-opacity  (or (get-in (item-at (:shadow shape) index) [:color :opacity]) 1)
      :blur            (or (get-in shape [:blur :value]) 0)
      :background-blur (or (get-in shape [:background-blur :value]) 0)
+     ;; the type style of a text, of its first span
+     (:font-size :letter-spacing :line-height :font-weight)
+     (when (cfh/text-shape? shape) (cta/text-style-rest shape property))
      ;; for a row made for the path as it is (see `ctao/outline-value`)
      :content         (when (= :path (:type shape)) (ctao/outline-of shape))
      (get cta/trim-properties property))))
@@ -515,7 +518,7 @@
 
 (def animatable-properties
   (into transform-properties (concat [:path-progress] camera-properties light-properties [:opacity :r1 :r2 :r3 :r4]
-                                     appearance-properties [:content])))
+                                     appearance-properties cta/text-style-properties [:content])))
 
 (defn- store-value
   [m property index v]
@@ -550,6 +553,11 @@
                    (into (map (fn [property]
                                 [property (get animated property (cta/light-rest shape property))]))
                          light-properties)
+
+                   (cfh/text-shape? shape)
+                   (into (map (fn [property]
+                                [property (get animated property (cta/text-style-rest shape property))]))
+                         cta/text-style-properties)
 
                    (= :path (:type shape))
                    (assoc :content (or (:content animated)

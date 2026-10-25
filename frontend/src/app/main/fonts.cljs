@@ -11,6 +11,7 @@
    [app.common.data.macros :as dm]
    [app.common.fonts :as cfnt]
    [app.common.logging :as log]
+   [app.common.types.animation :as cta]
    [app.common.types.text :as txt]
    [app.common.uri :as u]
    [app.config :as cf]
@@ -418,6 +419,16 @@
   same variant for the same text."
   [font target-weight target-style]
   (cfnt/closest-variant (:variants font []) target-weight target-style))
+
+;; The face a weight of a text plays in (Penpot Motion, see
+;; `cta/apply-text-style`): the variant of its font nearest it.
+(cta/set-font-weight-face!
+ (fn [font-id font-style weight]
+   (when-let [font (get-font-data font-id)]
+     (when-let [variant (find-closest-variant font weight font-style)]
+       {:font-variant-id (:id variant)
+        :font-weight (:weight variant)
+        :font-style (:style variant)}))))
 
 ;; Font embedding functions
 (defn get-node-fonts

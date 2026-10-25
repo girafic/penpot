@@ -73,6 +73,8 @@
     :shadow-offset-x :shadow-offset-y :shadow-blur
     :shadow-spread :shadow-color :shadow-opacity
     :blur :background-blur
+    ;; the type style of a text (see `text-style-properties`)
+    :font-size :letter-spacing :line-height :font-weight
     ;; path trim: the part of the outline the strokes are drawn along
     :trim-start :trim-end :trim-offset
     ;; the outline of a path, in its own frame (see `ctao/outline-of`)
@@ -95,6 +97,14 @@
 
 (def color-properties
   #{:fill-color :stroke-color :shadow-color})
+
+(def text-style-properties
+  "The type style of a text (see `apply-text-style`): the size of its
+  first span (px), the others keeping their share of it, and of all its
+  spans the spacing of the letters (px), the height of the lines (a share
+  of the size) and the weight (100 to 900, the nearest face its font
+  has). Only texts have them."
+  [:font-size :letter-spacing :line-height :font-weight])
 
 (def camera-properties
   "The properties of the camera of a board (see `app.common.geom.tilt`):
@@ -135,6 +145,7 @@
                   :shadow-spread :shadow-color :shadow-opacity]
                  (repeat :shadow))
          (zipmap [:trim-start :trim-end :trim-offset] (repeat :trim))
+         (zipmap text-style-properties (repeat :text-style))
          (zipmap [:r1 :r2 :r3 :r4] (repeat :radius))))
 
 (defn property-area
@@ -3375,6 +3386,75 @@
         txt/default-text-fills)
     (:fills shape)))
 
+(defn- text-number
+  [v]
+  (if (number? v) v (d/parse-double v)))
+
+(defn text-style-rest
+  "The value of the text style property `property` (see
+  `text-style-properties`) of the text `shape` without keyframes: that of
+  its first span, or of a text by default."
+  [shape property]
+  (let [span (first (txt/node-seq txt/is-text-node? (:content shape)))]
+    (or (text-number (get span property))
+        (text-number (get txt/default-text-attrs property)))))
+
+(defonce ^:private font-weight-face (atom nil))
+
+(defn set-font-weight-face!
+  "Have `f` give the face a weight of a text plays in (see
+  `apply-text-style`): `(f font-id font-style weight)`, the face of the
+  font nearest it in that style, `{:font-variant-id :font-weight
+  :font-style}`, or nil for a font it does not know. The hosts know the
+  fonts; without it a span takes the weight alone."
+  [f]
+  (reset! font-weight-face f))
+
+(defn- text-style-value
+  "`v` as a text keeps it: a string, to 3 decimals, a whole one without
+  them (on the JVM as in JS)."
+  [v]
+  (let [v (mth/precision (double v) 3)]
+    (if (== v (mth/floor v)) (str (long v)) (str v))))
+
+(defn apply-text-style
+  "The content of the text `shape` as the text style `values` (see
+  `text-style-properties`) play it: each span and paragraph scaled as much
+  as its first span is to the played size, their letters spaced and their
+  lines as high as played, and each span in the face of its font nearest
+  the played weight (see `set-font-weight-face!`)."
+  [shape values]
+  (let [base   (text-style-rest shape :font-size)
+        scale  (when (and (contains? values :font-size) (pos? base))
+                 (/ (:font-size values) base))
+        weight (some-> (:font-weight values) (mth/round) (mth/clamp 1 1000))
+        face   (when (some? weight)
+                 (let [f @font-weight-face]
+                   (fn [node]
+                     (or (when (some? f)
+                           (f (or (:font-id node) (:font-id txt/default-text-attrs))
+                              (or (:font-style node) "normal")
+                              weight))
+                         {:font-weight (str weight)}))))
+        style  (fn [node]
+                 (let [span? (txt/is-text-node? node)
+                       size  (text-number (:font-size node))]
+                   (cond-> node
+                     (and (some? scale) (or span? (some? size)))
+                     (assoc :font-size (text-style-value (* scale (or size base))))
+
+                     (contains? values :letter-spacing)
+                     (assoc :letter-spacing (text-style-value (:letter-spacing values)))
+
+                     (contains? values :line-height)
+                     (assoc :line-height (text-style-value (:line-height values)))
+
+                     (and span? (some? face))
+                     (merge (select-keys (face node) [:font-variant-id :font-weight :font-style])))))]
+    (txt/transform-nodes #(or (txt/is-text-node? %) (txt/is-paragraph-node? %))
+                         style
+                         (:content shape))))
+
 (defn apply-fills
   [fills values]
   (-> fills
@@ -3606,7 +3686,10 @@
                          trim-properties))
 
       (and (contains? values :content) (= :path (:type shape)))
-      (ctm/change-property :content (ctao/outline->content shape track (:content values))))))
+      (ctm/change-property :content (ctao/outline->content shape track (:content values)))
+
+      (and (= :text (:type shape)) (some #(contains? values %) text-style-properties))
+      (ctm/change-property :content (apply-text-style shape values)))))
 
 (defn rest-value
   "The value of `property` that `shape` has without keyframes, positions
@@ -4779,6 +4862,9 @@
     (:light-angle :light-height :light-ambient)
     (and (= :frame (:type shape)) (some? (:light shape)))
 
+    (:font-size :letter-spacing :line-height :font-weight)
+    (= :text (:type shape))
+
     :content
     (= :path (:type shape))
 
@@ -5066,8 +5152,9 @@
     :else (mth/close? old new)))
 
 (defn- appearance-slot-values
-  "The current fill, stroke, shadow and blur values of `shape` as
-  `{[property index] value}` (index is nil for blur)."
+  "The current fill, stroke, shadow and blur values of `shape`, and the
+  type style of a text (see `text-style-rest`), as `{[property index]
+  value}` (index is nil for blur and the type style)."
   [shape]
   (let [put (fn [m property index value]
               (cond-> m (some? value) (assoc [property index] value)))]
@@ -5116,7 +5203,11 @@
         (:blur shape)
         (put :blur nil (or (get-in shape [:blur :value]) 0))
         (:background-blur shape)
-        (put :background-blur nil (or (get-in shape [:background-blur :value]) 0))))))
+        (put :background-blur nil (or (get-in shape [:background-blur :value]) 0))
+        (= :text (:type shape))
+        (as-> m (reduce (fn [m property] (put m property nil (text-style-rest shape property)))
+                        m
+                        text-style-properties))))))
 
 (defn- edit-value
   "The value of `property` of the shape `shape-id` of `objects`, with
@@ -5231,9 +5322,10 @@
   Each gets a keyframe with its new value there and, past the start, one
   with the value before at 0, so the change plays. `before` and `after`
   are the objects before and after the edit. A shape whose text changes
-  records nothing, nor does a path reshaped (moved, turned or resized it
-  records as any layer, see `ctao/outline-change`) or a boolean whose outline
-  changes, nor fills, strokes and shadows added or removed."
+  records nothing (but its type style, its words as they were), nor does
+  a path reshaped (moved, turned or resized it records as any layer, see
+  `ctao/outline-change`) or a boolean whose outline changes, nor fills,
+  strokes and shadows added or removed."
   [timeline before after shape-ids time]
   (let [board-id (:board-id timeline)
 
@@ -5253,9 +5345,17 @@
                              (map (juxt :property :index))
                              (dm/get-in timeline [:tracks shape-id :keyframes]))]
          (if (or (nil? old-shape) (nil? new-shape)
-                 (if (and (= :path (:type old-shape)) (= :path (:type new-shape)))
+                 (cond
+                   (and (= :path (:type old-shape)) (= :path (:type new-shape)))
                    (and (not= (:content old-shape) (:content new-shape))
                         (= :reshape (ctao/outline-change old-shape new-shape)))
+
+                   ;; its words as they were, its type style records
+                   (and (= :text (:type old-shape)) (= :text (:type new-shape)))
+                   (not= (txt/content->text (:content old-shape))
+                         (txt/content->text (:content new-shape)))
+
+                   :else
                    (not= (:content old-shape) (:content new-shape))))
            timeline
            (let [timeline

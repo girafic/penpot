@@ -595,3 +595,12 @@
             value (get-in (property-json (layer-json doc :a) "fillGradient") ["keyframes" 0 "value"])]
         (t/is (= "linear" (get value "type")))
         (t/is (= {"color" "#ff0000" "opacity" 1 "offset" 0} (get-in value ["stops" 0])))))))
+
+(t/deftest the-type-style-plays-on-the-element-of-a-text
+  (let [text  {:type :text :selrect {:x 0 :y 0 :width 100 :height 20}}
+        frame (acss/frame-values text {:font-size 30 :letter-spacing 2 :line-height 1.5 :font-weight 650.4}
+                                 {:x 0 :y 0})]
+    (t/is (= [30 2 1.5 650] ((juxt :font-size :letter-spacing :line-height :font-weight) frame)))
+    (t/is (empty? (select-keys (acss/frame-values (assoc text :type :rect) {:font-size 30} {:x 0 :y 0})
+                               [:font-size])))
+    (t/is (= "fontSize" (get ctac/property-names :font-size)))))

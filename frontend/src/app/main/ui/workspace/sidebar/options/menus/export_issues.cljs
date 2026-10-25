@@ -38,7 +38,8 @@
    :lottie/three-d  i/rotation
    :svg/three-d     i/rotation
    :svg/dash        i/stroke-size
-   :svg/gradient    i/fill-content})
+   :svg/gradient    i/fill-content
+   :text-style      i/text})
 
 (defn issue-texts
   "What the list says of an issue `kind` (see `dea/export-issues`), in the

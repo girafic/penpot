@@ -7245,6 +7245,18 @@ msgstr "Layer blur"
 msgid "workspace.animation.background-blur"
 msgstr "Background blur"
 
+msgid "workspace.animation.font-size"
+msgstr "Font size"
+
+msgid "workspace.animation.letter-spacing"
+msgstr "Letter spacing"
+
+msgid "workspace.animation.line-height"
+msgstr "Line height"
+
+msgid "workspace.animation.font-weight"
+msgstr "Font weight"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.path-trim"
 msgstr "Path trim"
@@ -8775,6 +8787,14 @@ msgstr "Gradients · Partly kept at rest in %s"
 #: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
 msgid "workspace.options.export.issue.svg-gradient.text"
 msgstr "The gradients of texts, the points of radial gradients of paths and a change from linear to radial stay as they rest in %s. The other gradients play."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.text-style"
+msgstr "Text style · Kept at rest in %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.text-style.text"
+msgstr "The size, letter spacing, line height and weight of texts stay as they rest in %s. Video and GIF play them."
 
 msgid "workspace.options.export.issue.lottie-matte"
 msgstr "Luminance inverted mask · May not play in %s"

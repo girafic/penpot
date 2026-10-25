@@ -172,7 +172,8 @@
   text, `:color`, `:text-stroke-color` and `:text-stroke-width`: it paints
   its glyphs in the fills of its spans, see `cta/paint-fills`),
   `:box-shadow` (the CSS of its visible shadows), `:blur` and
-  `:backdrop-blur` (px). `origin` is where its positions count from (see
+  `:backdrop-blur` (px), and of a text `:font-size`, `:letter-spacing`
+  (px), `:line-height` and `:font-weight`. `origin` is where its positions count from (see
   `position-origin`). A tilted shape (see `app.common.geom.tilt`) has its
   `:rotate-x` and `:rotate-y` (degrees) with its transform, and, turning
   around `pivot` (fractions of its box) off its middle with a tilt at
@@ -277,6 +278,19 @@
 
       (contains? values :background-blur)
       (assoc :backdrop-blur (:background-blur values))
+
+      ;; the type style of a text, on the element of the text
+      (and text? (contains? values :font-size))
+      (assoc :font-size (:font-size values))
+
+      (and text? (contains? values :letter-spacing))
+      (assoc :letter-spacing (:letter-spacing values))
+
+      (and text? (contains? values :line-height))
+      (assoc :line-height (:line-height values))
+
+      (and text? (contains? values :font-weight))
+      (assoc :font-weight (mth/round (:font-weight values)))
 
       ;; the camera of a board: CSS sees the tilted layers in it with its
       ;; perspective (see `app.common.geom.tilt`); an orthographic one has
@@ -400,6 +414,18 @@
 
       (contains? frame :backdrop-blur)
       (conj (str "backdrop-filter: blur(" (fmt backdrop-blur) "px);"))
+
+      (contains? frame :font-size)
+      (conj (str "font-size: " (fmt (:font-size frame)) "px;"))
+
+      (contains? frame :letter-spacing)
+      (conj (str "letter-spacing: " (fmt (:letter-spacing frame)) "px;"))
+
+      (contains? frame :line-height)
+      (conj (str "line-height: " (fmt (:line-height frame)) ";"))
+
+      (contains? frame :font-weight)
+      (conj (str "font-weight: " (:font-weight frame) ";"))
 
       (contains? frame :perspective)
       (conj (str "perspective: " (fmt perspective) "px;")
