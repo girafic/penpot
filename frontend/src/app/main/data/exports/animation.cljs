@@ -573,19 +573,16 @@
 (defn- svg-static?
   "Whether `track` animates on `shape` what an SVG keeps as it rests: the
   trim of a text not `outlined?` (see `outline-texts`), which the SVG
-  renderer draws as text, which takes no length of its path, and some of
-  its gradients (see `asvg/svg-gradient-static?`). CSS plays the rest on
-  its vectors, the strokes of a text too, SMIL its shadows, its
-  gradients and what CSS can not on outlines (see
-  `asvg/svg-filter-shadows?`, `asvg/svg-smil-corners?`,
-  `aexp/svg-outline-sized?`)."
+  renderer draws as text, which takes no length of its path. CSS plays
+  the rest on its vectors, the strokes of a text too, SMIL its shadows
+  and what CSS can not on outlines (see `asvg/svg-filter-shadows?`,
+  `asvg/svg-smil-corners?`, `aexp/svg-outline-sized?`)."
   [shape track outlined?]
   (boolean
-   (or (and (= :text (:type shape))
-            (not outlined?)
-            (some #(#{:trim-start :trim-end :trim-offset} (:property %))
-                  (:keyframes track)))
-       (asvg/svg-gradient-static? shape track))))
+   (and (= :text (:type shape))
+        (not outlined?)
+        (some #(#{:trim-start :trim-end :trim-offset} (:property %))
+              (:keyframes track)))))
 
 (defn- shown
   "The items of `items` (a shadow, a stroke, a blur, or a vector of them)
@@ -654,6 +651,8 @@
   - `:svg/dash`, a stroke whose dash pattern plays (see
     `cta/dashed-stroke?`) and that trims too: an SVG draws a trim by the
     dash of its vectors, so the trim plays and the dashes stay out;
+  - `:svg/gradient`, gradients an SVG keeps as they rest (see
+    `asvg/svg-gradient-static?`);
   - `:lottie/three-d` and `:svg/three-d`, a layer that tilts or comes
     out of the plane (see `app.common.geom.tilt`), at rest or as it
     plays: the players of
@@ -766,6 +765,11 @@
                              (let [props (into #{} (map :property) keyframes)]
                                (and (some props [:stroke-dash :stroke-gap :stroke-dash-offset])
                                     (some props [:trim-start :trim-end :trim-offset]))))
+                           (:tracks resolved)))]
+           [:svg/gradient #{:svg}
+            (boolean (some (fn [[id track]]
+                             (when-let [shape (get objects id)]
+                               (asvg/svg-gradient-static? shape track)))
                            (:tracks resolved)))]]]
       (reduce (fn [issues [kind formats on?]]
                 (if on?

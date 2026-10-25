@@ -8768,6 +8768,14 @@ msgstr "Dashes and trim · Trim only in %s"
 msgid "workspace.options.export.issue.svg-dash.text"
 msgstr "An %s draws the trim of a stroke with its dash pattern, so a stroke whose dashes play and that trims too plays its trim and draws its dashes solid."
 
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.svg-gradient"
+msgstr "Gradients · Partly kept at rest in %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.svg-gradient.text"
+msgstr "The gradients of texts, the points of radial gradients of paths and a change from linear to radial stay as they rest in %s. The other gradients play."
+
 msgid "workspace.options.export.issue.lottie-matte"
 msgstr "Luminance inverted mask · May not play in %s"
 

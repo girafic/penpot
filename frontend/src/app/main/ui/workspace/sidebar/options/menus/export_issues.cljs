@@ -37,7 +37,8 @@
    :mp4/alpha       i/rgba
    :lottie/three-d  i/rotation
    :svg/three-d     i/rotation
-   :svg/dash        i/stroke-size})
+   :svg/dash        i/stroke-size
+   :svg/gradient    i/fill-content})
 
 (defn issue-texts
   "What the list says of an issue `kind` (see `dea/export-issues`), in the
