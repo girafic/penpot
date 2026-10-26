@@ -8,7 +8,7 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
-   [app.common.types.animation :as cta]
+   [app.common.types.animation-paint :as ctap]
    [app.common.types.color :as ctc]
    [app.common.types.token :as ctt]
    [app.main.data.workspace.colors :as dc]
@@ -171,8 +171,8 @@
         ;; the keyframes the width field keys: of a stroke whose sides
         ;; differ its sides, as a width would set them all as it plays
         width-keyframes
-        (if (and per-side-available (map? stroke) (not (cta/stroke-sides-even? stroke)))
-          cta/stroke-side-properties
+        (if (and per-side-available (map? stroke) (not (ctap/stroke-sides-even? stroke)))
+          ctap/stroke-side-properties
           [:stroke-width])
 
         applied-token-width

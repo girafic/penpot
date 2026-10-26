@@ -25,8 +25,11 @@
    [app.common.transit :as t]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-layout :as ctal]
    [app.common.types.animation-outline :as ctao]
+   [app.common.types.animation-paint :as ctap]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.animation-text-style :as ctat]
    [app.common.types.path.morph :as morph]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
@@ -480,10 +483,10 @@
      :stroke-gradient (:stroke-color-gradient (item-at (:strokes shape) index))
      ;; a side of a stroke: its own width, or the stroke's
      (:stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left)
-     (cta/stroke-side-width (item-at (:strokes shape) index) property)
-     ;; the dash pattern as a dashed stroke draws it (see `cta/stroke-dash`)
-     :stroke-dash    (first (cta/stroke-dash (item-at (:strokes shape) index)))
-     :stroke-gap     (second (cta/stroke-dash (item-at (:strokes shape) index)))
+     (ctap/stroke-side-width (item-at (:strokes shape) index) property)
+     ;; the dash pattern as a dashed stroke draws it (see `ctap/stroke-dash`)
+     :stroke-dash    (first (ctap/stroke-dash (item-at (:strokes shape) index)))
+     :stroke-gap     (second (ctap/stroke-dash (item-at (:strokes shape) index)))
      :stroke-dash-offset (or (:stroke-dash-offset (item-at (:strokes shape) index)) 0)
      :shadow-offset-x (or (:offset-x (item-at (:shadow shape) index)) 0)
      :shadow-offset-y (or (:offset-y (item-at (:shadow shape) index)) 0)
@@ -495,12 +498,12 @@
      :background-blur (or (get-in shape [:background-blur :value]) 0)
      ;; the type style of a text, of its first span
      (:font-size :letter-spacing :line-height :font-weight)
-     (when (cfh/text-shape? shape) (cta/text-style-rest shape property))
+     (when (cfh/text-shape? shape) (ctat/text-style-rest shape property))
      ;; the spacing of an auto layout, and of a layer in one
      (:layout-row-gap :layout-column-gap :layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left)
-     (when (some? (:layout shape)) (cta/layout-rest shape property))
+     (when (some? (:layout shape)) (ctal/layout-rest shape property))
      (:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left :layout-min-width :layout-max-width :layout-min-height :layout-max-height)
-     (cta/layout-rest shape property)
+     (ctal/layout-rest shape property)
      ;; for a row made for the path as it is (see `ctao/outline-value`)
      :content         (when (= :path (:type shape)) (ctao/outline-of shape))
      (get cta/trim-properties property))))
@@ -531,8 +534,8 @@
 (def animatable-properties
   (into transform-properties (concat [:path-progress] camera-properties light-properties cta/depth-cue-properties
                                      [:opacity :r1 :r2 :r3 :r4]
-                                     appearance-properties cta/text-style-properties
-                                     cta/layout-container-properties cta/layout-item-properties [:content])))
+                                     appearance-properties ctat/text-style-properties
+                                     ctal/layout-container-properties ctal/layout-item-properties [:content])))
 
 (defn- store-value
   [m property index v]
@@ -575,19 +578,19 @@
 
                    (cfh/text-shape? shape)
                    (into (map (fn [property]
-                                [property (get animated property (cta/text-style-rest shape property))]))
-                         cta/text-style-properties)
+                                [property (get animated property (ctat/text-style-rest shape property))]))
+                         ctat/text-style-properties)
 
                    (some? (:layout shape))
                    (into (map (fn [property]
-                                [property (get animated property (cta/layout-rest shape property))]))
-                         cta/layout-container-properties)
+                                [property (get animated property (ctal/layout-rest shape property))]))
+                         ctal/layout-container-properties)
 
                    ;; a layer in an auto layout
                    (some? (:layout (get objects (:parent-id shape))))
                    (into (map (fn [property]
-                                [property (get animated property (cta/layout-rest shape property))]))
-                         cta/layout-item-properties)
+                                [property (get animated property (ctal/layout-rest shape property))]))
+                         ctal/layout-item-properties)
 
                    (= :path (:type shape))
                    (assoc :content (or (:content animated)

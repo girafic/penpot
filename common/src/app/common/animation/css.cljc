@@ -17,6 +17,8 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-layout :as ctal]
+   [app.common.types.animation-paint :as ctap]
    [app.common.types.color :as clr]
    [clojure.string :as str]))
 
@@ -99,7 +101,7 @@
         sy    (* start-y h)
         dx    (- (* end-x w) sx)
         dy    (- (* end-y h) sy)
-        stops (cta/gradient-stops gradient)
+        stops (ctap/gradient-stops gradient)
         color #(css-color (:color %) (:opacity %))]
     (if (= :radial type)
       (let [r     (mth/hypot dx dy)
@@ -266,13 +268,13 @@
       (and stroke (cta/has? values :stroke-color :stroke-opacity))
       (assoc (if text? :text-stroke-color :border-color) (css-color (:stroke-color stroke) (or (:stroke-opacity stroke) 1)))
 
-      (and stroke (contains? values :stroke-width) (not (cta/sided-stroke? stroke)))
+      (and stroke (contains? values :stroke-width) (not (ctap/sided-stroke? stroke)))
       (assoc (if text? :text-stroke-width :border-width) (or (:stroke-width stroke) 0))
 
       ;; a stroke with sides: each as wide as it plays, top first
-      (and stroke (not text?) (cta/sided-stroke? stroke)
-           (apply cta/has? values :stroke-width cta/stroke-side-properties))
-      (assoc :border-width (mapv #(cta/stroke-side-width stroke %) cta/stroke-side-properties))
+      (and stroke (not text?) (ctap/sided-stroke? stroke)
+           (apply cta/has? values :stroke-width ctap/stroke-side-properties))
+      (assoc :border-width (mapv #(ctap/stroke-side-width stroke %) ctap/stroke-side-properties))
 
       (cta/has? values :shadow-offset-x :shadow-offset-y :shadow-blur
                 :shadow-spread :shadow-color :shadow-opacity)
@@ -302,14 +304,14 @@
 
       ;; the spacing of an auto layout, and of a layer in one
       (apply cta/has? values [:layout-row-gap :layout-column-gap])
-      (assoc :gap (mapv #(get values % (cta/layout-rest shape %)) [:layout-row-gap :layout-column-gap]))
+      (assoc :gap (mapv #(get values % (ctal/layout-rest shape %)) [:layout-row-gap :layout-column-gap]))
 
       (apply cta/has? values [:layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left])
-      (assoc :padding (mapv #(get values % (cta/layout-rest shape %))
+      (assoc :padding (mapv #(get values % (ctal/layout-rest shape %))
                             [:layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left]))
 
       (apply cta/has? values [:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left])
-      (assoc :margin (mapv #(get values % (cta/layout-rest shape %))
+      (assoc :margin (mapv #(get values % (ctal/layout-rest shape %))
                            [:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left]))
 
       (contains? values :layout-min-width)  (assoc :min-width (:layout-min-width values))
@@ -587,7 +589,7 @@
   (into (mapv double [start-x start-y end-x end-y width])
         (mapcat (fn [{:keys [offset color opacity]}]
                   (into [(double offset)] (conj (mapv double (clr/hex->rgb color)) (double opacity)))))
-        (cta/gradient-stops gradient)))
+        (ctap/gradient-stops gradient)))
 
 (defn value-numbers
   "The numbers of `values` (see `values-at`), in an order of their own: a
@@ -728,7 +730,7 @@
       (let [played (get-in ((shape-values timeline (:id shape)) 0) [:fill-gradient index])
             rest   (:fill-color-gradient (get fills index))
             rest   (cond-> rest
-                     (some? played) (assoc :stops (cta/pad-stops rest played)))
+                     (some? played) (assoc :stops (ctap/pad-stops rest played)))
             {:keys [type stops] :as css} (css-gradient rest (dm/get-in shape [:selrect :width])
                                                        (dm/get-in shape [:selrect :height]))
             stops  (str/join ", " (map #(str "var(--penpot-gradient-color-" % ") var(--penpot-gradient-at-" % ")")

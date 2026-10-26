@@ -22,8 +22,11 @@
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-layout :as ctal]
    [app.common.types.animation-outline :as ctao]
+   [app.common.types.animation-paint :as ctap]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.animation-text-style :as ctat]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
@@ -1371,26 +1374,26 @@
         three (linear-gradient [{:color "#000000" :offset 0}
                                 {:color "#ff0000" :offset 0.5}
                                 {:color "#ffffff" :offset 1}])
-        half  (cta/lerp-gradient two three 0.5)]
+        half  (ctap/lerp-gradient two three 0.5)]
     (t/testing "the gradient with fewer stops gets its colours at the others' offsets"
       (t/is (= 3 (count (:stops half))))
       (t/is (= [0.0 0.5 1.0] (mapv #(double (:offset %)) (:stops half))))
       ;; grey (#808080) half way to red
       (t/is (hex-close? "#c04040" (get-in half [:stops 1 :color]))))
     (t/testing "at the ends it is the one or the other"
-      (t/is (hex-close? "#808080" (get-in (cta/lerp-gradient two three 0) [:stops 1 :color])))
-      (t/is (hex-close? "#ff0000" (get-in (cta/lerp-gradient two three 1) [:stops 1 :color]))))
+      (t/is (hex-close? "#808080" (get-in (ctap/lerp-gradient two three 0) [:stops 1 :color])))
+      (t/is (hex-close? "#ff0000" (get-in (ctap/lerp-gradient two three 1) [:stops 1 :color]))))
     (t/testing "a change of type holds until the next keyframe"
       (let [radial (assoc three :type :radial)]
-        (t/is (= :linear (:type (cta/lerp-gradient two radial 0.9))))
-        (t/is (= radial (cta/lerp-gradient two radial 1)))))
+        (t/is (= :linear (:type (ctap/lerp-gradient two radial 0.9))))
+        (t/is (= radial (ctap/lerp-gradient two radial 1)))))
     (t/testing "a gradient keeps its own stops, those it gets draw as it does"
       (let [own    (linear-gradient [{:color "#000000" :offset 0.2}
                                      {:color "#ffffff" :offset 0.8}])
-            padded (cta/pad-stops own three)]
+            padded (ctap/pad-stops own three)]
         (t/is (= [0.2 0.5 0.8] (mapv #(double (:offset %)) padded)))
         (t/is (hex-close? "#808080" (:color (second padded))))
-        (t/is (= (cta/gradient-stops own) (cta/pad-stops own two)))))
+        (t/is (= (ctap/gradient-stops own) (ctap/pad-stops own two)))))
     (t/testing "every frame of a row has as many stops as its keyframe with most"
       (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10
                                     :fills [{:fill-color-gradient two}]})
@@ -1403,9 +1406,9 @@
             stops #(count (get-in (cta/values-at tl %) [sid :fill-gradient 0 :stops]))]
         (t/is (= [3 3 3 3 3] (mapv stops [0 250 500 750 1000])))))
     (t/testing "a spring overshoot keeps opacities and offsets in range"
-      (let [over (cta/lerp-gradient two (linear-gradient [{:color "#000000" :opacity 0 :offset 0.5}
-                                                          {:color "#ffffff" :offset 1}])
-                                    1.3)]
+      (let [over (ctap/lerp-gradient two (linear-gradient [{:color "#000000" :opacity 0 :offset 0.5}
+                                                           {:color "#ffffff" :offset 1}])
+                                     1.3)]
         (t/is (<= 0 (get-in over [:stops 0 :opacity]) 1))
         (t/is (<= 0 (get-in over [:stops 0 :offset]) 1))))))
 
@@ -7609,7 +7612,7 @@
       (t/is (= [:stroke-color :stroke-opacity :stroke-width :stroke-dash :stroke-gap :stroke-dash-offset]
                (:properties (d/seek #(= :stroke (:group %)) (cta/appearance-slots shape))))))
     (t/testing "the dash and gap a stroke without them draws"
-      (t/is (= [12 12] (cta/stroke-dash {:stroke-style :dashed :stroke-width 2}))))
+      (t/is (= [12 12] (ctap/stroke-dash {:stroke-style :dashed :stroke-width 2}))))
     (t/is (= [:stroke :stroke :stroke] (mapv cta/property-area [:stroke-dash :stroke-gap :stroke-dash-offset])))))
 
 (t/deftest gradients-play-in-svg-and-lottie
@@ -7759,7 +7762,7 @@
         (t/is (= "30" (:font-size (first (spans-of shown)))))))
     (t/testing "the values at rest are those of its first span"
       (t/is (= [20.0 0.0 1.2 400.0]
-               (mapv #(double (cta/text-style-rest shape %)) cta/text-style-properties))))
+               (mapv #(double (ctat/text-style-rest shape %)) ctat/text-style-properties))))
     (t/testing "only texts take them"
       (t/is (cta/fits-keyframe? shape {:property :font-size}))
       (t/is (not (cta/fits-keyframe? (assoc shape :type :rect) {:property :font-weight}))))))
@@ -7774,11 +7777,11 @@
                 (let [w (if (< weight 550) "400" "700")]
                   {:font-variant-id (if (= "400" w) "regular" w) :font-weight w :font-style style}))]
     (try
-      (cta/set-font-weight-face! faces)
+      (ctat/set-font-weight-face! faces)
       (t/is (= ["regular" "400"] ((juxt :font-variant-id :font-weight) (first (spans-of (played-text tl shape 400))))))
       (t/is (= ["700" "700"] ((juxt :font-variant-id :font-weight) (first (spans-of (played-text tl shape 600))))))
       (finally
-        (cta/set-font-weight-face! nil)))
+        (ctat/set-font-weight-face! nil)))
     (t/testing "without the faces, the weight alone"
       (t/is (= "700" (:font-weight (first (spans-of (played-text tl shape 1000)))))))))
 
@@ -7828,7 +7831,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :stroke-width-top :index 0 :value 10}))
         half  (played-stroke tl shape 500)]
     (t/testing "the top side plays, the others stay"
-      (t/is (= [6.0 2.0 2.0 2.0] (mapv #(double (get half %)) cta/stroke-side-properties))))
+      (t/is (= [6.0 2.0 2.0 2.0] (mapv #(double (get half %)) ctap/stroke-side-properties))))
     (t/testing "the width of the stroke follows its top side, as the Design tab keeps it"
       (t/is (mth/close? 6 (:stroke-width half))))
     (t/testing "only the sides of rectangles and boards"
@@ -7844,15 +7847,15 @@
                   (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 0 :value 8})
                   (cta/add-keyframe sid {:time 0 :property :stroke-width-right :index 0 :value 4}))]
     (t/testing "every side without keyframes of its own"
-      (t/is (= [8.0 4.0 8.0 8.0] (mapv #(double (get (played-stroke tl shape 1000) %)) cta/stroke-side-properties))))
+      (t/is (= [8.0 4.0 8.0 8.0] (mapv #(double (get (played-stroke tl shape 1000) %)) ctap/stroke-side-properties))))
     (t/testing "a stroke without sides plays its width alone"
-      (let [plain (update shape :strokes (fn [ss] (mapv #(apply dissoc % cta/stroke-side-properties) ss)))
+      (let [plain (update shape :strokes (fn [ss] (mapv #(apply dissoc % ctap/stroke-side-properties) ss)))
             width (-> (mk-timeline)
                       (cta/add-keyframe sid {:time 0 :property :stroke-width :index 0 :value 2 :easing :linear})
                       (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 0 :value 8}))
             out   (played-stroke width plain 1000)]
         (t/is (mth/close? 8 (:stroke-width out)))
-        (t/is (not (cta/sided-stroke? out)))))))
+        (t/is (not (ctap/sided-stroke? out)))))))
 
 (t/deftest an-edit-of-a-side-records-the-side
   (let [shape   (sided-rect)
@@ -7886,8 +7889,8 @@
         (t/is (= #{:stroke-width} (into #{} (map :property) kfs)))
         (t/is (= [[0 2] [500 6]] (mapv (juxt :time :value) (sort-by :time kfs))))))
     (t/testing "whether its sides are all as wide"
-      (t/is (cta/stroke-sides-even? (get-in shape [:strokes 0])))
-      (t/is (not (cta/stroke-sides-even? (assoc (get-in shape [:strokes 0]) :stroke-width-left 5)))))))
+      (t/is (ctap/stroke-sides-even? (get-in shape [:strokes 0])))
+      (t/is (not (ctap/stroke-sides-even? (assoc (get-in shape [:strokes 0]) :stroke-width-left 5)))))))
 
 (t/deftest the-keyframes-a-layer-has
   (let [text  (cts/setup-shape {:type :text :x 0 :y 0 :width 100 :height 40
@@ -7939,8 +7942,8 @@
       (t/is (not (cta/fits-keyframe? card {:property :layout-padding-left})))
       (t/is (cta/fits-keyframe? card {:property :layout-margin-top})))
     (t/testing "the values at rest"
-      (t/is (= [4 4 8 8 8 8] (mapv #(cta/layout-rest board %) cta/layout-container-properties)))
-      (t/is (= 100 (cta/layout-rest card :layout-min-width)) "its own width when it has no least one"))
+      (t/is (= [4 4 8 8 8 8] (mapv #(ctal/layout-rest board %) ctal/layout-container-properties)))
+      (t/is (= 100 (ctal/layout-rest card :layout-min-width)) "its own width when it has no least one"))
     (t/testing "an edit of the gap at the playhead records it"
       (let [after (assoc-in objects [bid :layout-gap :row-gap] 12)
             kfs   (get-in (cta/record-unanimated (mk-timeline) objects after [bid] 500) [:tracks bid :keyframes])]

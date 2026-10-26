@@ -24,6 +24,7 @@
    [app.common.types.animation-code :as ctac]
    [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-outline :as ctao]
+   [app.common.types.animation-paint :as ctap]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
@@ -219,7 +220,7 @@
   gives it: a `Gradient` of a gradient fill or stroke as Penpot's, the
   others as they are."
   [property value]
-  (if (cta/gradient-property? property)
+  (if (ctap/gradient-property? property)
     ;; a plain object or the proxy of a fill or stroke
     ;; (`fills[0].fillColorGradient`); `keyframe-value-fits?` checks it
     (when (and (some? value) (not (string? value)) (not (number? value)))
@@ -230,7 +231,7 @@
   "The value of a keyframe of `property` as the plugin API gives it (see
   `parse-value`)."
   [property value]
-  (if (cta/gradient-property? property)
+  (if (ctap/gradient-property? property)
     (format/format-gradient value)
     value))
 
@@ -239,8 +240,8 @@
   (cond
     (cta/color-property? property)    (and (string? value) (sm/validate clr/schema:hex-color value))
     (= :content property)             (some? (parse-outline value))
-    (cta/gradient-property? property) (cta/keyframe-value-fits? {:property property
-                                                                 :value (parse-value property value)})
+    (ctap/gradient-property? property) (cta/keyframe-value-fits? {:property property
+                                                                  :value (parse-value property value)})
     :else                             (sm/valid-safe-number? value)))
 
 (def ^:private gradient-message
@@ -1038,7 +1039,7 @@
       (cond
         (cta/color-property? property)    "The value of a color should be an hexadecimal color like '#ff0000'"
         (= :content property)             outline-message
-        (cta/gradient-property? property) gradient-message
+        (ctap/gradient-property? property) gradient-message
         :else                             "The value should be a number")
 
       (and (some? index) (not (cta/indexed-property? property)))
@@ -1163,7 +1164,7 @@
         (not (valid-value? property value))
         (cond
           (cta/color-property? property)    "The value of a color should be an hexadecimal color like '#ff0000'"
-          (cta/gradient-property? property) gradient-message
+          (ctap/gradient-property? property) gradient-message
           :else                             "The value should be a number")
 
         (nil? easing)

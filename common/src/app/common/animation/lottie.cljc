@@ -30,6 +30,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-outline :as ctao]
+   [app.common.types.animation-paint :as ctap]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -306,15 +307,15 @@
   the box, playing the gradients of the keyframes `kfs` (static for one,
   see `lottie-prop-1d`, or what they all have alike).
   Lottie keeps the count of stops: each has the most any has (see
-  `cta/pad-stops`). The type is the one it starts with."
+  `ctap/pad-stops`). The type is the one it starts with."
   [gradient kfs [x y width height]]
   (let [kfs    (cta/sort-keyframes kfs)
         first' (if (seq kfs) (:value (first kfs)) gradient)
         most   (apply max-key #(count (:stops %)) first' (map :value kfs))
         stops  (fn [g]
                  (if (= (count (:stops g)) (count (:stops most)))
-                   (cta/gradient-stops g)
-                   (cta/pad-stops g most)))
+                   (ctap/gradient-stops g)
+                   (ctap/pad-stops g most)))
         colors (fn [g]
                  (let [stops (stops g)]
                    (vec (concat (mapcat (fn [{:keys [offset color]}]

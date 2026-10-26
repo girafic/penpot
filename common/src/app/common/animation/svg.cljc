@@ -21,6 +21,7 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.animation-outline :as ctao]
+   [app.common.types.animation-paint :as ctap]
    [app.common.types.color :as clr]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -170,12 +171,12 @@
 (defn- svg-dash-declarations
   "The dash pattern of the dashed `stroke` its dash, gap and offset in
   `values` play (at `index`), the others as they rest (see
-  `cta/stroke-dash`); none when the stroke trims (`trimmed?`), whose trim
+  `ctap/stroke-dash`); none when the stroke trims (`trimmed?`), whose trim
   takes the dash of its vectors (see `svg-trim-declarations`)."
   [stroke index values trimmed?]
-  (when (and (cta/dashed-stroke? stroke) (not trimmed?)
+  (when (and (ctap/dashed-stroke? stroke) (not trimmed?)
              (some #(contains? values %) [:stroke-dash :stroke-gap :stroke-dash-offset]))
-    (let [[dash gap] (cta/stroke-dash stroke)
+    (let [[dash gap] (ctap/stroke-dash stroke)
           dash   (or (indexed-value (:stroke-dash values) index) dash)
           gap    (or (indexed-value (:stroke-gap values) index) gap)
           offset (or (indexed-value (:stroke-dash-offset values) index) (:stroke-dash-offset stroke) 0)]
@@ -671,7 +672,7 @@
   one of a path, and the type of one that changes it, which keeps the one
   it rests in."
   [shape track]
-  (let [kfs (filter #(cta/gradient-property? (:property %)) (:keyframes track))]
+  (let [kfs (filter #(ctap/gradient-property? (:property %)) (:keyframes track))]
     (boolean
      (and (seq kfs)
           (or (= :text (:type shape))
@@ -694,7 +695,7 @@
   linear one; the centre and radius of a radial one, and its turn and
   width on its `gradientTransform`, but on a path, whose transform the
   renderer bakes in) and its stops, as many as the gradient with most
-  has (see `cta/pad-stops`), each with its own. Nil without any."
+  has (see `ctap/pad-stops`), each with its own. Nil without any."
   [timeline shape [property index] kfs]
   (let [rest     (rest-gradient shape property index)
         values   (acss/shape-values timeline (:id shape))
@@ -704,8 +705,8 @@
         stops-at (memoize (fn [t]
                             (let [g (at t)]
                               (if (= n (count (:stops g)))
-                                (cta/gradient-stops g)
-                                (cta/pad-stops g most)))))
+                                (ctap/gradient-stops g)
+                                (ctap/pad-stops g most)))))
         points   #(smil-points % kfs (max 1 (:duration timeline)))
         animate  (fn [attr value render] (smil-animate timeline attr (points value) render))
         vec-of   (fn [g] (gpt/point (- (:end-x g) (:start-x g)) (- (:end-y g) (:start-y g))))

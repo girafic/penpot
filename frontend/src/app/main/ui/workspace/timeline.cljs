@@ -19,6 +19,7 @@
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-paint :as ctap]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.component :as ctk]
@@ -795,7 +796,7 @@
        (tr "workspace.animation.path-nodes" (outline-nodes keyframe value))]
 
       ;; a gradient, which the gradient editor of the fill or stroke edits
-      (cta/gradient-property? property)
+      (ctap/gradient-property? property)
       [:div {:class (stl/css-case :row-color true :disabled disabled?)
              :title (or hint (uc/gradient-type->string (:type value)))}
        (when (some? value)

@@ -31,7 +31,10 @@
    [app.common.math :as mth]
    [app.common.math.noise :as noise]
    [app.common.schema :as sm]
+   [app.common.types.animation-layout :as ctal]
    [app.common.types.animation-outline :as ctao]
+   [app.common.types.animation-paint :as ctap]
+   [app.common.types.animation-text-style :as ctat]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
@@ -66,24 +69,24 @@
     :r1 :r2 :r3 :r4
     :fill-color :fill-opacity
     ;; a gradient fill, whole: its stops, its points and its width (see
-    ;; `lerp-gradient`)
+    ;; `ctap/lerp-gradient`)
     :fill-gradient
     :stroke-color :stroke-opacity :stroke-width
     ;; a gradient stroke, whole, as a gradient fill
     :stroke-gradient
     ;; the width of each side of a stroke of a rectangle or a board (see
-    ;; `stroke-side-properties`)
+    ;; `ctap/stroke-side-properties`)
     :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
     ;; the dash pattern of a dashed stroke: its dash, its gap and where it
-    ;; starts along the stroke (see `dashed-stroke?`)
+    ;; starts along the stroke (see `ctap/dashed-stroke?`)
     :stroke-dash :stroke-gap :stroke-dash-offset
     :shadow-offset-x :shadow-offset-y :shadow-blur
     :shadow-spread :shadow-color :shadow-opacity
     :blur :background-blur
-    ;; the type style of a text (see `text-style-properties`)
+    ;; the type style of a text (see `ctat/text-style-properties`)
     :font-size :letter-spacing :line-height :font-weight
     ;; the spacing of an auto layout and of the layers in it (see
-    ;; `layout-paths`)
+    ;; `ctal/layout-paths`)
     :layout-row-gap :layout-column-gap
     :layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left
     :layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left
@@ -110,83 +113,6 @@
 
 (def color-properties
   #{:fill-color :stroke-color :shadow-color})
-
-(def gradient-properties
-  "The properties whose values are whole gradients (see `lerp-gradient`):
-  of a gradient fill and of a gradient stroke."
-  #{:fill-gradient :stroke-gradient})
-
-(def layout-container-properties
-  "The spacing of a board with an auto layout (flex or grid), px: the
-  gaps between its rows and its columns and its padding, top first."
-  [:layout-row-gap :layout-column-gap
-   :layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left])
-
-(def layout-item-properties
-  "The spacing of a layer in an auto layout, px: its margins, top first,
-  and its least and most width and height."
-  [:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left
-   :layout-min-width :layout-max-width :layout-min-height :layout-max-height])
-
-(def layout-paths
-  "Where the layout properties are in a shape (see `apply-layout`)."
-  {:layout-row-gap        [:layout-gap :row-gap]
-   :layout-column-gap     [:layout-gap :column-gap]
-   :layout-padding-top    [:layout-padding :p1]
-   :layout-padding-right  [:layout-padding :p2]
-   :layout-padding-bottom [:layout-padding :p3]
-   :layout-padding-left   [:layout-padding :p4]
-   :layout-margin-top     [:layout-item-margin :m1]
-   :layout-margin-right   [:layout-item-margin :m2]
-   :layout-margin-bottom  [:layout-item-margin :m3]
-   :layout-margin-left    [:layout-item-margin :m4]
-   :layout-min-width      [:layout-item-min-w]
-   :layout-max-width      [:layout-item-max-w]
-   :layout-min-height     [:layout-item-min-h]
-   :layout-max-height     [:layout-item-max-h]})
-
-(defn layout-rest
-  "The value of the layout property `property` of `shape` without
-  keyframes: its own, else no gap, padding or margin, and its own width
-  or height for a least or most size it has none of."
-  [shape property]
-  (or (get-in shape (get layout-paths property))
-      (case property
-        (:layout-min-width :layout-max-width)   (dm/get-in shape [:selrect :width] 0)
-        (:layout-min-height :layout-max-height) (dm/get-in shape [:selrect :height] 0)
-        0)))
-
-(def ^:private layout-maps
-  "The maps of gaps, padding and margins of a shape with no spacing, which
-  its own fill in (see `apply-layout`)."
-  {:layout-gap         {:row-gap 0 :column-gap 0}
-   :layout-padding     {:p1 0 :p2 0 :p3 0 :p4 0}
-   :layout-item-margin {:m1 0 :m2 0 :m3 0 :m4 0}})
-
-(defn apply-layout
-  "The attributes of `shape` its layout properties in `values` change
-  (see `layout-paths`): `{attribute value}`, the maps of its gaps,
-  padding and margins whole, a side it has none of at 0 (as it draws)."
-  [shape values]
-  (reduce-kv (fn [changed property [attr :as path]]
-               (if (contains? values property)
-                 (assoc changed attr (if (next path)
-                                       (assoc (or (get changed attr)
-                                                  (merge (get layout-maps attr) (get shape attr)))
-                                              (second path)
-                                              (get values property))
-                                       (get values property)))
-                 changed))
-             {}
-             layout-paths))
-
-(def text-style-properties
-  "The type style of a text (see `apply-text-style`): the size of its
-  first span (px), the others keeping their share of it, and of all its
-  spans the spacing of the letters (px), the height of the lines (a share
-  of the size) and the weight (100 to 900, the nearest face its font
-  has). Only texts have them."
-  [:font-size :letter-spacing :line-height :font-weight])
 
 (def camera-properties
   "The properties of the camera of a board (see `app.common.geom.tilt`):
@@ -257,9 +183,9 @@
                   :shadow-spread :shadow-color :shadow-opacity]
                  (repeat :shadow))
          (zipmap [:trim-start :trim-end :trim-offset] (repeat :trim))
-         (zipmap text-style-properties (repeat :text-style))
-         (zipmap layout-container-properties (repeat :layout))
-         (zipmap layout-item-properties (repeat :layout-item))
+         (zipmap ctat/text-style-properties (repeat :text-style))
+         (zipmap ctal/layout-container-properties (repeat :layout))
+         (zipmap ctal/layout-item-properties (repeat :layout-item))
          (zipmap [:r1 :r2 :r3 :r4] (repeat :radius))))
 
 (defn property-area
@@ -301,10 +227,6 @@
 (defn color-property?
   [property]
   (contains? color-properties property))
-
-(defn gradient-property?
-  [property]
-  (contains? gradient-properties property))
 
 (defn indexed-property?
   [property]
@@ -2674,127 +2596,6 @@
   [from-keyframe t]
   (easing-progress (:easing from-keyframe) t))
 
-(defn- lerp
-  [a b t]
-  (+ a (* (- b a) t)))
-
-(defn- clamp-byte
-  [n]
-  (-> n mth/round (max 0) (min 255) int))
-
-(defn- lerp-color
-  "Mix two hex colours in RGB. A step (`t` unused by the caller) is
-  handled before this is called."
-  [from to t]
-  (let [[fr fg fb] (clr/hex->rgb from)
-        [tr tg tb] (clr/hex->rgb to)]
-    (clr/rgb->hex [(clamp-byte (lerp fr tr t))
-                   (clamp-byte (lerp fg tg t))
-                   (clamp-byte (lerp fb tb t))])))
-
-(defn- gradient-value?
-  [v]
-  (and (map? v) (contains? v :stops)))
-
-(defn gradient-stops
-  "The stops of `gradient` by their offset, each with its opacity."
-  [gradient]
-  (->> (:stops gradient)
-       (map #(update % :opacity (fn [o] (or o 1))))
-       (sort-by :offset)
-       (vec)))
-
-(defn- stop-slots
-  "The slots of the sorted offsets `ref` that the sorted offsets `own`, as
-  many or fewer, take: in order, as near their offsets as can be."
-  [own ref]
-  (let [c    (count own)
-        n    (count ref)
-        memo (volatile! {})
-        best (fn best [i j]
-               (if-let [found (find @memo [i j])]
-                 (val found)
-                 (let [result
-                       (cond
-                         (= i c)               [0 []]
-                         (> (- c i) (- n j))   nil
-                         :else
-                         (let [take (when-let [[cost slots] (best (inc i) (inc j))]
-                                      [(+ cost (mth/abs (- (nth own i) (nth ref j))))
-                                       (into [j] slots)])
-                               skip (best i (inc j))]
-                           (cond
-                             (nil? take)                    skip
-                             (nil? skip)                    take
-                             (<= (first take) (first skip)) take
-                             :else                          skip)))]
-                   (vswap! memo assoc [i j] result)
-                   result)))]
-    (second (best 0 0))))
-
-(defn pad-stops
-  "The stops of `gradient` (see `gradient-stops`), as many as those of
-  `reference` when it has fewer: its own in the slots of the stops of the
-  reference nearest them (see `stop-slots`), and in the others stops that
-  draw as it does, its colour at the offset of the reference there, kept
-  between its own around. So a gradient blends into one of more stops,
-  each of its stops going to the nearest of the other."
-  [gradient reference]
-  (let [own (gradient-stops gradient)
-        ref (gradient-stops reference)]
-    (if (>= (count own) (count ref))
-      own
-      (let [slots   (stop-slots (mapv :offset own) (mapv :offset ref))
-            by-slot (zipmap slots own)]
-        (mapv (fn [j]
-                (or (get by-slot j)
-                    (let [before (some->> (filter #(< % j) slots) (last) (get by-slot))
-                          after  (some->> (filter #(> % j) slots) (first) (get by-slot))
-                          offset (mth/clamp (:offset (nth ref j))
-                                            (if before (:offset before) 0)
-                                            (if after (:offset after) 1))]
-                      (-> (clr/interpolate-gradient own offset)
-                          (select-keys [:color :opacity :offset])))))
-              (range (count ref)))))))
-
-(defn- evened-gradient-row
-  "`keyframes`, the time-sorted keyframes of a row of gradients, each
-  with as many stops as the one with most (see `pad-stops`), so each
-  blends into the next stop by stop and every frame has as many."
-  [keyframes]
-  (let [most (:value (apply max-key #(count (:stops (:value %))) keyframes))
-        n    (count (:stops most))]
-    (if (every? #(= n (count (:stops (:value %)))) keyframes)
-      keyframes
-      (mapv (fn [kf]
-              (cond-> kf
-                (< (count (:stops (:value kf))) n)
-                (assoc-in [:value :stops] (pad-stops (:value kf) most))))
-            keyframes))))
-
-(defn lerp-gradient
-  "The gradient `t` of the way from `from` to `to`: its points and width,
-  and stop by stop (as many in each, see `pad-stops`) the colour in RGB,
-  the opacity and the offset. One of another type (linear, radial) holds
-  until `to`."
-  [from to t]
-  (if (not= (:type from) (:type to))
-    (if (>= t 1) to from)
-    (let [a   (pad-stops from to)
-          b   (pad-stops to from)
-          num   (fn [k] (lerp (get from k 0) (get to k 0) t))]
-      (assoc from
-             :start-x (num :start-x) :start-y (num :start-y)
-             :end-x (num :end-x) :end-y (num :end-y)
-             :width (num :width)
-             :stops (->> (map (fn [sa sb]
-                                {:color   (lerp-color (:color sa) (:color sb) t)
-                                 :opacity (mth/clamp (lerp (:opacity sa) (:opacity sb) t) 0 1)
-                                 :offset  (mth/clamp (lerp (:offset sa) (:offset sb) t) 0 1)})
-                              a b)
-                         (sort-by :offset)
-                         (vec))))))
-
 (defn- lerp-value
   [from to t]
   (cond
@@ -2802,14 +2603,14 @@
     (path/content? from)
     (or (when (path/content? to) (path/lerp from to t)) from)
 
-    (gradient-value? from)
-    (if (gradient-value? to) (lerp-gradient from to t) from)
+    (ctap/gradient-value? from)
+    (if (ctap/gradient-value? to) (ctap/lerp-gradient from to t) from)
 
     (or (string? from) (string? to))
-    (lerp-color from to t)
+    (ctap/lerp-color from to t)
 
     :else
-    (lerp from to t)))
+    (ctap/lerp from to t)))
 
 (defn- bezier-value
   "The cubic bezier through `p0`, `p1`, `p2` and `p3` at `t`."
@@ -2917,7 +2718,7 @@
   Indexed properties (fill, stroke, shadow) nest as `{index value}`. The
   outlines of a path morph into each other (see `match-outlines`), and
   the gradients of a fill have as many stops all along (see
-  `evened-gradient-row`)."
+  `ctap/evened-gradient-row`)."
   [timeline time]
   (reduce-kv
    (fn [acc shape-id track]
@@ -2927,7 +2728,7 @@
                      (fn [m [property index] keyframes]
                        (let [keyframes (cond-> (sort-keyframes keyframes)
                                          (= :content property) (->> (matched-row [shape-id index]))
-                                         (gradient-property? property) (evened-gradient-row))
+                                         (ctap/gradient-property? property) (ctap/evened-gradient-row))
                              time      (if (contains? loops (slot-key property index))
                                          (loop-time keyframes time)
                                          time)
@@ -3417,78 +3218,20 @@
   [stroke]
   (some? (:stroke-color-gradient stroke)))
 
-(defn dashed-stroke?
-  "A stroke drawn in dashes of its own length and gap (`:stroke-dash`,
-  `:stroke-gap`), which its dash keyframes play on; dotted and mixed
-  strokes take theirs from their width."
-  [stroke]
-  (= :dashed (:stroke-style stroke)))
-
-(def stroke-side-properties
-  "The widths of the sides of a stroke, px, top first: rectangles and
-  boards draw them (see `sided-shape?`), with the WASM renderer."
-  [:stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left])
-
-(defn sided-shape?
-  "Whether `shape` draws the sides of its strokes as wide as each says: a
-  rectangle or a board."
-  [shape]
-  (contains? #{:rect :frame} (:type shape)))
-
-(defn sided-stroke?
-  "Whether `stroke` has a width of its own for its sides (the Design tab
-  sets all four, see `app.common.types.stroke/materialize-stroke-side-widths`)."
-  [stroke]
-  (boolean (some #(some? (get stroke %)) stroke-side-properties)))
-
-(defn stroke-side-width
-  "The width of the side `property` of `stroke`: its own, or the stroke's."
-  [stroke property]
-  (or (get stroke property) (:stroke-width stroke) 0))
-
-(defn stroke-sides-even?
-  "Whether the sides of `stroke` are all as wide."
-  [stroke]
-  (apply = (map #(stroke-side-width stroke %) stroke-side-properties)))
-
 (defn- auto-stroke-slot?
   "Whether auto-keyframe records the slot `[property index]` of `shape`
   as edited: of a stroke with sides, its width when they end alike, else
   its sides, never both, as a width plays on every side without keyframes
-  of its own (see `sided`)."
+  of its own (see `ctap/sided`)."
   [shape [property index]]
   (let [stroke (get (as-vec (:strokes shape)) index)]
-    (if (and (sided-shape? shape)
-             (sided-stroke? stroke)
-             (or (= :stroke-width property) (some #{property} stroke-side-properties)))
-      (if (stroke-sides-even? stroke)
+    (if (and (ctap/sided-shape? shape)
+             (ctap/sided-stroke? stroke)
+             (or (= :stroke-width property) (some #{property} ctap/stroke-side-properties)))
+      (if (ctap/stroke-sides-even? stroke)
         (= :stroke-width property)
         (not= :stroke-width property))
       true)))
-
-(defn- sided
-  "`stroke` with the widths of its sides that play (`played`, `{side
-  width}`) and, when its width plays (`width`, else nil), each other side
-  that wide: all four set and `:stroke-width` the top one, as the Design
-  tab keeps them, so render-wasm draws the sides, or, all alike, the one
-  width."
-  [stroke played width]
-  (let [sides (into {}
-                    (map (fn [side]
-                           [side (cond
-                                   (contains? played side) (get played side)
-                                   (some? width)           width
-                                   :else                   (stroke-side-width stroke side))]))
-                    stroke-side-properties)]
-    (merge stroke sides {:stroke-width (:stroke-width-top sides)})))
-
-(defn stroke-dash
-  "The dash and gap of the dashed `stroke`, px: its own, or the width
-  plus 10 that a stroke without them draws."
-  [stroke]
-  (let [width (or (:stroke-width stroke) 1)]
-    [(or (:stroke-dash stroke) (+ width 10))
-     (or (:stroke-gap stroke) (+ width 10))]))
 
 (defn appearance-slots
   "The fill, stroke, shadow and blur slots of `shape` that can take
@@ -3496,7 +3239,7 @@
   gradient (`:fill-gradient`), images none, and so a stroke (a gradient
   one `:stroke-gradient`); the dash pattern of a dashed stroke takes them
   in any paint, and the widths of the sides of a stroke
-  with sides (see `sided-stroke?`) of a rectangle or a board."
+  with sides (see `ctap/sided-stroke?`) of a rectangle or a board."
   [shape]
   (let [fills   (as-vec (:fills shape))
         strokes (as-vec (:strokes shape))
@@ -3523,10 +3266,10 @@
                             (gradient-stroke? stroke)
                             (into [:stroke-gradient :stroke-width])
 
-                            (and (sided-shape? shape) (sided-stroke? stroke))
-                            (into stroke-side-properties)
+                            (and (ctap/sided-shape? shape) (ctap/sided-stroke? stroke))
+                            (into ctap/stroke-side-properties)
 
-                            (dashed-stroke? stroke)
+                            (ctap/dashed-stroke? stroke)
                             (into [:stroke-dash :stroke-gap :stroke-dash-offset]))]
            (when (seq properties)
              {:group :stroke :index index
@@ -3577,75 +3320,6 @@
         txt/default-text-fills)
     (:fills shape)))
 
-(defn- text-number
-  [v]
-  (if (number? v) v (d/parse-double v)))
-
-(defn text-style-rest
-  "The value of the text style property `property` (see
-  `text-style-properties`) of the text `shape` without keyframes: that of
-  its first span, or of a text by default."
-  [shape property]
-  (let [span (first (txt/node-seq txt/is-text-node? (:content shape)))]
-    (or (text-number (get span property))
-        (text-number (get txt/default-text-attrs property)))))
-
-(defonce ^:private font-weight-face (atom nil))
-
-(defn set-font-weight-face!
-  "Have `f` give the face a weight of a text plays in (see
-  `apply-text-style`): `(f font-id font-style weight)`, the face of the
-  font nearest it in that style, `{:font-variant-id :font-weight
-  :font-style}`, or nil for a font it does not know. The hosts know the
-  fonts; without it a span takes the weight alone."
-  [f]
-  (reset! font-weight-face f))
-
-(defn- text-style-value
-  "`v` as a text keeps it: a string, to 3 decimals, a whole one without
-  them (on the JVM as in JS)."
-  [v]
-  (let [v (mth/precision (double v) 3)]
-    (if (== v (mth/floor v)) (str (long v)) (str v))))
-
-(defn apply-text-style
-  "The content of the text `shape` as the text style `values` (see
-  `text-style-properties`) play it: each span and paragraph scaled as much
-  as its first span is to the played size, their letters spaced and their
-  lines as high as played, and each span in the face of its font nearest
-  the played weight (see `set-font-weight-face!`)."
-  [shape values]
-  (let [base   (text-style-rest shape :font-size)
-        scale  (when (and (contains? values :font-size) (pos? base))
-                 (/ (:font-size values) base))
-        weight (some-> (:font-weight values) (mth/round) (mth/clamp 1 1000))
-        face   (when (some? weight)
-                 (let [f @font-weight-face]
-                   (fn [node]
-                     (or (when (some? f)
-                           (f (or (:font-id node) (:font-id txt/default-text-attrs))
-                              (or (:font-style node) "normal")
-                              weight))
-                         {:font-weight (str weight)}))))
-        style  (fn [node]
-                 (let [span? (txt/is-text-node? node)
-                       size  (text-number (:font-size node))]
-                   (cond-> node
-                     (and (some? scale) (or span? (some? size)))
-                     (assoc :font-size (text-style-value (* scale (or size base))))
-
-                     (contains? values :letter-spacing)
-                     (assoc :letter-spacing (text-style-value (:letter-spacing values)))
-
-                     (contains? values :line-height)
-                     (assoc :line-height (text-style-value (:line-height values)))
-
-                     (and span? (some? face))
-                     (merge (select-keys (face node) [:font-variant-id :font-weight :font-style])))))]
-    (txt/transform-nodes #(or (txt/is-text-node? %) (txt/is-paragraph-node? %))
-                         style
-                         (:content shape))))
-
 (defn apply-fills
   [fills values]
   (-> fills
@@ -3663,7 +3337,7 @@
   "`strokes` as `values` (see `values-at`) play them: their colour and
   opacity (flat ones), gradient (gradient ones), width and dash pattern
   (dashed ones), and the widths
-  of their sides (see `sided`): a side plays its own keyframes, a stroke
+  of their sides (see `ctap/sided`): a side plays its own keyframes, a stroke
   with sides takes the width that plays on every other side."
   [strokes values]
   (let [strokes (-> strokes
@@ -3682,8 +3356,8 @@
                      nil)
                     (patch-indexed
                      (select-keys values [:stroke-dash :stroke-gap :stroke-dash-offset])
-                     dashed-stroke?))
-        sides   (select-keys values stroke-side-properties)
+                     ctap/dashed-stroke?))
+        sides   (select-keys values ctap/stroke-side-properties)
         widths  (:stroke-width values)]
     (if (and (empty? sides) (empty? widths))
       strokes
@@ -3696,8 +3370,8 @@
                                             [side (get by-index index)])))
                                   sides)
                      width  (get widths index)]
-                 (if (or (seq played) (and (some? width) (sided-stroke? stroke)))
-                   (sided stroke played width)
+                 (if (or (seq played) (and (some? width) (ctap/sided-stroke? stroke)))
+                   (ctap/sided stroke played width)
                    stroke))))
             (as-vec strokes)))))
 
@@ -3916,13 +3590,13 @@
       (and (contains? values :content) (= :path (:type shape)))
       (ctm/change-property :content (ctao/outline->content shape track (:content values)))
 
-      (and (= :text (:type shape)) (some #(contains? values %) text-style-properties))
-      (ctm/change-property :content (apply-text-style shape values))
+      (and (= :text (:type shape)) (some #(contains? values %) ctat/text-style-properties))
+      (ctm/change-property :content (ctat/apply-text-style shape values))
 
       ;; render-wasm lays the board out again (`parse-geometry-modifiers`
       ;; gives a shape changed this way a reflow)
-      (some #(contains? values %) (keys layout-paths))
-      (as-> m (reduce-kv ctm/change-property m (apply-layout shape values))))))
+      (some #(contains? values %) (keys ctal/layout-paths))
+      (as-> m (reduce-kv ctm/change-property m (ctal/apply-layout shape values))))))
 
 (defn rest-value
   "The value of `property` that `shape` has without keyframes, positions
@@ -5077,10 +4751,10 @@
     (some? (get (as-vec (:strokes shape)) index))
 
     (:stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left)
-    (and (sided-shape? shape) (some? (get (as-vec (:strokes shape)) index)))
+    (and (ctap/sided-shape? shape) (some? (get (as-vec (:strokes shape)) index)))
 
     (:stroke-dash :stroke-gap :stroke-dash-offset)
-    (dashed-stroke? (get (as-vec (:strokes shape)) index))
+    (ctap/dashed-stroke? (get (as-vec (:strokes shape)) index))
 
     (:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-spread :shadow-color :shadow-opacity)
     (some? (get (as-vec (:shadow shape)) index))
@@ -5130,7 +4804,7 @@
   (cond
     (color-property? property)    (clr/hex-color-string? value)
     (= :content property)         (ctao/outline-fits? value)
-    (gradient-property? property) (valid-gradient? value)
+    (ctap/gradient-property? property) (valid-gradient? value)
     :else                         (mth/finite? value)))
 
 (defn- relative-value
@@ -5396,13 +5070,13 @@
   [property old new]
   (cond
     (or (nil? old) (nil? new)) true
-    (or (color-property? property) (gradient-property? property)) (= old new)
+    (or (color-property? property) (ctap/gradient-property? property)) (= old new)
     :else (mth/close? old new)))
 
 (defn- appearance-slot-values
   "The current fill, stroke, shadow and blur values of `shape`, the type
-  style of a text (see `text-style-rest`) and the spacing of an auto
-  layout and of a layer in one (see `layout-paths`), as `{[property
+  style of a text (see `ctat/text-style-rest`) and the spacing of an auto
+  layout and of a layer in one (see `ctal/layout-paths`), as `{[property
   index] value}` (index is nil for blur, the type style and the layout)."
   [shape]
   (let [put (fn [m property index value]
@@ -5424,8 +5098,8 @@
        (as-vec (:fills shape)))
       (reduce-kv
        (fn [m index stroke]
-         (let [[dash gap] (stroke-dash stroke)
-               sides?     (and (sided-shape? shape) (sided-stroke? stroke))]
+         (let [[dash gap] (ctap/stroke-dash stroke)
+               sides?     (and (ctap/sided-shape? shape) (ctap/sided-stroke? stroke))]
            (cond-> m
              (solid-color-stroke? stroke)
              (-> (put :stroke-color index (:stroke-color stroke))
@@ -5441,9 +5115,9 @@
              (put :stroke-width index (or (:stroke-width stroke) 0))
 
              sides?
-             (as-> m (reduce #(put %1 %2 index (stroke-side-width stroke %2)) m stroke-side-properties))
+             (as-> m (reduce #(put %1 %2 index (ctap/stroke-side-width stroke %2)) m ctap/stroke-side-properties))
 
-             (dashed-stroke? stroke)
+             (ctap/dashed-stroke? stroke)
              (-> (put :stroke-dash index dash)
                  (put :stroke-gap index gap)
                  (put :stroke-dash-offset index (or (:stroke-dash-offset stroke) 0))))))
@@ -5466,22 +5140,22 @@
         (:background-blur shape)
         (put :background-blur nil (or (get-in shape [:background-blur :value]) 0))
         (= :text (:type shape))
-        (as-> m (reduce (fn [m property] (put m property nil (text-style-rest shape property)))
+        (as-> m (reduce (fn [m property] (put m property nil (ctat/text-style-rest shape property)))
                         m
-                        text-style-properties))
+                        ctat/text-style-properties))
 
         ;; the spacing of an auto layout and of the layers in it; a least
         ;; or most size only once the layer has one
         (some? (:layout shape))
-        (as-> m (reduce #(put %1 %2 nil (layout-rest shape %2)) m layout-container-properties))
+        (as-> m (reduce #(put %1 %2 nil (ctal/layout-rest shape %2)) m ctal/layout-container-properties))
 
         :always
-        (as-> m (reduce #(put %1 %2 nil (or (get-in shape (get layout-paths %2))
+        (as-> m (reduce #(put %1 %2 nil (or (get-in shape (get ctal/layout-paths %2))
                                             (when (contains? #{:layout-margin-top :layout-margin-right
                                                                :layout-margin-bottom :layout-margin-left} %2)
                                               0)))
                         m
-                        layout-item-properties))))))
+                        ctal/layout-item-properties))))))
 
 (defn- edit-value
   "The value of `property` of the shape `shape-id` of `objects`, with

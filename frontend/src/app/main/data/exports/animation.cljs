@@ -23,6 +23,9 @@
    [app.common.render-wasm.api.select :as wselect]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-layout :as ctal]
+   [app.common.types.animation-paint :as ctap]
+   [app.common.types.animation-text-style :as ctat]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
@@ -652,18 +655,18 @@
   - `:gif/alpha` and `:mp4/alpha`, a board that shows through (see
     `see-through?`): GIF has no partial transparency, MP4 none at all;
   - `:svg/dash`, a stroke whose dash pattern plays (see
-    `cta/dashed-stroke?`) and that trims too: an SVG draws a trim by the
+    `ctap/dashed-stroke?`) and that trims too: an SVG draws a trim by the
     dash of its vectors, so the trim plays and the dashes stay out;
   - `:svg/gradient`, gradients an SVG keeps as they rest (see
     `asvg/svg-gradient-static?`);
   - `:stroke-sides`, the widths of the sides of a stroke as they play
-    (see `cta/stroke-side-properties`): an SVG and Lottie draw a stroke as
+    (see `ctap/stroke-side-properties`): an SVG and Lottie draw a stroke as
     wide all round, the width of its top side;
   - `:layout`, the spacing of an auto layout or of a layer in one (see
-    `cta/layout-paths`): the markup formats place the layers where they
+    `ctal/layout-paths`): the markup formats place the layers where they
     rest;
   - `:text-style`, the type style of a text (see
-    `cta/text-style-properties`), which no markup format plays: its
+    `ctat/text-style-properties`), which no markup format plays: its
     texts are drawn, or outlined, as they rest;
   - `:lottie/three-d` and `:svg/three-d`, a layer that tilts or comes
     out of the plane (see `app.common.geom.tilt`), at rest or as it
@@ -784,11 +787,11 @@
                                (asvg/svg-gradient-static? shape track)))
                            (:tracks resolved)))]
            [:stroke-sides markup-formats
-            (boolean (some animated cta/stroke-side-properties))]
+            (boolean (some animated ctap/stroke-side-properties))]
            [:layout markup-formats
-            (boolean (some animated (keys cta/layout-paths)))]
+            (boolean (some animated (keys ctal/layout-paths)))]
            [:text-style markup-formats
-            (boolean (some animated cta/text-style-properties))]]]
+            (boolean (some animated ctat/text-style-properties))]]]
       (reduce (fn [issues [kind formats on?]]
                 (if on?
                   (reduce #(update %1 %2 (fnil conj []) kind) issues formats)
@@ -2312,7 +2315,7 @@
 
 (defn played-texts
   "The texts of the boards `board-ids` of `page` in each weight their
-  animations play (see `cta/apply-text-style`), as they play (see
+  animations play (see `ctat/apply-text-style`), as they play (see
   `cta/resolve-animations`: the keyframes of styles too), every hundred
   between their keyframes too, which an export lays them out in."
   [page files board-ids]
@@ -2327,7 +2330,7 @@
                            (when (and (cfh/text-shape? text) (seq weights))
                              (let [lo (mth/floor (reduce min weights))
                                    hi (mth/ceil (reduce max weights))]
-                               (map #(assoc text :content (cta/apply-text-style text {:font-weight %}))
+                               (map #(assoc text :content (ctat/apply-text-style text {:font-weight %}))
                                     (distinct (concat weights (range lo (inc hi) 100))))))))
                        (:tracks (cta/resolve-animations tl objects))))))
           board-ids)))
