@@ -120,11 +120,13 @@
                            {:left (- (.-innerWidth js/window) 318)})]
              (swap! place* #(if (nil? %) (popover-place rect (:left sidebar)) nil)))))
 
+        ;; no tilt and no turn in the plane, as Isometric sets them
         on-reset
         (mf/use-fn
-         (mf/deps on-tilt on-drag-start on-drag-end)
+         (mf/deps on-tilt on-rotation-change on-drag-start on-drag-end)
          (fn [_]
            (on-drag-start)
+           (on-rotation-change 0)
            (on-tilt [0 0])
            (on-drag-end)))
 
