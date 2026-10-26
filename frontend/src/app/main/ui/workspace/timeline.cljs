@@ -794,8 +794,8 @@
       [:span {:class (stl/css :row-value :row-outline)}
        (tr "workspace.animation.path-nodes" (outline-nodes keyframe value))]
 
-      ;; a gradient, which the gradient editor of the fill edits
-      (= :fill-gradient property)
+      ;; a gradient, which the gradient editor of the fill or stroke edits
+      (cta/gradient-property? property)
       [:div {:class (stl/css-case :row-color true :disabled disabled?)
              :title (or hint (uc/gradient-type->string (:type value)))}
        (when (some? value)

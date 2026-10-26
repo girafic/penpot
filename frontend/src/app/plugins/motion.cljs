@@ -216,10 +216,10 @@
 
 (defn- parse-value
   "The value a keyframe of `property` holds of `value`, as the plugin API
-  gives it: a `Gradient` of a gradient fill as Penpot's, the others as
-  they are."
+  gives it: a `Gradient` of a gradient fill or stroke as Penpot's, the
+  others as they are."
   [property value]
-  (if (= :fill-gradient property)
+  (if (cta/gradient-property? property)
     (when (object? value) (parser/parse-gradient value))
     value))
 
@@ -227,18 +227,18 @@
   "The value of a keyframe of `property` as the plugin API gives it (see
   `parse-value`)."
   [property value]
-  (if (= :fill-gradient property)
+  (if (cta/gradient-property? property)
     (format/format-gradient value)
     value))
 
 (defn- valid-value?
   [property value]
   (cond
-    (cta/color-property? property) (and (string? value) (sm/validate clr/schema:hex-color value))
-    (= :content property)          (some? (parse-outline value))
-    (= :fill-gradient property)    (cta/keyframe-value-fits? {:property property
-                                                              :value (parse-value property value)})
-    :else                          (sm/valid-safe-number? value)))
+    (cta/color-property? property)    (and (string? value) (sm/validate clr/schema:hex-color value))
+    (= :content property)             (some? (parse-outline value))
+    (cta/gradient-property? property) (cta/keyframe-value-fits? {:property property
+                                                                 :value (parse-value property value)})
+    :else                             (sm/valid-safe-number? value)))
 
 (def ^:private gradient-message
   (str "The value of a gradient should be a Gradient like { type: 'linear', startX: 0, startY: 0, "
@@ -1033,10 +1033,10 @@
 
       (not (valid-value? property value))
       (cond
-        (cta/color-property? property) "The value of a color should be an hexadecimal color like '#ff0000'"
-        (= :content property)          outline-message
-        (= :fill-gradient property)    gradient-message
-        :else                          "The value should be a number")
+        (cta/color-property? property)    "The value of a color should be an hexadecimal color like '#ff0000'"
+        (= :content property)             outline-message
+        (cta/gradient-property? property) gradient-message
+        :else                             "The value should be a number")
 
       (and (some? index) (not (cta/indexed-property? property)))
       "Only fills, strokes and shadows take an index"
@@ -1159,9 +1159,9 @@
 
         (not (valid-value? property value))
         (cond
-          (cta/color-property? property) "The value of a color should be an hexadecimal color like '#ff0000'"
-          (= :fill-gradient property)    gradient-message
-          :else                          "The value should be a number")
+          (cta/color-property? property)    "The value of a color should be an hexadecimal color like '#ff0000'"
+          (cta/gradient-property? property) gradient-message
+          :else                             "The value should be a number")
 
         (nil? easing)
         "Not a valid easing"

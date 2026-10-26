@@ -58,6 +58,7 @@
       :stroke-color (tr "workspace.animation.stroke" n)
       :stroke-opacity (tr "workspace.animation.stroke-opacity" n)
       :stroke-width (tr "workspace.animation.stroke-width" n)
+      :stroke-gradient (tr "workspace.animation.stroke-gradient" n)
       :stroke-width-top (tr "workspace.animation.stroke-width-top" n)
       :stroke-width-right (tr "workspace.animation.stroke-width-right" n)
       :stroke-width-bottom (tr "workspace.animation.stroke-width-bottom" n)

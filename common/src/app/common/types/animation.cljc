@@ -67,6 +67,8 @@
     ;; `lerp-gradient`)
     :fill-gradient
     :stroke-color :stroke-opacity :stroke-width
+    ;; a gradient stroke, whole, as a gradient fill
+    :stroke-gradient
     ;; the width of each side of a stroke of a rectangle or a board (see
     ;; `stroke-side-properties`)
     :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
@@ -106,6 +108,11 @@
 
 (def color-properties
   #{:fill-color :stroke-color :shadow-color})
+
+(def gradient-properties
+  "The properties whose values are whole gradients (see `lerp-gradient`):
+  of a gradient fill and of a gradient stroke."
+  #{:fill-gradient :stroke-gradient})
 
 (def layout-container-properties
   "The spacing of a board with an auto layout (flex or grid), px: the
@@ -201,7 +208,7 @@
          (zipmap (keys light-properties) (repeat :light))
          (zipmap camera-properties (repeat :camera))
          (zipmap [:fill-color :fill-opacity :fill-gradient] (repeat :fill))
-         (zipmap [:stroke-color :stroke-opacity :stroke-width
+         (zipmap [:stroke-color :stroke-opacity :stroke-width :stroke-gradient
                   :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
                   :stroke-dash :stroke-gap :stroke-dash-offset]
                  (repeat :stroke))
@@ -244,7 +251,7 @@
 
 (def indexed-properties
   #{:fill-color :fill-opacity :fill-gradient
-    :stroke-color :stroke-opacity :stroke-width
+    :stroke-color :stroke-opacity :stroke-width :stroke-gradient
     :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
     :stroke-dash :stroke-gap :stroke-dash-offset
     :shadow-offset-x :shadow-offset-y :shadow-blur
@@ -253,6 +260,10 @@
 (defn color-property?
   [property]
   (contains? color-properties property))
+
+(defn gradient-property?
+  [property]
+  (contains? gradient-properties property))
 
 (defn indexed-property?
   [property]
@@ -354,7 +365,7 @@
     (into [:map {:title "ValueKeyframe"}
            ;; all but the outline, the progress along a path too
            [:property [::sm/one-of (disj animatable-properties :content)]]
-           ;; a gradient for `:fill-gradient`
+           ;; a gradient for `:fill-gradient` and `:stroke-gradient`
            [:value [:or ::sm/safe-number clr/schema:hex-color clr/schema:gradient]]
            ;; Motion path: for `:x` and `:y`, how far along its axis the
            ;; curve leaves the keyframe towards the next one (`:path-out`)
@@ -2875,7 +2886,7 @@
                      (fn [m [property index] keyframes]
                        (let [keyframes (cond-> (sort-keyframes keyframes)
                                          (= :content property) (->> (matched-row [shape-id index]))
-                                         (= :fill-gradient property) (evened-gradient-row))
+                                         (gradient-property? property) (evened-gradient-row))
                              time      (if (contains? loops (slot-key property index))
                                          (loop-time keyframes time)
                                          time)
@@ -3359,6 +3370,12 @@
        (nil? (:stroke-color-gradient stroke))
        (nil? (:stroke-image stroke))))
 
+(defn gradient-stroke?
+  "A stroke that is a gradient, which its `:stroke-gradient` keyframes
+  play."
+  [stroke]
+  (some? (:stroke-color-gradient stroke)))
+
 (defn dashed-stroke?
   "A stroke drawn in dashes of its own length and gap (`:stroke-dash`,
   `:stroke-gap`), which its dash keyframes play on; dotted and mixed
@@ -3415,8 +3432,9 @@
 (defn appearance-slots
   "The fill, stroke, shadow and blur slots of `shape` that can take
   keyframes: a flat fill its colour and opacity, a gradient one its
-  gradient (`:fill-gradient`), images none; the dash pattern of a dashed
-  stroke takes them in any paint, and the widths of the sides of a stroke
+  gradient (`:fill-gradient`), images none, and so a stroke (a gradient
+  one `:stroke-gradient`); the dash pattern of a dashed stroke takes them
+  in any paint, and the widths of the sides of a stroke
   with sides (see `sided-stroke?`) of a rectangle or a board."
   [shape]
   (let [fills   (as-vec (:fills shape))
@@ -3440,6 +3458,9 @@
          (let [properties (cond-> []
                             (solid-color-stroke? stroke)
                             (into [:stroke-color :stroke-opacity :stroke-width])
+
+                            (gradient-stroke? stroke)
+                            (into [:stroke-gradient :stroke-width])
 
                             (and (sided-shape? shape) (sided-stroke? stroke))
                             (into stroke-side-properties)
@@ -3579,7 +3600,8 @@
 
 (defn apply-strokes
   "`strokes` as `values` (see `values-at`) play them: their colour and
-  opacity (flat ones), width and dash pattern (dashed ones), and the widths
+  opacity (flat ones), gradient (gradient ones), width and dash pattern
+  (dashed ones), and the widths
   of their sides (see `sided`): a side plays its own keyframes, a stroke
   with sides takes the width that plays on every other side."
   [strokes values]
@@ -3589,6 +3611,10 @@
                        (contains? values :stroke-color) (assoc :stroke-color (:stroke-color values))
                        (contains? values :stroke-opacity) (assoc :stroke-opacity (:stroke-opacity values)))
                      solid-color-stroke?)
+                    (patch-indexed
+                     (cond-> {}
+                       (contains? values :stroke-gradient) (assoc :stroke-color-gradient (:stroke-gradient values)))
+                     gradient-stroke?)
                     (patch-indexed
                      (cond-> {}
                        (contains? values :stroke-width) (assoc :stroke-width (:stroke-width values)))
@@ -3793,7 +3819,7 @@
       (has? values :fill-color :fill-opacity :fill-gradient)
       (ctm/change-property :fills (apply-fills (paint-fills shape) values))
 
-      (has? values :stroke-color :stroke-opacity :stroke-width
+      (has? values :stroke-color :stroke-opacity :stroke-width :stroke-gradient
             :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
             :stroke-dash :stroke-gap :stroke-dash-offset)
       (ctm/change-property :strokes (apply-strokes (:strokes shape) values))
@@ -4967,6 +4993,9 @@
     :fill-gradient
     (gradient-fill? (get (as-vec (:fills shape)) index))
 
+    :stroke-gradient
+    (gradient-stroke? (get (as-vec (:strokes shape)) index))
+
     (:stroke-color :stroke-opacity)
     (boolean (solid-color-stroke? (get (as-vec (:strokes shape)) index)))
 
@@ -5018,14 +5047,14 @@
 (defn keyframe-value-fits?
   "Whether the value of `keyframe` is of the kind its property takes: a
   hex colour for a colour, an outline (see `ctao/outline-fits?`) for the
-  outline of a path, a gradient for a gradient fill, a finite number for
-  the others."
+  outline of a path, a gradient for a gradient fill or stroke, a finite
+  number for the others."
   [{:keys [property value]}]
   (cond
-    (color-property? property)   (clr/hex-color-string? value)
-    (= :content property)        (ctao/outline-fits? value)
-    (= :fill-gradient property)  (valid-gradient? value)
-    :else                        (mth/finite? value)))
+    (color-property? property)    (clr/hex-color-string? value)
+    (= :content property)         (ctao/outline-fits? value)
+    (gradient-property? property) (valid-gradient? value)
+    :else                         (mth/finite? value)))
 
 (defn- relative-value
   "`value` of `property`, of a layer resting at `from`, for a layer
@@ -5290,7 +5319,7 @@
   [property old new]
   (cond
     (or (nil? old) (nil? new)) true
-    (or (color-property? property) (= :fill-gradient property)) (= old new)
+    (or (color-property? property) (gradient-property? property)) (= old new)
     :else (mth/close? old new)))
 
 (defn- appearance-slot-values
@@ -5328,7 +5357,10 @@
              ;; a stroke with sides keeps its width as wide as its top side:
              ;; an edit records its sides, not that width, which would take
              ;; the other sides along as it plays (see `apply-strokes`)
-             (and (solid-color-stroke? stroke) (not sides?))
+             (gradient-stroke? stroke)
+             (put :stroke-gradient index (:stroke-color-gradient stroke))
+
+             (and (or (solid-color-stroke? stroke) (gradient-stroke? stroke)) (not sides?))
              (put :stroke-width index (or (:stroke-width stroke) 0))
 
              sides?

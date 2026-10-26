@@ -632,55 +632,73 @@
           []
           points))
 
+(def ^:private gradient-paints
+  "Where the gradients the keyframes of a gradient property play are: the
+  paints of `shape` that hold them, the key of the gradient in one, and
+  the id the SVG renderer gives it, but its render id and index."
+  {:fill-gradient   {:paints :fills :paint? cta/gradient-fill?
+                     :key :fill-color-gradient :id "fill-color-gradient"}
+   :stroke-gradient {:paints :strokes :paint? cta/gradient-stroke?
+                     :key :stroke-color-gradient :id "stroke-color-gradient"}})
+
+(defn- rest-gradient
+  "The gradient of the paint `index` of `shape` that `property` (see
+  `gradient-paints`) plays, as it rests."
+  [shape property index]
+  (let [{:keys [paints key]} (get gradient-paints property)]
+    (get (get (cta/as-vec (get shape paints)) index) key)))
+
 (defn- gradient-tracks
-  "The keyframes `track` plays on the gradients of the fills of `shape`,
-  by the index of the fill: of fills that are gradients, of a layer that
-  is no text (whose fills the SVG renderer draws once a line)."
+  "The keyframes `track` plays on the gradients of the fills and strokes
+  of `shape`, by `[property index]` of the paint: of paints that are
+  gradients, of a layer that is no text (whose paints the SVG renderer
+  draws once a line)."
   [shape track]
   (when (not= :text (:type shape))
-    (let [fills (cta/as-vec (:fills shape))]
-      (->> (:keyframes track)
-           (filter #(and (= :fill-gradient (:property %))
-                         (cta/gradient-fill? (get fills (:index %)))))
-           (group-by :index)
-           (not-empty)))))
+    (->> (:keyframes track)
+         (filter (fn [{:keys [property index]}]
+                   (when-let [{:keys [paints paint?]} (get gradient-paints property)]
+                     (paint? (get (cta/as-vec (get shape paints)) index)))))
+         (group-by (juxt :property :index))
+         (not-empty))))
 
 (def ^:private gradient-geometry [:start-x :start-y :end-x :end-y :width])
 
 (defn svg-gradient-static?
-  "Whether `track` plays on the gradients of the fills of `shape` what an
-  SVG of vectors keeps as it rests (see `svg-gradient-smil`): the
-  gradients of a text, the points of a radial one of a path, and the
-  type of one that changes it, which keeps the one it rests in."
+  "Whether `track` plays on the gradients of the fills and strokes of
+  `shape` what an SVG of vectors keeps as it rests (see
+  `svg-gradient-smil`): the gradients of a text, the points of a radial
+  one of a path, and the type of one that changes it, which keeps the one
+  it rests in."
   [shape track]
-  (let [kfs (filter #(= :fill-gradient (:property %)) (:keyframes track))]
+  (let [kfs (filter #(cta/gradient-property? (:property %)) (:keyframes track))]
     (boolean
      (and (seq kfs)
           (or (= :text (:type shape))
-              (let [fills (cta/as-vec (:fills shape))]
-                (some (fn [[index kfs]]
-                        (let [rest (:fill-color-gradient (get fills index))]
-                          (some (fn [{:keys [value]}]
-                                  (or (not= (:type value) (:type rest))
-                                      (and (= :radial (:type rest))
-                                           (= :path (:type shape))
-                                           (not= (select-keys value gradient-geometry)
-                                                 (select-keys rest gradient-geometry)))))
-                                kfs)))
-                      (group-by :index kfs))))))))
+              (some (fn [[[property index] kfs]]
+                      (let [rest (rest-gradient shape property index)]
+                        (some (fn [{:keys [value]}]
+                                (or (not= (:type value) (:type rest))
+                                    (and (= :radial (:type rest))
+                                         (= :path (:type shape))
+                                         (not= (select-keys value gradient-geometry)
+                                               (select-keys rest gradient-geometry)))))
+                              kfs)))
+                    (group-by (juxt :property :index) kfs)))))))
 
 (defn- svg-gradient-smil
-  "What SMIL plays in the gradient of the fill `index` of `shape`, its
-  keyframes `kfs` of `timeline` (cut to its duration), drawn as the SVG
+  "What SMIL plays in the gradient of the fill or stroke `index` of
+  `shape` that `property` plays (see `gradient-paints`), its keyframes
+  `kfs` of `timeline` (cut to its duration), drawn as the SVG
   renderer draws it: the `<animate>`s of its points (`x1` to `y2` of a
   linear one; the centre and radius of a radial one, and its turn and
   width on its `gradientTransform`, but on a path, whose transform the
   renderer bakes in) and its stops, as many as the gradient with most
   has (see `cta/pad-stops`), each with its own. Nil without any."
-  [timeline shape index kfs]
-  (let [rest     (:fill-color-gradient (get (cta/as-vec (:fills shape)) index))
+  [timeline shape [property index] kfs]
+  (let [rest     (rest-gradient shape property index)
         values   (acss/shape-values timeline (:id shape))
-        at       (memoize #(or (indexed-value (:fill-gradient (values %)) index) rest))
+        at       (memoize #(or (indexed-value (get (values %) property) index) rest))
         most     (apply max-key #(count (:stops %)) rest (map :value kfs))
         n        (count (:stops most))
         stops-at (memoize (fn [t]
@@ -736,13 +754,14 @@
       (str (str/join "" geometry) (str/join "" stops)))))
 
 (defn- svg-smil-gradients
-  "`markup` with what SMIL plays in the gradients of its fills (see
-  `svg-gradient-smil`), by the index of the fill, in place of their
-  stops."
+  "`markup` with what SMIL plays in the gradients of its fills and
+  strokes (see `svg-gradient-smil`), by `[property index]` of the paint,
+  in place of their stops."
   [markup gradients]
-  (reduce-kv (fn [markup index inner]
+  (reduce-kv (fn [markup [property index] inner]
                (str/replace markup
-                            (re-pattern (str "(?s)(<(linearGradient|radialGradient) [^>]*?id=\"fill-color-gradient-[^\"]*-"
+                            (re-pattern (str "(?s)(<(linearGradient|radialGradient) [^>]*?id=\""
+                                             (:id (get gradient-paints property)) "-[^\"]*-"
                                              index "\"[^>]*>).*?(</\\2>)"))
                             (fn [[_ open _ close]] (str open inner close))))
              markup
@@ -1184,7 +1203,7 @@
   shadows it plays or a blur (see `svg-filter-shadows?`,
   `svg-filter-blur?`), as they play and at rest, which reduced motion
   shows (see `svg-smil-css`), and what it plays in the gradients of the
-  fills of each (`:gradients`, see `svg-gradient-smil`). Those of `wide`
+  fills and strokes of each (`:gradients`, see `svg-gradient-smil`). Those of `wide`
   hold layers, which may go over `area` (on the page)."
   [timeline objects images wide area]
   (reduce
@@ -1233,9 +1252,9 @@
            gradients (when (some? shape)
                        (not-empty
                         (into {}
-                              (keep (fn [[index kfs]]
-                                      (some->> (svg-gradient-smil timeline shape index kfs)
-                                               (vector index))))
+                              (keep (fn [[slot kfs]]
+                                      (some->> (svg-gradient-smil timeline shape slot kfs)
+                                               (vector slot))))
                               (gradient-tracks shape track))))]
        (cond-> result
          (or (some? outline) (some? filters) (some? inner) (some? paint) (some? gradients))
@@ -1296,7 +1315,7 @@
 
 (defn- svg-smil-vectors
   "The vectors `markup` of the layer `id` (see `svg-vectors`) with the
-  path of their outline and the gradients of their fills SMIL plays (see
+  path of their outline and the gradients of their paints SMIL plays (see
   `svg-smil`), and beside them, for reduced motion, which SMIL does not
   heed, a copy at rest (see `svg-rest-copy`, `svg-smil-css`)."
   [{:keys [smil ox oy]} id markup]

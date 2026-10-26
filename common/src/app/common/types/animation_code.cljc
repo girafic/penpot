@@ -53,6 +53,7 @@
    :stroke-color "strokeColor"
    :stroke-opacity "strokeOpacity"
    :stroke-width "strokeWidth"
+   :stroke-gradient "strokeGradient"
    :stroke-width-top "strokeWidthTop"
    :stroke-width-right "strokeWidthRight"
    :stroke-width-bottom "strokeWidthBottom"
@@ -114,7 +115,7 @@
    :light-angle :light-height :light-ambient
    :opacity :r1 :r2 :r3 :r4
    :fill-color :fill-opacity :fill-gradient
-   :stroke-color :stroke-opacity :stroke-width
+   :stroke-color :stroke-opacity :stroke-width :stroke-gradient
    :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
    :stroke-dash :stroke-gap :stroke-dash-offset
    :shadow-offset-x :shadow-offset-y :shadow-blur

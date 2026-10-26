@@ -6270,6 +6270,9 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  *   a change from linear to radial holds until the keyframe. Only fills
  *   that are gradients take it (`fillColor` and `fillOpacity` only flat
  *   ones).
+ * - `strokeGradient`: a `Gradient`, the whole gradient of a gradient
+ *   stroke, which blends as `fillGradient` does. Only strokes that are
+ *   gradients take it (`strokeColor` and `strokeOpacity` only flat ones).
  * - `strokeWidthTop`, `strokeWidthRight`, `strokeWidthBottom`,
  *   `strokeWidthLeft`: the width of one side of a stroke of a rectangle or
  *   a board (see `Stroke.strokeWidthTop`), in pixels, each side on its own
@@ -6339,6 +6342,7 @@ export type AnimatableProperty =
   | 'strokeColor'
   | 'strokeOpacity'
   | 'strokeWidth'
+  | 'strokeGradient'
   | 'strokeWidthTop'
   | 'strokeWidthRight'
   | 'strokeWidthBottom'
@@ -6415,8 +6419,8 @@ export interface KeyframeProps {
   time: number;
   /**
    * The value of the property then: a number, a hexadecimal color for the
-   * colors, a `Gradient` for `fillGradient`, or an SVG path for `path`
-   * (see `AnimatableProperty`).
+   * colors, a `Gradient` for `fillGradient` and `strokeGradient`, or an
+   * SVG path for `path` (see `AnimatableProperty`).
    */
   value: number | string | Gradient;
   /**
@@ -6840,7 +6844,7 @@ export interface KeyframesStyleEntryKeyframe {
   /**
    * The value of the property then, relative to the layer that plays it
    * (see `KeyframesStyleEntry`): a number, a hexadecimal color for the
-   * colors, or a `Gradient` for `fillGradient`.
+   * colors, or a `Gradient` for `fillGradient` and `strokeGradient`.
    */
   value: number | string | Gradient;
   /**

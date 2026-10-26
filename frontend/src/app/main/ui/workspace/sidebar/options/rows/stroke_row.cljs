@@ -419,6 +419,10 @@
         [:> keyframe-diamond* {:properties [:stroke-color :stroke-opacity]
                                :index index}])
 
+      (when (cta/gradient-stroke? stroke)
+        [:> keyframe-diamond* {:properties [:stroke-gradient]
+                               :index index}])
+
       (when (some? on-toggle-visibility)
         [:> icon-button* {:variant "ghost"
                           :aria-label (tr "workspace.options.stroke.toggle-stroke")

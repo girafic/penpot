@@ -300,57 +300,14 @@
                                       (lottie-prop-1d offset-kfs identity (or stroke-dash-offset 0))
                                       {:a 0 :k 0})}))))
 
-(defn- lottie-stroke-items
-  "The Lottie strokes of `shape`, top-most first, each with the keyframes
-  of its index, but the hidden ones. Lottie draws them centered on the
-  outline."
-  [shape by-prop]
-  (->> (cta/as-vec (:strokes shape))
-       (map-indexed
-        (fn [index stroke]
-          (let [color-kfs (slot-kfs by-prop :stroke-color index)
-                opac-kfs  (slot-kfs by-prop :stroke-opacity index)
-                width-kfs (slot-kfs by-prop :stroke-width index)]
-            ;; a hidden one stays hidden as it plays
-            (when (and (not (:hidden stroke))
-                       (or (cta/solid-color-stroke? stroke) (seq color-kfs)))
-              (let [cap    (:stroke-cap-start stroke)
-                    dashes (lottie-dashes stroke
-                                          (slot-kfs by-prop :stroke-dash index)
-                                          (slot-kfs by-prop :stroke-gap index)
-                                          (slot-kfs by-prop :stroke-dash-offset index))]
-                (cond-> {:ty "st" :nm (str "stroke " index)
-                         :c (lottie-color-prop color-kfs (hex->rgb01 (or (:stroke-color stroke)
-                                                                         (:value (first color-kfs))
-                                                                         "#000000")))
-                         :o (lottie-prop-1d opac-kfs (fn [v] (* 100.0 v))
-                                            (* 100.0 (or (:stroke-opacity stroke) 1)))
-                         :w (lottie-prop-1d width-kfs identity (or (:stroke-width stroke) 1))
-                         :lc (cond
-                               (= :dotted (:stroke-style stroke))           2
-                               (not= cap (:stroke-cap-end stroke))          1
-                               :else (case cap :round 2 :square 3 1))
-                         :lj 1 :ml 4}
-                  (seq dashes) (assoc :d dashes)))))))
-       (remove nil?)
-       (vec)))
-
-(defn- fill-rule
-  "Lottie fill rule of `shape`: 2 (even-odd) when it says so, else 1."
-  [shape]
-  (if (= "evenodd" (or (dm/get-in shape [:svg-attrs :fill-rule])
-                       (dm/get-in shape [:svg-attrs :fillRule])))
-    2
-    1))
-
-(defn- lottie-gradient-fill
-  "A Lottie gradient fill of `gradient` over the box `[x y width height]`,
-  where the gradient points are fractions of the box, playing the
-  gradients of the keyframes `kfs` (static for one, see `lottie-prop-1d`,
-  or what they all have alike).
+(defn- lottie-gradient
+  "The gradient of a Lottie gradient fill or stroke: `gradient` over the
+  box `[x y width height]`, where the gradient points are fractions of
+  the box, playing the gradients of the keyframes `kfs` (static for one,
+  see `lottie-prop-1d`, or what they all have alike).
   Lottie keeps the count of stops: each has the most any has (see
   `cta/pad-stops`). The type is the one it starts with."
-  [gradient kfs opacity rule [x y width height]]
+  [gradient kfs [x y width height]]
   (let [kfs    (cta/sort-keyframes kfs)
         first' (if (seq kfs) (:value (first kfs)) gradient)
         most   (apply max-key #(count (:stops %)) first' (map :value kfs))
@@ -371,13 +328,70 @@
                  (if (apply = (value-fn first') (map (comp value-fn :value) kfs))
                    {:a 0 :k (value-fn first')}
                    {:a 1 :k (lottie-keyframes kfs value-fn)}))]
-    {:ty "gf" :nm "gradient" :r rule
-     :t (if (= :radial (:type first')) 2 1)
+    {:t (if (= :radial (:type first')) 2 1)
      :s (prop #(point (:start-x %) (:start-y %)))
      :e (prop #(point (:end-x %) (:end-y %)))
      :g {:p (count (:stops most))
-         :k (prop colors)}
-     :o {:a 0 :k (* 100.0 (or opacity 1))}}))
+         :k (prop colors)}}))
+
+(defn- lottie-gradient-fill
+  "A Lottie gradient fill of `gradient` over `box` playing the keyframes
+  `kfs` (see `lottie-gradient`)."
+  [gradient kfs opacity rule box]
+  (merge {:ty "gf" :nm "gradient" :r rule}
+         (lottie-gradient gradient kfs box)
+         {:o {:a 0 :k (* 100.0 (or opacity 1))}}))
+
+(defn- lottie-stroke-items
+  "The Lottie strokes of `shape`, top-most first, each with the keyframes
+  of its index, but the hidden ones: flat ones, and gradients over `box`
+  (see `lottie-gradient`). Lottie draws them centered on the outline."
+  [shape by-prop box]
+  (->> (cta/as-vec (:strokes shape))
+       (map-indexed
+        (fn [index stroke]
+          (let [color-kfs (slot-kfs by-prop :stroke-color index)
+                opac-kfs  (slot-kfs by-prop :stroke-opacity index)
+                width-kfs (slot-kfs by-prop :stroke-width index)
+                gradient? (cta/gradient-stroke? stroke)]
+            ;; a hidden one stays hidden as it plays
+            (when (and (not (:hidden stroke))
+                       (or (cta/solid-color-stroke? stroke) gradient? (seq color-kfs)))
+              (let [cap    (:stroke-cap-start stroke)
+                    dashes (lottie-dashes stroke
+                                          (slot-kfs by-prop :stroke-dash index)
+                                          (slot-kfs by-prop :stroke-gap index)
+                                          (slot-kfs by-prop :stroke-dash-offset index))
+                    paint  (if gradient?
+                             (assoc (lottie-gradient (:stroke-color-gradient stroke)
+                                                     (slot-kfs by-prop :stroke-gradient index)
+                                                     box)
+                                    :ty "gs")
+                             {:ty "st"
+                              :c (lottie-color-prop color-kfs (hex->rgb01 (or (:stroke-color stroke)
+                                                                              (:value (first color-kfs))
+                                                                              "#000000")))})]
+                (cond-> (merge {:nm (str "stroke " index)}
+                               paint
+                               {:o (lottie-prop-1d opac-kfs (fn [v] (* 100.0 v))
+                                                   (* 100.0 (or (:stroke-opacity stroke) 1)))
+                                :w (lottie-prop-1d width-kfs identity (or (:stroke-width stroke) 1))
+                                :lc (cond
+                                      (= :dotted (:stroke-style stroke))           2
+                                      (not= cap (:stroke-cap-end stroke))          1
+                                      :else (case cap :round 2 :square 3 1))
+                                :lj 1 :ml 4})
+                  (seq dashes) (assoc :d dashes)))))))
+       (remove nil?)
+       (vec)))
+
+(defn- fill-rule
+  "Lottie fill rule of `shape`: 2 (even-odd) when it says so, else 1."
+  [shape]
+  (if (= "evenodd" (or (dm/get-in shape [:svg-attrs :fill-rule])
+                       (dm/get-in shape [:svg-attrs :fillRule])))
+    2
+    1))
 
 (defn- lottie-fill-items
   "The Lottie fills of `shape`, top-most first: flat colours with the
@@ -635,11 +649,12 @@
 
 (defn- lottie-paints?
   "Whether the fills and strokes of `shape` are Lottie paints: flat or
-  gradient fills, flat strokes (a hidden one draws nothing)."
+  gradient ones (a hidden stroke draws nothing)."
   [shape]
-  (and (every? #(or (cta/solid-color-fill? %) (some? (:fill-color-gradient %)))
+  (and (every? #(or (cta/solid-color-fill? %) (cta/gradient-fill? %))
                (cta/as-vec (:fills shape)))
-       (every? #(or (:hidden %) (cta/solid-color-stroke? %)) (cta/as-vec (:strokes shape)))))
+       (every? #(or (:hidden %) (cta/solid-color-stroke? %) (cta/gradient-stroke? %))
+               (cta/as-vec (:strokes shape)))))
 
 (declare lottie-content?)
 
@@ -687,7 +702,7 @@
 (defn lottie-vector-layer?
   "Whether the layer `id` of a Lottie export draws as vectors (`layer-ids`
   are all the layers of the export): a rectangle, ellipse, path or
-  boolean, or a group or board of such, with flat or gradient fills, flat
+  boolean, or a group or board of such, with flat or gradient fills and
   strokes, and shadows and blur of its own at most (see
   `lottie-shadow-layers?`, `lottie-inner-shadow-mattes`), or a masked
   group of layers (see `lottie-masked-layers`). Anything else draws as
@@ -836,8 +851,9 @@
   [shape by-prop ox oy & [sized]]
   (let [{:keys [x y width height]} (:selrect shape)
         outline (lottie-outline shape by-prop ox oy sized)
-        strokes (lottie-stroke-items shape by-prop)
-        fills   (lottie-fill-items shape by-prop [(- x ox) (- y oy) width height])
+        box     [(- x ox) (- y oy) width height]
+        strokes (lottie-stroke-items shape by-prop box)
+        fills   (lottie-fill-items shape by-prop box)
         trim    (lottie-trim-item by-prop shape)]
     (if (and (some? trim) (seq strokes))
       (cond-> [(lottie-group "strokes" (concat outline [trim] strokes))]
@@ -869,8 +885,9 @@
                                                        rotation center ox oy))))
           {:keys [x y width height]} (:selrect shape)
           paint    (when (not= :group (:type shape))
-                     (concat (lottie-stroke-items shape {})
-                             (lottie-fill-items shape {} [(- x ox) (- y oy) width height])))
+                     (let [box [(- x ox) (- y oy) width height]]
+                       (concat (lottie-stroke-items shape {} box)
+                               (lottie-fill-items shape {} box))))
           items    (cond-> (vec children)
                      (seq paint)
                      (conj (lottie-group "shape" (concat (lottie-turned-back (aexp/canvas-outline shape)
@@ -938,7 +955,7 @@
                :s {:a 0 :k [width height]}
                :p {:a 0 :k [(+ (- x ox) (/ width 2.0)) (+ (- y oy) (/ height 2.0))]}
                :r {:a 0 :k 0}}]
-             (lottie-stroke-items shape by-prop)
+             (lottie-stroke-items shape by-prop [(- x ox) (- y oy) width height])
              [{:ty "fl" :nm "fill" :r 1
                :c (lottie-color-prop (slot-kfs by-prop :fill-color 0)
                                      (hex->rgb01 (or (:fill-color fill)

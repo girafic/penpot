@@ -7848,3 +7848,71 @@
       (let [after (assoc-in objects [bid :layout-gap :row-gap] 12)
             kfs   (get-in (cta/record-unanimated (mk-timeline) objects after [bid] 500) [:tracks bid :keyframes])]
         (t/is (= #{:layout-row-gap} (into #{} (map :property) kfs)))))))
+
+(t/deftest a-gradient-stroke-plays-its-keyframes
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        bid    (:id board)
+        from   (linear-gradient [{:color "#ff0000" :opacity 1 :offset 0}
+                                 {:color "#0000ff" :opacity 1 :offset 1}])
+        to     (linear-gradient [{:color "#0000ff" :opacity 0 :offset 0.2}
+                                 {:color "#ff0000" :opacity 1 :offset 1}]
+                                :end-x 0 :end-y 1)
+        shape  (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20
+                                 :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                            :stroke-style :solid :stroke-alignment :center}
+                                           {:stroke-color-gradient from :stroke-opacity 1 :stroke-width 4
+                                            :stroke-style :solid :stroke-alignment :center}]})
+        sid    (:id shape)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe sid {:time 0 :property :stroke-gradient :index 1 :value from})
+                   (cta/add-keyframe sid {:time 1000 :property :stroke-gradient :index 1 :value to}))
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}]
+    (t/testing "the gradient of the stroke mixes, the flat one stays as it is"
+      (let [tree    (ctaf/timeline->modif-tree tl {sid shape} 500)
+            strokes (vec (:strokes (ctm/apply-structure-modifiers shape (get-in tree [sid :modifiers]))))
+            grad    (:stroke-color-gradient (second strokes))]
+        (t/is (= "#00ff00" (:stroke-color (first strokes))))
+        (t/is (mth/close? 0.5 (:end-x grad) 0.001))
+        (t/is (hex-close? "#800080" (get-in grad [:stops 0 :color])))
+        (t/is (mth/close? 0.1 (get-in grad [:stops 0 :offset]) 0.001))))
+    (t/testing "a gradient keyframe fits a gradient stroke only, which takes its width too"
+      (t/is (cta/fits-keyframe? shape {:property :stroke-gradient :index 1}))
+      (t/is (not (cta/fits-keyframe? shape {:property :stroke-gradient :index 0})))
+      (t/is (cta/keyframe-value-fits? {:property :stroke-gradient :value to}))
+      (t/is (= :stroke (cta/property-area :stroke-gradient)))
+      (t/is (= [:stroke-gradient :stroke-width]
+               (:properties (d/seek #(and (= :stroke (:group %)) (= 1 (:index %)))
+                                    (cta/appearance-slots shape))))))
+    (t/testing "an edit at the playhead records the gradient, and the width"
+      (let [edited (assoc-in from [:stops 0 :color] "#00ff00")
+            after  (-> {sid shape}
+                       (assoc-in [sid :strokes 1 :stroke-color-gradient] edited)
+                       (assoc-in [sid :strokes 1 :stroke-width] 9))
+            kfs    (get-in (cta/record-unanimated (mk-timeline) {sid shape} after [sid] 500)
+                           [:tracks sid :keyframes])]
+        (t/is (= #{[:stroke-gradient 1] [:stroke-width 1]} (into #{} (map (juxt :property :index)) kfs)))
+        (t/is (= edited (:value (d/seek #(and (= 500 (:time %)) (= :stroke-gradient (:property %))) kfs))))))
+    (t/testing "SVG: SMIL plays the gradient of the stroke"
+      (let [markup (str "<g id=\"shape-" sid "\"><defs>"
+                        "<linearGradient id=\"stroke-color-gradient-r1-1\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\">"
+                        "<stop offset=\"0\" stop-color=\"#ff0000\" stop-opacity=\"1\"></stop>"
+                        "<stop offset=\"1\" stop-color=\"#0000ff\" stop-opacity=\"1\"></stop>"
+                        "</linearGradient></defs>"
+                        "<rect stroke=\"url(#stroke-color-gradient-r1-1)\"></rect></g>")
+            svg    (asvg/timeline->svg tl objects {sid {:markup markup}})]
+        (t/is (str/includes? svg "<animate attributeName=\"x2\""))
+        (t/is (str/includes? svg "<animate attributeName=\"stop-color\""))
+        (t/is (str/includes? svg "stroke-color-gradient-r1-1-rest"))
+        (t/is (not (asvg/svg-gradient-static? shape (get-in tl [:tracks sid]))))
+        (t/is (asvg/svg-gradient-static? (assoc shape :type :text) (get-in tl [:tracks sid])))))
+    (t/testing "Lottie: a gradient stroke, its stops playing, beside the flat one"
+      (let [L     (alottie/timeline->lottie tl {bid board sid shape})
+            items (get-in (first (:layers L)) [:shapes 0 :it])
+            gs    (d/seek #(= "gs" (:ty %)) items)]
+        (t/is (some #(= "st" (:ty %)) items))
+        (t/is (some? gs))
+        (t/is (= 1 (get-in gs [:g :k :a])))
+        (t/is (= 1 (get-in gs [:e :a])))
+        (t/is (= 4 (get-in gs [:w :k])))
+        (t/is (nil? (:r gs)) "a stroke has no fill rule")))))

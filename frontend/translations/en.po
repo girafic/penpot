@@ -7205,6 +7205,9 @@ msgstr "Stroke %s opacity"
 msgid "workspace.animation.stroke-width"
 msgstr "Stroke %s width"
 
+msgid "workspace.animation.stroke-gradient"
+msgstr "Stroke %s gradient"
+
 #: src/app/util/motion_labels.cljs
 msgid "workspace.animation.stroke-width-top"
 msgstr "Stroke %s top width"

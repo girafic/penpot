@@ -1686,6 +1686,30 @@
                                                                  :value "#ff0000"}))
               "a colour is no gradient")))))
 
+(t/deftest a-gradient-stroke-blends-its-gradients
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js timeline         (.addTimeline board)
+            gradient             (fn [a b end-x]
+                                   #js {:type "linear" :startX 0 :startY 0 :endX end-x :endY 0 :width 1
+                                        :stops #js [#js {:color a :opacity 1 :offset 0}
+                                                    #js {:color b :opacity 1 :offset 1}]})]
+        (set! (.-strokes rect) #js [#js {:strokeColorGradient (gradient "#ff0000" "#0000ff" 1)
+                                         :strokeWidth 4 :strokeStyle "solid" :strokeAlignment "center"}])
+        (.addKeyframe timeline rect #js {:property "strokeGradient" :index 0 :time 0
+                                         :value (gradient "#ff0000" "#0000ff" 1) :easing "linear"})
+        (.addKeyframe timeline rect #js {:property "strokeGradient" :index 0 :time 1000
+                                         :value (gradient "#0000ff" "#ff0000" 0)})
+        (t/is (= #{:stroke-gradient} (into #{} (map :property) (:keyframes (stored-track store context board rect)))))
+        (t/is (mth/close? 0.5 (.-endX (.valueAt timeline rect "strokeGradient" 500 0))) "its points blend")
+        (t/is (= "#0000ff" (-> (.-keyframes timeline) (aget 1) .-value .-stops (aget 0) .-color))
+              "a keyframe gives it back as a Gradient")
+        (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "strokeGradient" :index 0 :time 500
+                                                                 :value "#ff0000"}))
+              "a colour is no gradient")))))
+
 (t/deftest the-type-style-of-a-text-takes-keyframes
   (thw/with-wasm-mocks*
     (fn []
