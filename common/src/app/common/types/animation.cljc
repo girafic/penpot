@@ -3446,6 +3446,26 @@
   [stroke property]
   (or (get stroke property) (:stroke-width stroke) 0))
 
+(defn stroke-sides-even?
+  "Whether the sides of `stroke` are all as wide."
+  [stroke]
+  (apply = (map #(stroke-side-width stroke %) stroke-side-properties)))
+
+(defn- auto-stroke-slot?
+  "Whether auto-keyframe records the slot `[property index]` of `shape`
+  as edited: of a stroke with sides, its width when they end alike, else
+  its sides, never both, as a width plays on every side without keyframes
+  of its own (see `sided`)."
+  [shape [property index]]
+  (let [stroke (get (as-vec (:strokes shape)) index)]
+    (if (and (sided-shape? shape)
+             (sided-stroke? stroke)
+             (or (= :stroke-width property) (some #{property} stroke-side-properties)))
+      (if (stroke-sides-even? stroke)
+        (= :stroke-width property)
+        (not= :stroke-width property))
+      true)))
+
 (defn- sided
   "`stroke` with the widths of its sides that play (`played`, `{side
   width}`) and, when its width plays (`width`, else nil), each other side
@@ -5410,13 +5430,13 @@
              (-> (put :stroke-color index (:stroke-color stroke))
                  (put :stroke-opacity index (or (:stroke-opacity stroke) 1)))
 
-             ;; a stroke with sides keeps its width as wide as its top side:
-             ;; an edit records its sides, not that width, which would take
-             ;; the other sides along as it plays (see `apply-strokes`)
              (gradient-stroke? stroke)
              (put :stroke-gradient index (:stroke-color-gradient stroke))
 
-             (and (or (solid-color-stroke? stroke) (gradient-stroke? stroke)) (not sides?))
+             ;; the width of a stroke with sides too, which the Design tab
+             ;; sets with all of them (auto-keyframe records one or the
+             ;; others, see `auto-stroke-slot?`)
+             (or (solid-color-stroke? stroke) (gradient-stroke? stroke))
              (put :stroke-width index (or (:stroke-width stroke) 0))
 
              sides?
@@ -5633,7 +5653,8 @@
              (if (same-paint-layers? old-shape new-shape)
                (reduce (fn [timeline [property index :as slot]]
                          (if (or (contains? animated slot)
-                                 (close-value? property (get old slot) (get new slot)))
+                                 (close-value? property (get old slot) (get new slot))
+                                 (not (auto-stroke-slot? new-shape slot)))
                            timeline
                            (record timeline shape-id property index (get old slot) (get new slot))))
                        timeline

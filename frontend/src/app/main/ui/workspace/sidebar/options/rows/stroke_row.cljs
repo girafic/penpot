@@ -8,6 +8,7 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
+   [app.common.types.animation :as cta]
    [app.common.types.color :as ctc]
    [app.common.types.token :as ctt]
    [app.main.data.workspace.colors :as dc]
@@ -166,6 +167,13 @@
           (stroke-width-input-value stroke per-side-disabled))
 
         show-multiple-placeholder? (or per-side? (= :multiple stroke-width-value))
+
+        ;; the keyframes the width field keys: of a stroke whose sides
+        ;; differ its sides, as a width would set them all as it plays
+        width-keyframes
+        (if (and per-side-available (map? stroke) (not (cta/stroke-sides-even? stroke)))
+          cta/stroke-side-properties
+          [:stroke-width])
 
         applied-token-width
         (mf/with-memo [applied-tokens per-side-disabled]
@@ -430,7 +438,7 @@
        [:div {:class (stl/css-case :stroke-options-tokens true
                                    :stroke-options-tokens-with-toggle per-side-available)}
         ;; the width, with its keyframe diamond in the field in motion mode
-        [:> keyed-field* {:properties [:stroke-width] :index index}
+        [:> keyed-field* {:properties width-keyframes :index index}
          [:> numeric-input-wrapper* {:on-change on-width-change
                                      :on-detach on-detach-token-width
                                      :icon i/stroke-size
@@ -489,7 +497,7 @@
                                               :on-focus on-focus
                                               :select-on-focus select-on-focus
                                               :on-blur on-blur}]
-         [:> keyframe-diamond* {:properties [:stroke-width]
+         [:> keyframe-diamond* {:properties width-keyframes
                                 :index index}]]
         [:div {:class (stl/css :stroke-alignment-select)
                :data-testid "stroke.alignment"}

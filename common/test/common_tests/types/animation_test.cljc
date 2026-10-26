@@ -7786,8 +7786,9 @@
                               [:tracks sid :keyframes])))))))
 
 (defn- sided-rect
-  "A rectangle with a stroke 2 px wide all round, its four sides set (as
-  the Design tab sets them once they are edited one by one)."
+  "A rectangle with a stroke 2 px wide all round, its four sides set, as
+  the Design tab sets them on any edit of its width
+  (`stroke-width-all-attrs`)."
   []
   (cts/setup-shape
    {:type :rect :x 0 :y 0 :width 100 :height 60
@@ -7843,6 +7844,31 @@
     (t/is (= #{:stroke-width-top} (into #{} (map :property) kfs))
           "not the width of the stroke, which would take the other sides along")
     (t/is (= [[0 2] [500 6]] (mapv (juxt :time :value) (sort-by :time kfs))))))
+
+(t/deftest an-edit-of-the-width-of-a-stroke-with-sides-records-the-width
+  (let [shape   (sided-rect)
+        sid     (:id shape)
+        objects {sid shape}
+        ;; as the width field of the Design tab sets it: all sides along
+        widen   (fn [objects width]
+                  (update-in objects [sid :strokes 0] assoc :stroke-width width
+                             :stroke-width-top width :stroke-width-right width
+                             :stroke-width-bottom width :stroke-width-left width))]
+    (t/testing "its width keyframes record an edit at the playhead"
+      (let [tl  (-> (mk-timeline)
+                    (cta/add-keyframe sid {:time 0 :property :stroke-width :index 0 :value 2})
+                    (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 0 :value 4}))
+            tl' (cta/record-edit tl objects (widen objects 10) 1000)
+            kf  (d/seek #(= 1000 (:time %)) (get-in tl' [:tracks sid :keyframes]))]
+        (t/is (= [:stroke-width 10] ((juxt :property :value) kf)))))
+    (t/testing "auto-keyframe records the width alone, the sides ending alike"
+      (let [kfs (get-in (cta/record-unanimated (mk-timeline) objects (widen objects 6) [sid] 500)
+                        [:tracks sid :keyframes])]
+        (t/is (= #{:stroke-width} (into #{} (map :property) kfs)))
+        (t/is (= [[0 2] [500 6]] (mapv (juxt :time :value) (sort-by :time kfs))))))
+    (t/testing "whether its sides are all as wide"
+      (t/is (cta/stroke-sides-even? (get-in shape [:strokes 0])))
+      (t/is (not (cta/stroke-sides-even? (assoc (get-in shape [:strokes 0]) :stroke-width-left 5)))))))
 
 (t/deftest the-spacing-of-an-auto-layout-plays
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 300 :height 200
