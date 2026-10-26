@@ -174,7 +174,9 @@
   its glyphs in the fills of its spans, see `cta/paint-fills`),
   `:box-shadow` (the CSS of its visible shadows), `:blur` and
   `:backdrop-blur` (px), and of a text `:font-size`, `:letter-spacing`
-  (px), `:line-height` and `:font-weight`. `origin` is where its positions count from (see
+  (px), `:line-height` and `:font-weight`; of an auto layout `:gap` (row,
+  column) and `:padding`, of a layer in one `:margin` (both top first) and
+  `:min-width`, `:max-width`, `:min-height`, `:max-height` (px). `origin` is where its positions count from (see
   `position-origin`). A tilted shape (see `app.common.geom.tilt`) has its
   `:rotate-x` and `:rotate-y` (degrees) with its transform, and, turning
   around `pivot` (fractions of its box) off its middle with a tilt at
@@ -297,6 +299,23 @@
 
       (and text? (contains? values :font-weight))
       (assoc :font-weight (mth/round (:font-weight values)))
+
+      ;; the spacing of an auto layout, and of a layer in one
+      (apply cta/has? values [:layout-row-gap :layout-column-gap])
+      (assoc :gap (mapv #(get values % (cta/layout-rest shape %)) [:layout-row-gap :layout-column-gap]))
+
+      (apply cta/has? values [:layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left])
+      (assoc :padding (mapv #(get values % (cta/layout-rest shape %))
+                            [:layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left]))
+
+      (apply cta/has? values [:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left])
+      (assoc :margin (mapv #(get values % (cta/layout-rest shape %))
+                           [:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left]))
+
+      (contains? values :layout-min-width)  (assoc :min-width (:layout-min-width values))
+      (contains? values :layout-max-width)  (assoc :max-width (:layout-max-width values))
+      (contains? values :layout-min-height) (assoc :min-height (:layout-min-height values))
+      (contains? values :layout-max-height) (assoc :max-height (:layout-max-height values))
 
       ;; the camera of a board: CSS sees the tilted layers in it with its
       ;; perspective (see `app.common.geom.tilt`); an orthographic one has
@@ -436,6 +455,20 @@
 
       (contains? frame :font-weight)
       (conj (str "font-weight: " (:font-weight frame) ";"))
+
+      (contains? frame :gap)
+      (conj (str "gap: " (str/join " " (map #(str (fmt %) "px") (:gap frame))) ";"))
+
+      (contains? frame :padding)
+      (conj (str "padding: " (str/join " " (map #(str (fmt %) "px") (:padding frame))) ";"))
+
+      (contains? frame :margin)
+      (conj (str "margin: " (str/join " " (map #(str (fmt %) "px") (:margin frame))) ";"))
+
+      (contains? frame :min-width)  (conj (str "min-width: " (fmt (:min-width frame)) "px;"))
+      (contains? frame :max-width)  (conj (str "max-width: " (fmt (:max-width frame)) "px;"))
+      (contains? frame :min-height) (conj (str "min-height: " (fmt (:min-height frame)) "px;"))
+      (contains? frame :max-height) (conj (str "max-height: " (fmt (:max-height frame)) "px;"))
 
       (contains? frame :perspective)
       (conj (str "perspective: " (fmt perspective) "px;")

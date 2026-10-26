@@ -25,6 +25,7 @@
    [app.main.ui.components.radio-buttons :refer [radio-button radio-buttons]]
    [app.main.ui.components.select :refer [select]]
    [app.main.ui.components.title-bar :refer [title-bar*]]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.formats :as fmt]
@@ -32,6 +33,7 @@
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.workspace.sidebar.options.common :as soc]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -636,6 +638,27 @@
           :on-blur on-padding-blur
           :min 0
           :value p4}]])]))
+
+(defn layout-keyframe-groups
+  "The groups of keyframes of the spacing of an auto layout (see
+  `layout-keyframes*`)."
+  []
+  [[(tr "workspace.animation.layout-keys.gap") [:layout-row-gap :layout-column-gap]]
+   [(tr "workspace.animation.layout-keys.padding")
+    [:layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left]]])
+
+(mf/defc layout-keyframes*
+  "In motion mode, the keyframe diamonds of the spacing of an auto layout
+  or of a layer in one at the playhead, by group: `groups`, `[label
+  properties]` each (see `cta/layout-paths`). Its spacing fields sit too
+  close for a diamond each; the timeline has a row each."
+  [{:keys [groups]}]
+  (when (some? (mf/use-ctx ctx/motion-shape-id))
+    [:div {:class (stl/css :layout-keyframes)}
+     (for [[label properties] groups]
+       [:div {:key label :class (stl/css :layout-keyframe)}
+        [:> keyframe-diamond* {:properties properties}]
+        [:span label]])]))
 
 (mf/defc padding-section*
   [{:keys [type on-type-change] :as props}]
@@ -1370,7 +1393,8 @@
                                  :on-type-change on-padding-type-change
                                  :ids ids
                                  :applied-tokens applied-tokens
-                                 :on-change on-padding-change}]]]
+                                 :on-change on-padding-change}]]
+          [:> layout-keyframes* {:groups (layout-keyframe-groups)}]]
 
          :grid
          [:div {:class (stl/css :grid-layout-menu)}
@@ -1414,7 +1438,8 @@
                                  :ids ids
                                  :applied-tokens applied-tokens
                                  :on-type-change on-padding-type-change
-                                 :on-change on-padding-change}]]]
+                                 :on-change on-padding-change}]]
+          [:> layout-keyframes* {:groups (layout-keyframe-groups)}]]
 
          nil))]))
 

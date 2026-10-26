@@ -493,6 +493,11 @@
      ;; the type style of a text, of its first span
      (:font-size :letter-spacing :line-height :font-weight)
      (when (cfh/text-shape? shape) (cta/text-style-rest shape property))
+     ;; the spacing of an auto layout, and of a layer in one
+     (:layout-row-gap :layout-column-gap :layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left)
+     (when (some? (:layout shape)) (cta/layout-rest shape property))
+     (:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left :layout-min-width :layout-max-width :layout-min-height :layout-max-height)
+     (cta/layout-rest shape property)
      ;; for a row made for the path as it is (see `ctao/outline-value`)
      :content         (when (= :path (:type shape)) (ctao/outline-of shape))
      (get cta/trim-properties property))))
@@ -522,7 +527,8 @@
 
 (def animatable-properties
   (into transform-properties (concat [:path-progress] camera-properties light-properties [:opacity :r1 :r2 :r3 :r4]
-                                     appearance-properties cta/text-style-properties [:content])))
+                                     appearance-properties cta/text-style-properties
+                                     cta/layout-container-properties cta/layout-item-properties [:content])))
 
 (defn- store-value
   [m property index v]
@@ -562,6 +568,17 @@
                    (into (map (fn [property]
                                 [property (get animated property (cta/text-style-rest shape property))]))
                          cta/text-style-properties)
+
+                   (some? (:layout shape))
+                   (into (map (fn [property]
+                                [property (get animated property (cta/layout-rest shape property))]))
+                         cta/layout-container-properties)
+
+                   ;; a layer in an auto layout
+                   (some? (:layout (get objects (:parent-id shape))))
+                   (into (map (fn [property]
+                                [property (get animated property (cta/layout-rest shape property))]))
+                         cta/layout-item-properties)
 
                    (= :path (:type shape))
                    (assoc :content (or (:content animated)

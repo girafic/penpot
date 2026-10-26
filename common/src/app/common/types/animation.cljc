@@ -78,6 +78,12 @@
     :blur :background-blur
     ;; the type style of a text (see `text-style-properties`)
     :font-size :letter-spacing :line-height :font-weight
+    ;; the spacing of an auto layout and of the layers in it (see
+    ;; `layout-paths`)
+    :layout-row-gap :layout-column-gap
+    :layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left
+    :layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left
+    :layout-min-width :layout-max-width :layout-min-height :layout-max-height
     ;; path trim: the part of the outline the strokes are drawn along
     :trim-start :trim-end :trim-offset
     ;; the outline of a path, in its own frame (see `ctao/outline-of`)
@@ -100,6 +106,60 @@
 
 (def color-properties
   #{:fill-color :stroke-color :shadow-color})
+
+(def layout-container-properties
+  "The spacing of a board with an auto layout (flex or grid), px: the
+  gaps between its rows and its columns and its padding, top first."
+  [:layout-row-gap :layout-column-gap
+   :layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left])
+
+(def layout-item-properties
+  "The spacing of a layer in an auto layout, px: its margins, top first,
+  and its least and most width and height."
+  [:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left
+   :layout-min-width :layout-max-width :layout-min-height :layout-max-height])
+
+(def layout-paths
+  "Where the layout properties are in a shape (see `apply-layout`)."
+  {:layout-row-gap        [:layout-gap :row-gap]
+   :layout-column-gap     [:layout-gap :column-gap]
+   :layout-padding-top    [:layout-padding :p1]
+   :layout-padding-right  [:layout-padding :p2]
+   :layout-padding-bottom [:layout-padding :p3]
+   :layout-padding-left   [:layout-padding :p4]
+   :layout-margin-top     [:layout-item-margin :m1]
+   :layout-margin-right   [:layout-item-margin :m2]
+   :layout-margin-bottom  [:layout-item-margin :m3]
+   :layout-margin-left    [:layout-item-margin :m4]
+   :layout-min-width      [:layout-item-min-w]
+   :layout-max-width      [:layout-item-max-w]
+   :layout-min-height     [:layout-item-min-h]
+   :layout-max-height     [:layout-item-max-h]})
+
+(defn layout-rest
+  "The value of the layout property `property` of `shape` without
+  keyframes: its own, else no gap, padding or margin, and its own width
+  or height for a least or most size it has none of."
+  [shape property]
+  (or (get-in shape (get layout-paths property))
+      (case property
+        (:layout-min-width :layout-max-width)   (dm/get-in shape [:selrect :width] 0)
+        (:layout-min-height :layout-max-height) (dm/get-in shape [:selrect :height] 0)
+        0)))
+
+(defn apply-layout
+  "The attributes of `shape` its layout properties in `values` change
+  (see `layout-paths`): `{attribute value}`, the maps of its gaps,
+  padding and margins whole."
+  [shape values]
+  (reduce-kv (fn [changed property [attr :as path]]
+               (if (contains? values property)
+                 (assoc changed attr (if (next path)
+                                       (assoc (get changed attr (get shape attr)) (second path) (get values property))
+                                       (get values property)))
+                 changed))
+             {}
+             layout-paths))
 
 (def text-style-properties
   "The type style of a text (see `apply-text-style`): the size of its
@@ -150,6 +210,8 @@
                  (repeat :shadow))
          (zipmap [:trim-start :trim-end :trim-offset] (repeat :trim))
          (zipmap text-style-properties (repeat :text-style))
+         (zipmap layout-container-properties (repeat :layout))
+         (zipmap layout-item-properties (repeat :layout-item))
          (zipmap [:r1 :r2 :r3 :r4] (repeat :radius))))
 
 (defn property-area
@@ -3758,7 +3820,12 @@
       (ctm/change-property :content (ctao/outline->content shape track (:content values)))
 
       (and (= :text (:type shape)) (some #(contains? values %) text-style-properties))
-      (ctm/change-property :content (apply-text-style shape values)))))
+      (ctm/change-property :content (apply-text-style shape values))
+
+      ;; render-wasm lays the board out again (`parse-geometry-modifiers`
+      ;; gives a shape changed this way a reflow)
+      (some #(contains? values %) (keys layout-paths))
+      (as-> m (reduce-kv ctm/change-property m (apply-layout shape values))))))
 
 (defn rest-value
   "The value of `property` that `shape` has without keyframes, positions
@@ -4937,6 +5004,9 @@
     (:font-size :letter-spacing :line-height :font-weight)
     (= :text (:type shape))
 
+    (:layout-row-gap :layout-column-gap :layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left)
+    (some? (:layout shape))
+
     :content
     (= :path (:type shape))
 
@@ -5224,9 +5294,10 @@
     :else (mth/close? old new)))
 
 (defn- appearance-slot-values
-  "The current fill, stroke, shadow and blur values of `shape`, and the
-  type style of a text (see `text-style-rest`), as `{[property index]
-  value}` (index is nil for blur and the type style)."
+  "The current fill, stroke, shadow and blur values of `shape`, the type
+  style of a text (see `text-style-rest`) and the spacing of an auto
+  layout and of a layer in one (see `layout-paths`), as `{[property
+  index] value}` (index is nil for blur, the type style and the layout)."
   [shape]
   (let [put (fn [m property index value]
               (cond-> m (some? value) (assoc [property index] value)))]
@@ -5288,7 +5359,20 @@
         (= :text (:type shape))
         (as-> m (reduce (fn [m property] (put m property nil (text-style-rest shape property)))
                         m
-                        text-style-properties))))))
+                        text-style-properties))
+
+        ;; the spacing of an auto layout and of the layers in it; a least
+        ;; or most size only once the layer has one
+        (some? (:layout shape))
+        (as-> m (reduce #(put %1 %2 nil (layout-rest shape %2)) m layout-container-properties))
+
+        :always
+        (as-> m (reduce #(put %1 %2 nil (or (get-in shape (get layout-paths %2))
+                                            (when (contains? #{:layout-margin-top :layout-margin-right
+                                                               :layout-margin-bottom :layout-margin-left} %2)
+                                              0)))
+                        m
+                        layout-item-properties))))))
 
 (defn- edit-value
   "The value of `property` of the shape `shape-id` of `objects`, with

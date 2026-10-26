@@ -7809,3 +7809,42 @@
     (t/is (= #{:stroke-width-top} (into #{} (map :property) kfs))
           "not the width of the stroke, which would take the other sides along")
     (t/is (= [[0 2] [500 6]] (mapv (juxt :time :value) (sort-by :time kfs))))))
+
+(t/deftest the-spacing-of-an-auto-layout-plays
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 300 :height 200
+                                :layout :flex :layout-flex-dir :column
+                                :layout-gap {:row-gap 4 :column-gap 4}
+                                :layout-padding {:p1 8 :p2 8 :p3 8 :p4 8}})
+        card  (cts/setup-shape {:type :rect :x 8 :y 8 :width 100 :height 40})
+        bid   (:id board)
+        cid   (:id card)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe bid {:time 0 :property :layout-row-gap :value 4 :easing :linear})
+                  (cta/add-keyframe bid {:time 1000 :property :layout-row-gap :value 24})
+                  (cta/add-keyframe bid {:time 0 :property :layout-padding-top :value 8 :easing :linear})
+                  (cta/add-keyframe bid {:time 1000 :property :layout-padding-top :value 28})
+                  (cta/add-keyframe cid {:time 0 :property :layout-margin-left :value 0 :easing :linear})
+                  (cta/add-keyframe cid {:time 1000 :property :layout-margin-left :value 30})
+                  (cta/add-keyframe cid {:time 0 :property :layout-min-width :value 100 :easing :linear})
+                  (cta/add-keyframe cid {:time 1000 :property :layout-min-width :value 200}))
+        objects {bid board cid card}
+        tree  (ctaf/timeline->modif-tree tl objects 500)
+        board' (ctm/apply-structure-modifiers board (get-in tree [bid :modifiers]))
+        card'  (ctm/apply-structure-modifiers card (get-in tree [cid :modifiers]))]
+    (t/testing "the gaps and the padding of the board, the rest as it is"
+      (t/is (= {:row-gap 14.0 :column-gap 4} (update (:layout-gap board') :row-gap double)))
+      (t/is (= [18.0 8 8 8] (update (mapv #(get (:layout-padding board') %) [:p1 :p2 :p3 :p4]) 0 double))))
+    (t/testing "the margins and the least width of a layer in it"
+      (t/is (mth/close? 15 (get-in card' [:layout-item-margin :m4])))
+      (t/is (mth/close? 150 (:layout-item-min-w card'))))
+    (t/testing "the layout of a board only, the spacing of a layer any"
+      (t/is (cta/fits-keyframe? board {:property :layout-row-gap}))
+      (t/is (not (cta/fits-keyframe? card {:property :layout-padding-left})))
+      (t/is (cta/fits-keyframe? card {:property :layout-margin-top})))
+    (t/testing "the values at rest"
+      (t/is (= [4 4 8 8 8 8] (mapv #(cta/layout-rest board %) cta/layout-container-properties)))
+      (t/is (= 100 (cta/layout-rest card :layout-min-width)) "its own width when it has no least one"))
+    (t/testing "an edit of the gap at the playhead records it"
+      (let [after (assoc-in objects [bid :layout-gap :row-gap] 12)
+            kfs   (get-in (cta/record-unanimated (mk-timeline) objects after [bid] 500) [:tracks bid :keyframes])]
+        (t/is (= #{:layout-row-gap} (into #{} (map :property) kfs)))))))

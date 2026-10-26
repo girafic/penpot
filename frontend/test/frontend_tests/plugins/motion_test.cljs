@@ -1712,3 +1712,18 @@
         (.addKeyframe timeline rect #js {:property "strokeWidthTop" :index 0 :time 1000 :value 9})
         (t/is (= #{:stroke-width-top} (into #{} (map :property) (:keyframes (stored-track store context board rect)))))
         (t/is (mth/close? 5 (.valueAt timeline rect "strokeWidthTop" 500 0)) "the top side plays")))))
+
+(t/deftest the-spacing-of-an-auto-layout-takes-keyframes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js _flex            (.addFlexLayout board)
+            ^js timeline         (.addTimeline board)]
+        (.addKeyframe timeline board #js {:property "rowGap" :time 0 :value 4 :easing "linear"})
+        (.addKeyframe timeline board #js {:property "rowGap" :time 1000 :value 24})
+        (.addKeyframe timeline rect #js {:property "topMargin" :time 0 :value 0 :easing "linear"})
+        (.addKeyframe timeline rect #js {:property "topMargin" :time 1000 :value 10})
+        (t/is (= #{:layout-row-gap} (into #{} (map :property) (:keyframes (stored-track store context board board)))))
+        (t/is (mth/close? 14 (.valueAt timeline board "rowGap" 500)) "the gap plays")
+        (t/is (mth/close? 5 (.valueAt timeline rect "topMargin" 500)) "the margin plays")))))

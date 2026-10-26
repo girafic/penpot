@@ -72,6 +72,21 @@
    :letter-spacing "letterSpacing"
    :line-height "lineHeight"
    :font-weight "fontWeight"
+   ;; as the layouts of the plugin API name them
+   :layout-row-gap "rowGap"
+   :layout-column-gap "columnGap"
+   :layout-padding-top "topPadding"
+   :layout-padding-right "rightPadding"
+   :layout-padding-bottom "bottomPadding"
+   :layout-padding-left "leftPadding"
+   :layout-margin-top "topMargin"
+   :layout-margin-right "rightMargin"
+   :layout-margin-bottom "bottomMargin"
+   :layout-margin-left "leftMargin"
+   :layout-min-width "minWidth"
+   :layout-max-width "maxWidth"
+   :layout-min-height "minHeight"
+   :layout-max-height "maxHeight"
    :trim-start "trimStart"
    :trim-end "trimEnd"
    :trim-offset "trimOffset"
@@ -106,6 +121,10 @@
    :shadow-spread :shadow-color :shadow-opacity
    :blur :background-blur
    :font-size :letter-spacing :line-height :font-weight
+   :layout-row-gap :layout-column-gap
+   :layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left
+   :layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left
+   :layout-min-width :layout-max-width :layout-min-height :layout-max-height
    :trim-start :trim-end :trim-offset
    :content])
 
@@ -413,7 +432,14 @@
    ["fontSize" #{:font-size} :font-size]
    ["letterSpacing" #{:letter-spacing} :letter-spacing]
    ["lineHeight" #{:line-height} :line-height]
-   ["fontWeight" #{:font-weight} :font-weight]])
+   ["fontWeight" #{:font-weight} :font-weight]
+   ["gap" #{:layout-row-gap :layout-column-gap} :gap]
+   ["padding" #{:layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left} :padding]
+   ["margin" #{:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left} :margin]
+   ["minWidth" #{:layout-min-width} :min-width]
+   ["maxWidth" #{:layout-max-width} :max-width]
+   ["minHeight" #{:layout-min-height} :min-height]
+   ["maxHeight" #{:layout-max-height} :max-height]])
 
 (def ^:private text-react-values
   "`react-values` of a text, which paints its glyphs in its fills and
@@ -456,6 +482,9 @@
     ;; motion.dev blends two of as many stops, number by number
     "backgroundImage" (str "\"" (if (some? v) (acss/css-gradient-image v) "none") "\"")
     "backdropFilter" (str "\"blur(" (react-number v) "px)\"")
+    ;; the gaps of a layout, row then column; its padding and the margins
+    ;; of a layer in one, top first
+    ("gap" "padding" "margin") (str "\"" (str/join " " (map #(str (react-number %) "px") v)) "\"")
     ;; the widths of the sides of a stroke, top first
     "borderWidth" (if (sequential? v)
                     (str "\"" (str/join " " (map #(str (react-number %) "px") v)) "\"")

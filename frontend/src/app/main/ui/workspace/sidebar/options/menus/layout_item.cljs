@@ -23,7 +23,7 @@
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.workspace.sidebar.options.common :as soc]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [get-layout-flex-icon]]
+   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [get-layout-flex-icon layout-keyframes*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -949,4 +949,12 @@
                   (= v-sizing :fill))
           [:> layout-size-constraints* {:ids ids
                                         :values values
-                                        :applied-tokens applied-tokens}])])]))
+                                        :applied-tokens applied-tokens}])
+
+        (when is-layout-child?
+          [:> layout-keyframes*
+           {:groups (cond-> [[(tr "workspace.animation.layout-keys.margin")
+                              [:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left]]]
+                      (or (= h-sizing :fill) (= v-sizing :fill))
+                      (conj [(tr "workspace.animation.layout-keys.size")
+                             [:layout-min-width :layout-max-width :layout-min-height :layout-max-height]]))}])])]))

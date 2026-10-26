@@ -659,6 +659,9 @@
   - `:stroke-sides`, the widths of the sides of a stroke as they play
     (see `cta/stroke-side-properties`): an SVG and Lottie draw a stroke as
     wide all round, the width of its top side;
+  - `:layout`, the spacing of an auto layout or of a layer in one (see
+    `cta/layout-paths`): the markup formats place the layers where they
+    rest;
   - `:text-style`, the type style of a text (see
     `cta/text-style-properties`), which no markup format plays: its
     texts are drawn, or outlined, as they rest;
@@ -782,6 +785,8 @@
                            (:tracks resolved)))]
            [:stroke-sides markup-formats
             (boolean (some animated cta/stroke-side-properties))]
+           [:layout markup-formats
+            (boolean (some animated (keys cta/layout-paths)))]
            [:text-style markup-formats
             (boolean (some animated cta/text-style-properties))]]]
       (reduce (fn [issues [kind formats on?]]

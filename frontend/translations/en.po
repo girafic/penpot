@@ -7257,6 +7257,60 @@ msgstr "Layer blur"
 msgid "workspace.animation.background-blur"
 msgstr "Background blur"
 
+msgid "workspace.animation.layout-keys.gap"
+msgstr "Gap"
+
+msgid "workspace.animation.layout-keys.padding"
+msgstr "Padding"
+
+msgid "workspace.animation.layout-keys.margin"
+msgstr "Margin"
+
+msgid "workspace.animation.layout-keys.size"
+msgstr "Min & max size"
+
+msgid "workspace.animation.layout-row-gap"
+msgstr "Row gap"
+
+msgid "workspace.animation.layout-column-gap"
+msgstr "Column gap"
+
+msgid "workspace.animation.layout-padding-top"
+msgstr "Top padding"
+
+msgid "workspace.animation.layout-padding-right"
+msgstr "Right padding"
+
+msgid "workspace.animation.layout-padding-bottom"
+msgstr "Bottom padding"
+
+msgid "workspace.animation.layout-padding-left"
+msgstr "Left padding"
+
+msgid "workspace.animation.layout-margin-top"
+msgstr "Top margin"
+
+msgid "workspace.animation.layout-margin-right"
+msgstr "Right margin"
+
+msgid "workspace.animation.layout-margin-bottom"
+msgstr "Bottom margin"
+
+msgid "workspace.animation.layout-margin-left"
+msgstr "Left margin"
+
+msgid "workspace.animation.layout-min-width"
+msgstr "Min width"
+
+msgid "workspace.animation.layout-max-width"
+msgstr "Max width"
+
+msgid "workspace.animation.layout-min-height"
+msgstr "Min height"
+
+msgid "workspace.animation.layout-max-height"
+msgstr "Max height"
+
 msgid "workspace.animation.font-size"
 msgstr "Font size"
 
@@ -8807,6 +8861,14 @@ msgstr "Stroke widths per side · Even in %s"
 #: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
 msgid "workspace.options.export.issue.stroke-sides.text"
 msgstr "An %s draws a stroke as wide all round, as wide as its top side: the widths of the other sides and their keyframes stay out. Video and GIF play them."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.layout"
+msgstr "Auto layout · Kept at rest in %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.layout.text"
+msgstr "An %s places the layers of an auto layout where they rest: the gaps, padding, margins and least and most sizes that play stay out. Video and GIF play them."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
 msgid "workspace.options.export.issue.text-style"

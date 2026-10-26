@@ -40,6 +40,7 @@
    :svg/dash        i/stroke-size
    :svg/gradient    i/fill-content
    :stroke-sides    i/stroke-size
+   :layout          i/flex
    :text-style      i/text})
 
 (defn issue-texts

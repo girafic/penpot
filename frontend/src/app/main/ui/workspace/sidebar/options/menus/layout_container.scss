@@ -455,3 +455,20 @@
   grid-column: 1 / -1;
   align-items: center;
 }
+
+// motion mode: the keyframe diamonds of the spacing, by group
+.layout-keyframes {
+  @include t.use-typography("body-small");
+
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-m);
+  color: var(--color-foreground-secondary);
+}
+
+.layout-keyframe {
+  display: flex;
+  align-items: center;
+}

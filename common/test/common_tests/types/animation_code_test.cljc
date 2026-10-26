@@ -612,3 +612,12 @@
         frame (acss/frame-values rect {:stroke-width-left {0 7}} {:x 0 :y 0})]
     (t/is (= [2 2 2 7] (:border-width frame)))
     (t/is (= "strokeWidthLeft" (get ctac/property-names :stroke-width-left)))))
+
+(t/deftest the-spacing-of-a-layout-plays-in-css
+  (let [board {:type :frame :layout :flex :selrect {:x 0 :y 0 :width 300 :height 200}
+               :layout-gap {:row-gap 4 :column-gap 6} :layout-padding {:p1 8 :p2 8 :p3 8 :p4 8}}
+        frame (acss/frame-values board {:layout-row-gap 20 :layout-padding-left 12} {:x 0 :y 0})]
+    (t/is (= [20 6] (:gap frame)))
+    (t/is (= [8 8 8 12] (:padding frame)))
+    (t/is (= "rowGap" (get ctac/property-names :layout-row-gap)))
+    (t/is (= "minWidth" (get ctac/property-names :layout-min-width)))))

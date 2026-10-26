@@ -30135,6 +30135,20 @@ AnimatableProperty:
         | "letterSpacing"
         | "lineHeight"
         | "fontWeight"
+        | "rowGap"
+        | "columnGap"
+        | "topPadding"
+        | "rightPadding"
+        | "bottomPadding"
+        | "leftPadding"
+        | "topMargin"
+        | "rightMargin"
+        | "bottomMargin"
+        | "leftMargin"
+        | "minWidth"
+        | "maxWidth"
+        | "minHeight"
+        | "maxHeight"
         | "trimStart"
         | "trimEnd"
         | "trimOffset"
@@ -30187,6 +30201,13 @@ AnimatableProperty:
       spans in the face of their font nearest it, so it changes in steps
       from one weight the font has to the next. Only text layers take
       them; the text is laid out again as they play.
+    * `rowGap`, `columnGap`, `topPadding`, `rightPadding`, `bottomPadding`,
+      `leftPadding`: the spacing of a board with an auto layout (flex or
+      grid, see `FlexLayout`), in pixels; its layers are laid out again as
+      they play. Only boards with a layout take them.
+    * `topMargin`, `rightMargin`, `bottomMargin`, `leftMargin`, `minWidth`,
+      `maxWidth`, `minHeight`, `maxHeight`: the spacing of a layer in an
+      auto layout (see `LayoutChildProperties`), in pixels.
     * `trimStart`, `trimEnd`, `trimOffset`: a fraction of the outline (0 to
       1. the strokes are drawn along, to draw a line on. On a group they
          trim the layers in it (see `Timeline.setTrimMode`).
