@@ -507,10 +507,11 @@
    (if (and (some? shape) (some? modifiers) (not (ctm/empty? modifiers)))
      (let [;; the outline the animation draws for a path, where it rests
            ;; (see `cta/shape->modifiers`), which the transform then moves,
-           ;; turns and scales with it
-           content   (outline-change modifiers)
+           ;; turns and scales with it; the content of other layers (the
+           ;; type style a text plays) is a property like any other
+           content   (when (cfh/path-shape? shape) (outline-change modifiers))
            shape     (cond-> shape
-                       (and (some? content) (cfh/path-shape? shape))
+                       (some? content)
                        (path/update-geometry content))
            modifiers (cond-> modifiers (some? content) (without-outline-change))
            transform (ctm/modifiers->transform modifiers)]

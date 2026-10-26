@@ -7704,6 +7704,10 @@
       (t/is (= ["1.6" "1.6" "1.6"] (mapv :line-height [big small para]))))
     (t/testing "its words stay"
       (t/is (= ["Big" "small"] (mapv :text [big small]))))
+    (t/testing "a transform takes it along, as the Design tab shows the text"
+      (let [tree  (ctaf/timeline->modif-tree tl {sid shape} 500)
+            shown (gsh/transform-shape shape (get-in tree [sid :modifiers]))]
+        (t/is (= "30" (:font-size (first (spans-of shown)))))))
     (t/testing "the values at rest are those of its first span"
       (t/is (= [20.0 0.0 1.2 400.0]
                (mapv #(double (cta/text-style-rest shape %)) cta/text-style-properties))))
