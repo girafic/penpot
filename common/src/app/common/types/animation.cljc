@@ -154,15 +154,25 @@
         (:layout-min-height :layout-max-height) (dm/get-in shape [:selrect :height] 0)
         0)))
 
+(def ^:private layout-maps
+  "The maps of gaps, padding and margins of a shape with no spacing, which
+  its own fill in (see `apply-layout`)."
+  {:layout-gap         {:row-gap 0 :column-gap 0}
+   :layout-padding     {:p1 0 :p2 0 :p3 0 :p4 0}
+   :layout-item-margin {:m1 0 :m2 0 :m3 0 :m4 0}})
+
 (defn apply-layout
   "The attributes of `shape` its layout properties in `values` change
   (see `layout-paths`): `{attribute value}`, the maps of its gaps,
-  padding and margins whole."
+  padding and margins whole, a side it has none of at 0 (as it draws)."
   [shape values]
   (reduce-kv (fn [changed property [attr :as path]]
                (if (contains? values property)
                  (assoc changed attr (if (next path)
-                                       (assoc (get changed attr (get shape attr)) (second path) (get values property))
+                                       (assoc (or (get changed attr)
+                                                  (merge (get layout-maps attr) (get shape attr)))
+                                              (second path)
+                                              (get values property))
                                        (get values property)))
                  changed))
              {}

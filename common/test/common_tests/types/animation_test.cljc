@@ -7840,6 +7840,8 @@
       (t/is (= [18.0 8 8 8] (update (mapv #(get (:layout-padding board') %) [:p1 :p2 :p3 :p4]) 0 double))))
     (t/testing "the margins and the least width of a layer in it"
       (t/is (mth/close? 15 (get-in card' [:layout-item-margin :m4])))
+      (t/is (= [0 0 0] (mapv #(get-in card' [:layout-item-margin %]) [:m1 :m2 :m3]))
+            "the sides it has none of at 0, as it draws")
       (t/is (mth/close? 150 (:layout-item-min-w card'))))
     (t/testing "the layout of a board only, the spacing of a layer any"
       (t/is (cta/fits-keyframe? board {:property :layout-row-gap}))
