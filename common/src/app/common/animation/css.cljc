@@ -497,6 +497,10 @@
       objects
       (gsh/apply-objects-modifiers objects (cgm/set-objects-modifiers tree objects)))))
 
+(def ^:private cue-properties
+  "The properties of the light and the depth cues of a board."
+  (into (set (keys cta/light-properties)) cta/depth-cue-properties))
+
 (defn scene-layers
   "`{id scene}` of the layers of `objects` the light or the depth cues of
   their board show (see `gtl/scene-effects`) as `timeline` (as designed)
@@ -506,10 +510,16 @@
   them (`{}` for none then), as for one whose board's light plays. Of the
   layers in the planes of their boards, none."
   [timeline objects]
-  (let [lit (into #{}
-                  (comp (filter #(and (= :frame (:type %)) (some? (gtl/scene %))))
-                        (map :id))
-                  (vals objects))]
+  (let [;; the boards with a light or depth cues at rest, or depth cues
+        ;; that play from none
+        cued (fn [board]
+               (and (cta/depth-cued? board)
+                    (some #(contains? (set cta/depth-cue-properties) (:property %))
+                          (dm/get-in timeline [:tracks (:id board) :keyframes]))))
+        lit  (into #{}
+                   (comp (filter #(and (= :frame (:type %)) (or (some? (gtl/scene %)) (cued %))))
+                         (map :id))
+                   (vals objects))]
     (if (empty? lit)
       {}
       (let [played (cta/resolve-animations timeline objects)
@@ -530,9 +540,9 @@
                    (let [id     (:id shape)
                          ids    (gtl/space-ids objects shape)
                          tracks (keep #(get-in played [:tracks %]) ids)
-                         ;; the light of its board turns as it plays
+                         ;; the light or the depth cues of its board play
                          board  (:frame-id shape)
-                         lights (some #(contains? cta/light-properties (:property %))
+                         lights (some #(contains? cue-properties (:property %))
                                       (dm/get-in played [:tracks board :keyframes]))]
                      (if (or lights
                              (some (fn [track]

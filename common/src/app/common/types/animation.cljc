@@ -61,6 +61,8 @@
     :perspective :perspective-x :perspective-y
     ;; the light of a board (see `light-properties`)
     :light-angle :light-height :light-ambient
+    ;; the depth cues of a board (see `depth-cue-properties`)
+    :depth-focus :depth-fade :depth-blur
     :r1 :r2 :r3 :r4
     :fill-color :fill-opacity
     ;; a gradient fill, whole: its stops, its points and its width (see
@@ -207,6 +209,34 @@
   it from all round. Only boards with a light have them."
   {:light-angle :angle :light-height :height :light-ambient :ambient})
 
+(def depth-cue-properties
+  "The depth cues of a board (see `gtl/scene`): the depth they count from,
+  px, the share of their opacity its layers lose each 1000 px behind it
+  (0 to 1) and the px of blur they get each 100 px off it (0 to 100).
+  Only boards with depth cues have them (see `depth-cued?`)."
+  [:depth-focus :depth-fade :depth-blur])
+
+(defn depth-cued?
+  "Whether the board `board` has depth cues, as the Design tab turns them
+  on: any of them set, a cue at 0 too."
+  [board]
+  (and (= :frame (:type board))
+       (some #(some? (get board %)) depth-cue-properties)))
+
+(defn depth-cue-rest
+  "The value of the depth cue `property` of `board` without keyframes."
+  [board property]
+  (or (get board property) 0))
+
+(defn- depth-cue-value
+  "`value` of the depth cue `property` within what a board keeps (see
+  `app.common.types.shape`)."
+  [property value]
+  (case property
+    :depth-fade (mth/clamp value 0 1)
+    :depth-blur (mth/clamp value 0 100)
+    value))
+
 (def property-areas
   "The area of the properties that go together (see `property-area`): the
   geometry of a layer, which its modifiers build in one order about one
@@ -216,6 +246,7 @@
                   :rotate-x :rotate-y :translate-z :path-progress :content]
                  (repeat :geometry))
          (zipmap (keys light-properties) (repeat :light))
+         (zipmap depth-cue-properties (repeat :depth-cues))
          (zipmap camera-properties (repeat :camera))
          (zipmap [:fill-color :fill-opacity :fill-gradient] (repeat :fill))
          (zipmap [:stroke-color :stroke-opacity :stroke-width :stroke-gradient
@@ -3814,6 +3845,16 @@
                 (ctm/change-property $ :light light)
                 $))
 
+      ;; its depth cues, each as it plays (render-wasm takes them as the
+      ;; scene of the board)
+      (and (= :frame (:type shape)) (some #(contains? values %) depth-cue-properties))
+      (as-> $ (reduce (fn [modifiers property]
+                        (cond-> modifiers
+                          (contains? values property)
+                          (ctm/change-property property (depth-cue-value property (get values property)))))
+                      $
+                      depth-cue-properties))
+
       (contains? values :r1)
       (ctm/change-property :r1 (:r1 values))
 
@@ -3882,6 +3923,8 @@
     (when (= :frame (:type shape)) (camera-rest shape property))
     (:light-angle :light-height :light-ambient)
     (when (= :frame (:type shape)) (light-rest shape property))
+    (:depth-focus :depth-fade :depth-blur)
+    (when (= :frame (:type shape)) (depth-cue-rest shape property))
     nil))
 
 (defn- effect-value
@@ -5039,6 +5082,9 @@
 
     (:light-angle :light-height :light-ambient)
     (and (= :frame (:type shape)) (some? (:light shape)))
+
+    (:depth-focus :depth-fade :depth-blur)
+    (boolean (depth-cued? shape))
 
     (:font-size :letter-spacing :line-height :font-weight)
     (= :text (:type shape))

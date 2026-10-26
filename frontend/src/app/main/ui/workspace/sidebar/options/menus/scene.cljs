@@ -93,17 +93,21 @@
                                                   (merge % default-cues (select-keys % cue-attrs))
                                                   (apply dissoc % cue-attrs)))))))
 
-        ;; while they are on, a cue at 0 stays, so that they stay on
+        ;; while they are on, a cue at 0 stays, so that they stay on; an
+        ;; animated one takes the value at the playhead, as the light does
         on-cue-change
         (mf/use-fn
-         (mf/deps ids)
+         (mf/deps ids motion-id)
          (fn [attr value]
            (when (number? value)
              (let [value (case attr
                            :depth-fade  (mth/clamp value 0 1)
                            :depth-blur  (mth/clamp value 0 100)
                            :depth-focus value)]
-               (st/emit! (dwsh/update-shapes ids #(assoc % attr value)))))))
+               (if (and (some? motion-id)
+                        (seq (cta/property-keyframes (deref ref:timeline) motion-id attr)))
+                 (st/emit! (dwa/set-value-at-playhead motion-id attr value))
+                 (st/emit! (dwsh/update-shapes ids #(assoc % attr value))))))))
 
         on-angle   (mf/use-fn (mf/deps on-light-change) #(on-light-change :angle %))
         on-height  (mf/use-fn (mf/deps on-light-change) #(on-light-change :height %))
@@ -162,17 +166,20 @@
          [:> labelled-number* {:label (tr "workspace.options.scene.focus")
                                :hint (tr "workspace.options.scene.focus.hint")
                                :unit "px" :min -10000 :max 10000
+                               :keyframes (when motion-id :depth-focus)
                                :value (or (:depth-focus values) 0)
                                :on-change on-focus}]]
         [:div {:class (stl/css :scene-row :depth-fade)}
          [:> labelled-number* {:label (tr "workspace.options.scene.fade")
                                :hint (tr "workspace.options.scene.fade.hint")
                                :unit "%" :scale 100 :min 0 :max 100
+                               :keyframes (when motion-id :depth-fade)
                                :value (or (:depth-fade values) 0)
                                :on-change on-fade}]]
         [:div {:class (stl/css :scene-row :depth-blur)}
          [:> labelled-number* {:label (tr "workspace.options.scene.blur")
                                :hint (tr "workspace.options.scene.blur.hint")
                                :unit "px" :min 0 :max 100
+                               :keyframes (when motion-id :depth-blur)
                                :value (or (:depth-blur values) 0)
                                :on-change on-blur}]]])]))

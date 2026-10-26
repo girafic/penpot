@@ -1710,6 +1710,20 @@
                                                                  :value "#ff0000"}))
               "a colour is no gradient")))))
 
+(t/deftest the-depth-cues-of-a-board-take-keyframes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js _rect] (board-with-rect context)
+            ^js timeline         (.addTimeline board)]
+        (t/is (thrown? js/Error (.addKeyframe timeline board #js {:property "depthFade" :time 0 :value 0.2}))
+              "a board without depth cues has none to animate")
+        (set! (.-depthFade board) 0.3)
+        (.addKeyframe timeline board #js {:property "depthFade" :time 0 :value 0.2 :easing "linear"})
+        (.addKeyframe timeline board #js {:property "depthFade" :time 1000 :value 0.6})
+        (t/is (= #{:depth-fade} (into #{} (map :property) (:keyframes (stored-track store context board board)))))
+        (t/is (mth/close? 0.4 (.valueAt timeline board "depthFade" 500)) "the fade plays")))))
+
 (t/deftest the-type-style-of-a-text-takes-keyframes
   (thw/with-wasm-mocks*
     (fn []

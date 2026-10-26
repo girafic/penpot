@@ -6259,6 +6259,11 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  *   degrees round the view (clockwise from its top) and above it;
  *   `lightAmbient`: the share of it from all round (0 to 1). Only boards
  *   with a light take them (see `Board.light`).
+ * - `depthFocus`, `depthFade`, `depthBlur`: the depth cues of a board
+ *   (see `Board.depthFocus`): the depth they count from (px), the share of
+ *   their opacity its layers lose each 1000 px behind it (0 to 1) and the
+ *   px of blur they get each 100 px off it (0 to 100). Only boards with
+ *   depth cues take them.
  * - `scaleX`, `scaleY`: a factor, 1 is the layer's own size.
  * - `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
  * - `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
@@ -6329,6 +6334,9 @@ export type AnimatableProperty =
   | 'lightAngle'
   | 'lightHeight'
   | 'lightAmbient'
+  | 'depthFocus'
+  | 'depthFade'
+  | 'depthBlur'
   | 'scaleX'
   | 'scaleY'
   | 'opacity'

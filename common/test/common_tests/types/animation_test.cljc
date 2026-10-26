@@ -569,6 +569,36 @@
              (cta/played-light (assoc board :light {:angle 90 :height 30 :ambient 0.2}) {:light-angle 180}))
           "once it has one, they play again")))
 
+(t/deftest the-depth-cues-of-a-board-play
+  (let [board (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+                  (assoc :depth-fade 0.3 :depth-blur 1 :depth-focus 0))
+        bid   (:id board)
+        card  (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 100})
+                  (assoc :parent-id bid :frame-id bid :rotate-y 60))
+        cid   (:id card)
+        objects {bid (assoc board :shapes [cid]) cid card}
+        tl    (-> (mk-timeline)
+                  (assoc :board-id bid)
+                  (cta/add-keyframe bid {:time 0 :property :depth-fade :value 0 :easing :linear})
+                  (cta/add-keyframe bid {:time 1000 :property :depth-fade :value 1})
+                  (cta/add-keyframe bid {:time 0 :property :depth-blur :value 0 :easing :linear})
+                  (cta/add-keyframe bid {:time 1000 :property :depth-blur :value 300}))
+        played (fn [t] (ctm/apply-structure-modifiers
+                        board (get-in (ctaf/timeline->modif-tree tl objects t) [bid :modifiers])))]
+    (t/testing "each cue plays, within what a board keeps"
+      (t/is (mth/close? 0.5 (:depth-fade (played 500))))
+      (t/is (mth/close? 100 (:depth-blur (played 500))) "150 kept at the most, 100")
+      (t/is (= 0 (:depth-focus (played 500))) "the one without keyframes as it rests"))
+    (t/is (= [0 0.3 1] (mapv #(cta/rest-value board % nil) cta/depth-cue-properties)))
+    (t/testing "only boards with depth cues have them"
+      (t/is (true? (cta/fits-keyframe? board {:property :depth-fade})))
+      (t/is (true? (cta/fits-keyframe? (-> board (dissoc :depth-fade :depth-blur)) {:property :depth-blur}))
+            "the focus alone turns them on")
+      (t/is (false? (cta/fits-keyframe? (apply dissoc board cta/depth-cue-properties) {:property :depth-focus})))
+      (t/is (false? (cta/fits-keyframe? card {:property :depth-fade}))))
+    (t/testing "CSS cues the card frame by frame"
+      (t/is (fn? (get (acss/scene-layers tl objects) cid)) "its board's cues play"))))
+
 (t/deftest a-turning-light-turns-the-shadows-it-casts
   (let [board  (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
                    (assoc :light {:angle 315 :height 45 :ambient 0.3 :shadows true}))

@@ -9680,6 +9680,18 @@ msgstr "Light height"
 msgid "workspace.animation.light-ambient"
 msgstr "Ambient light"
 
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.depth-focus"
+msgstr "Depth focus"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.depth-fade"
+msgstr "Depth fade"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.depth-blur"
+msgstr "Depth blur"
+
 #: src/app/main/ui/workspace/viewport/tilt_handles.cljs
 msgid "workspace.viewport.tilt-handle.x"
 msgstr "3D rotation X: drag up and down, with Shift in steps of 15°"

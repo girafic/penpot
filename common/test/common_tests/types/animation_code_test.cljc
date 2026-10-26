@@ -621,3 +621,7 @@
     (t/is (= [8 8 8 12] (:padding frame)))
     (t/is (= "rowGap" (get ctac/property-names :layout-row-gap)))
     (t/is (= "minWidth" (get ctac/property-names :layout-min-width)))))
+
+(t/deftest the-depth-cues-have-names-of-the-plugin-api
+  (t/is (= ["depthFocus" "depthFade" "depthBlur"]
+           (mapv #(get ctac/property-names %) cta/depth-cue-properties))))

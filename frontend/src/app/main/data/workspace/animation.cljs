@@ -460,6 +460,8 @@
      (when (cfh/frame-shape? shape) (cta/camera-rest shape property))
      (:light-angle :light-height :light-ambient)
      (when (cfh/frame-shape? shape) (cta/light-rest shape property))
+     (:depth-focus :depth-fade :depth-blur)
+     (when (cfh/frame-shape? shape) (cta/depth-cue-rest shape property))
      :opacity  (or (:opacity shape) 1)
      :width    (or (-> shape :selrect :width) 0)
      :height   (or (-> shape :selrect :height) 0)
@@ -527,7 +529,8 @@
    :trim-start :trim-end :trim-offset])
 
 (def animatable-properties
-  (into transform-properties (concat [:path-progress] camera-properties light-properties [:opacity :r1 :r2 :r3 :r4]
+  (into transform-properties (concat [:path-progress] camera-properties light-properties cta/depth-cue-properties
+                                     [:opacity :r1 :r2 :r3 :r4]
                                      appearance-properties cta/text-style-properties
                                      cta/layout-container-properties cta/layout-item-properties [:content])))
 
@@ -564,6 +567,11 @@
                    (into (map (fn [property]
                                 [property (get animated property (cta/light-rest shape property))]))
                          light-properties)
+
+                   (cta/depth-cued? shape)
+                   (into (map (fn [property]
+                                [property (get animated property (cta/depth-cue-rest shape property))]))
+                         cta/depth-cue-properties)
 
                    (cfh/text-shape? shape)
                    (into (map (fn [property]
@@ -622,7 +630,7 @@
   (case property
     (:scale-x :scale-y :opacity :fill-opacity :stroke-opacity :shadow-opacity
               :trim-start :trim-end :trim-offset :perspective-x :perspective-y :light-ambient
-              :path-progress)
+              :depth-fade :path-progress)
     (* value 100)
     value))
 
@@ -632,7 +640,7 @@
   (case property
     (:scale-x :scale-y :opacity :fill-opacity :stroke-opacity :shadow-opacity
               :trim-start :trim-end :trim-offset :perspective-x :perspective-y :light-ambient
-              :path-progress)
+              :depth-fade :path-progress)
     (/ display 100)
     display))
 

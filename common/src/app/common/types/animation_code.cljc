@@ -40,6 +40,9 @@
    :light-angle "lightAngle"
    :light-height "lightHeight"
    :light-ambient "lightAmbient"
+   :depth-focus "depthFocus"
+   :depth-fade "depthFade"
+   :depth-blur "depthBlur"
    :scale-x "scaleX"
    :scale-y "scaleY"
    :opacity "opacity"
@@ -113,6 +116,7 @@
    :path-progress
    :perspective :perspective-x :perspective-y
    :light-angle :light-height :light-ambient
+   :depth-focus :depth-fade :depth-blur
    :opacity :r1 :r2 :r3 :r4
    :fill-color :fill-opacity :fill-gradient
    :stroke-color :stroke-opacity :stroke-width :stroke-gradient

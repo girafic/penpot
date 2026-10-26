@@ -1567,6 +1567,10 @@
                      (not (and (= :frame (:type board)) (some? (:light board))))))
               (u/not-valid plugin-id :addKeyframe "Only a board with a light has one to animate (lightAngle, lightHeight, lightAmbient)")
 
+              (and (contains? (set cta/depth-cue-properties) (:property keyframe))
+                   (not (cta/depth-cued? (get (u/locate-objects file-id page-id) shape-id))))
+              (u/not-valid plugin-id :addKeyframe "Only a board with depth cues has them to animate (depthFocus, depthFade, depthBlur)")
+
               (and (= :content (:property keyframe))
                    (not= :path (:type (get (u/locate-objects file-id page-id) shape-id))))
               (u/not-valid plugin-id :addKeyframe "Only a path morphs: turn the layer into a path first")
