@@ -9,6 +9,7 @@
    [frontend-tests.code-gen-style-test]
    [frontend-tests.composable-tests.comp.sync-test]
    [frontend-tests.copy-as-svg-test]
+   [frontend-tests.data.animation-diamonds-test]
    [frontend-tests.data.animation-follow-test]
    [frontend-tests.data.animation-ik-test]
    [frontend-tests.data.animation-morph-test]
@@ -226,6 +227,7 @@
    'frontend-tests.data.repo-test
    'frontend-tests.data.store-test
    'frontend-tests.data.exports-assets-test
+   'frontend-tests.data.animation-diamonds-test
    'frontend-tests.data.animation-follow-test
    'frontend-tests.data.animation-ik-test
    'frontend-tests.data.animation-morph-test

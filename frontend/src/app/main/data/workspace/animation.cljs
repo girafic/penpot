@@ -1280,8 +1280,9 @@
   "Toggle the keyframes of `properties` of `shape-id` at the playhead:
   remove the ones placed there or, when there are none, add them with
   the value each property shows there, so the animation is unchanged.
-  Locked properties keep their keyframes, and an outline its row has no
-  room for (see `ctao/row-takes?`) stays out, with a warning."
+  Locked properties keep their keyframes, those the shape does not have
+  (see `cta/fits-keyframe?`) get none, and an outline its row has no room
+  for (see `ctao/row-takes?`) stays out, with a warning."
   ([shape-id properties]
    (toggle-keyframes shape-id properties nil))
   ([shape-id properties index]
@@ -1299,11 +1300,16 @@
                  shape    (get objects shape-id)
                  values   (row-values tl objects shape properties index time)
                  placed   (keep #(keyframe-at tl shape-id % time index) properties)
+                 ;; the properties the shape has, with a value: the menus of
+                 ;; a group show those of its layers
+                 fitting  (filterv #(and (cta/fits-keyframe? shape {:property % :index index})
+                                         (some? (cta/value-of values % index)))
+                                   properties)
                  ;; an outline its row has no room for stays out
                  takes?   #(or (not= :content %)
                                (outline-takes? tl shape-id time (cta/value-of values :content index)))
-                 adding   (when (empty? placed) (filterv takes? properties))
-                 refused? (and (empty? placed) (< (count adding) (count properties)))
+                 adding   (when (empty? placed) (filterv takes? fitting))
+                 refused? (and (empty? placed) (< (count adding) (count fitting)))
                  tl'      (if (seq placed)
                             (reduce #(cta/remove-keyframe %1 shape-id (:id %2)) tl placed)
                             (-> (reduce (fn [tl property]

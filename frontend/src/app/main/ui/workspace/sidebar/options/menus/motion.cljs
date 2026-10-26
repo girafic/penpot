@@ -75,11 +75,23 @@
 (def ^:private ref:timeline
   (l/derived dwa/current-timeline st/state))
 
+(defn- use-fits
+  "Whether some of `properties` (optional `index`) fits the layer
+  `shape-id` (see `cta/fits-keyframe?`): the menus of a group show those
+  of its layers, whose keyframes are theirs, not the group's."
+  [shape-id properties index]
+  (let [shape-ref (mf/with-memo [shape-id] (refs/object-by-id shape-id))
+        shape     (mf/deref shape-ref)]
+    (boolean (and (some? shape)
+                  (some #(cta/fits-keyframe? shape {:property % :index index}) properties)))))
+
 (mf/defc keyframe-diamond*
   "Toggle keyframes of `properties` (optional `index`) at the playhead,
-  unless they are locked. Renders nothing outside motion mode."
+  unless they are locked. Renders nothing outside motion mode, nor when
+  none of them fits the layer (see `use-fits`)."
   [{:keys [properties index]}]
   (let [shape-id (mf/use-ctx ctx/motion-shape-id)
+        fits?    (use-fits shape-id properties index)
         playhead (mf/deref ref:playhead)
         timeline (mf/deref ref:timeline)
         active?  (boolean (and timeline
@@ -90,7 +102,7 @@
         (mf/use-fn
          (mf/deps shape-id properties index)
          #(st/emit! (dwa/toggle-keyframes shape-id properties index)))]
-    (when shape-id
+    (when (and shape-id fits?)
       [:button {:type "button"
                 :class (stl/css-case :keyframe-toggle true
                                      :active active?)
@@ -109,9 +121,9 @@
   "`children`, a field, with the keyframe diamond of `properties`
   (optional `index`) beside it in motion mode (see `keyframe-diamond*`),
   the two placed by `class` as the field is in its grid; the field alone
-  outside it."
+  outside it, or when the diamond does not fit the layer."
   [{:keys [properties index class children]}]
-  (if (some? (mf/use-ctx ctx/motion-shape-id))
+  (if (use-fits (mf/use-ctx ctx/motion-shape-id) properties index)
     [:div {:class (dm/str (stl/css :keyed-field) (when (some? class) (dm/str " " class)))}
      children
      [:> keyframe-diamond* {:properties properties :index index}]]

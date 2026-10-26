@@ -7870,6 +7870,22 @@
       (t/is (cta/stroke-sides-even? (get-in shape [:strokes 0])))
       (t/is (not (cta/stroke-sides-even? (assoc (get-in shape [:strokes 0]) :stroke-width-left 5)))))))
 
+(t/deftest the-keyframes-a-layer-has
+  (let [text  (cts/setup-shape {:type :text :x 0 :y 0 :width 100 :height 40
+                                :content {:type "root"
+                                          :children [{:type "paragraph-set"
+                                                      :children [{:type "paragraph"
+                                                                  :children [{:text "Hi" :fills [{:fill-color "#ff0000" :fill-opacity 1}]}]}]}]}})
+        group (cts/setup-shape {:type :group :x 0 :y 0 :width 100 :height 40})]
+    (t/testing "a text has the fills of its glyphs"
+      (t/is (cta/fits-keyframe? text {:property :fill-color :index 0}))
+      (t/is (not (cta/fits-keyframe? text {:property :fill-gradient :index 0}))))
+    (t/testing "a group has none of the paint of its layers, its place and opacity"
+      (t/is (not (cta/fits-keyframe? group {:property :fill-color :index 0})))
+      (t/is (not (cta/fits-keyframe? group {:property :stroke-dash :index 0})))
+      (t/is (not (cta/fits-keyframe? group {:property :font-size})))
+      (t/is (cta/fits-keyframe? group {:property :opacity})))))
+
 (t/deftest the-spacing-of-an-auto-layout-plays
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 300 :height 200
                                 :layout :flex :layout-flex-dir :column

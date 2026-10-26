@@ -5054,17 +5054,18 @@
      :translate-z (or (:translate-z shape) 0)}))
 
 (defn fits-keyframe?
-  "Whether `shape` can show `keyframe`: it has the fill, stroke or shadow
-  slot the keyframe animates (in a flat colour for the colour and opacity
-  of fills and strokes), and the radius, blur or strokes (for a trim) it
-  animates. Position, size, rotation, scale and opacity fit any shape."
+  "Whether `shape` can show `keyframe`: it has the fill (of a text, that
+  of its glyphs, see `paint-fills`), stroke or shadow slot the keyframe
+  animates (in a flat colour for the colour and opacity of fills and
+  strokes), and the radius, blur or strokes (for a trim) it animates.
+  Position, size, rotation, scale and opacity fit any shape."
   [shape {:keys [property index]}]
   (case property
     (:fill-color :fill-opacity)
-    (boolean (solid-color-fill? (get (as-vec (:fills shape)) index)))
+    (boolean (solid-color-fill? (get (as-vec (paint-fills shape)) index)))
 
     :fill-gradient
-    (gradient-fill? (get (as-vec (:fills shape)) index))
+    (gradient-fill? (get (as-vec (paint-fills shape)) index))
 
     :stroke-gradient
     (gradient-stroke? (get (as-vec (:strokes shape)) index))
