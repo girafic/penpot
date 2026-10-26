@@ -19,6 +19,7 @@
    [app.main.data.changes :as dch]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.shapes :as dwsh]
+   [app.main.ui.workspace.sidebar.options.menus.tilt-tool :as tilt-tool]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.async :as async]
@@ -141,3 +142,13 @@
         state (workspace-state (lit-file light [(:offset-x cast) (:offset-y cast)]))]
     (t/is (= [] (await (emitted (dwa/cast-shadows-of #{(thi/id :cast)} (uuid/next)) state))))))
 
+(t/deftest flat-again-turns-a-layer-back-flat
+  (let [calls (atom [])
+        call  (fn [kind] (fn [& args] (swap! calls conj (into [kind] args))))
+        pose  #(do (reset! calls [])
+                   (tilt-tool/apply-pose % (call :start) (call :rotation) (call :tilt) (call :end))
+                   @calls)]
+    (t/is (= [[:start] [:rotation 0] [:tilt [0 0]] [:end]] (pose tilt-tool/flat))
+          "no turn in the plane nor tilt, in one undo step")
+    (t/is (= [[:start] [:rotation 60] [:tilt [35.2644 -45]] [:end]] (pose tilt-tool/isometric))
+          "as Isometric sets both")))

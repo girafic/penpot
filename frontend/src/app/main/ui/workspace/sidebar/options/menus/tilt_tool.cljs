@@ -52,6 +52,21 @@
   a corner of a cube. With an orthographic board, for isometric drawings."
   [60 35.2644 -45])
 
+(def flat
+  "The turn `[rotation rotate-x rotate-y]` Flat again sets: none, back
+  from `isometric` or any tilt. The depth stays, a layer moved in depth
+  being flat too."
+  [0 0 0])
+
+(defn apply-pose
+  "Turn the selected layers to `pose` (`[rotation rotate-x rotate-y]`,
+  see `isometric`) in one undo step, through the callbacks of the tool."
+  [[rotation rotate-x rotate-y] on-drag-start on-rotation-change on-tilt on-drag-end]
+  (on-drag-start)
+  (on-rotation-change rotation)
+  (on-tilt [rotate-x rotate-y])
+  (on-drag-end))
+
 (defn- number-or-zero
   [v]
   (if (number? v) v 0))
@@ -123,25 +138,15 @@
                            {:left (- (.-innerWidth js/window) 318)})]
              (swap! place* #(if (nil? %) (popover-place rect (:left sidebar)) nil)))))
 
-        ;; no tilt and no turn in the plane, as Isometric sets them
         on-reset
         (mf/use-fn
          (mf/deps on-tilt on-rotation-change on-drag-start on-drag-end)
-         (fn [_]
-           (on-drag-start)
-           (on-rotation-change 0)
-           (on-tilt [0 0])
-           (on-drag-end)))
+         #(apply-pose flat on-drag-start on-rotation-change on-tilt on-drag-end))
 
         on-isometric
         (mf/use-fn
          (mf/deps on-tilt on-rotation-change on-drag-start on-drag-end)
-         (fn [_]
-           (let [[r ix iy] isometric]
-             (on-drag-start)
-             (on-rotation-change r)
-             (on-tilt [ix iy])
-             (on-drag-end))))
+         #(apply-pose isometric on-drag-start on-rotation-change on-tilt on-drag-end))
 
         on-pointer-down
         (mf/use-fn

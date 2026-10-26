@@ -1311,6 +1311,24 @@
     (t/is (contains? weights "700") "the weight the style ends in")
     (t/is (< 1 (count weights)) "and those on the way")))
 
+(t/deftest an-export-waits-for-the-faces-of-the-weights-texts-play
+  (t/async
+    done
+    (let [{:keys [objects bid tid]} (text-board)
+          played [(assoc-in (get objects tid) [:content :weight-played] true)]
+          loads  (atom [])
+          seen   (atom [])]
+      (-> (dea/texts-laid-out objects [bid]
+                              :played played
+                              :load #(swap! loads conj %)
+                              :pending (fn [texts] (swap! seen conj texts) #{}))
+          (.then (fn [_]
+                   (t/is (= [played] @loads) "loads their faces once")
+                   (t/is (some #(some :weight-played %) (map #(map :content %) @seen))
+                         "and waits for them with the texts of the board")))
+          (.catch (fn [cause] (t/is false (str "failed: " cause))))
+          (.finally (finish done))))))
+
 (t/deftest an-export-in-place-exports-the-file-as-the-wait-leaves-it
   ;; What is edited while it waits for the faces of its texts goes along,
   ;; as WASM draws it so.
@@ -2005,6 +2023,44 @@
            (issues-of :lottie :f #(assoc % :rotation 30)
                       :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
         "and a turned one stretches there too"))
+
+(t/deftest the-issues-of-dashes-gradients-sides-layouts-and-type-styles
+  (let [{:keys [objects bid cid]} (test-objects)
+        issues  dea/export-issues
+        has?    (fn [issues format kind] (boolean (some #{kind} (get issues format))))
+        keyed   (fn [property index from to & [id]]
+                  (-> (cta/make-timeline {:board-id bid :duration 1000})
+                      (cta/add-keyframe (or id cid) (cond-> {:time 0 :property property :value from} index (assoc :index index)))
+                      (cta/add-keyframe (or id cid) (cond-> {:time 1000 :property property :value to} index (assoc :index index)))))
+        dashed  (assoc-in objects [cid :strokes] [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
+                                                   :stroke-style :dashed :stroke-alignment :center}])
+        linear  {:type :linear :start-x 0 :start-y 0 :end-x 1 :end-y 0 :width 1
+                 :stops [{:color "#ff0000" :opacity 1 :offset 0} {:color "#0000ff" :opacity 1 :offset 1}]}
+        filled  (assoc-in objects [cid :fills] [{:fill-color-gradient linear}])]
+    (t/testing "an SVG keeps the dashes of a stroke that trims too"
+      (let [dashes (keyed :stroke-dash 0 4 12)]
+        (t/is (not (has? (issues dashed dashes) :svg :svg/dash)) "dashes alone play")
+        (t/is (has? (issues dashed (-> dashes
+                                       (cta/add-keyframe cid {:time 0 :property :trim-end :value 0})
+                                       (cta/add-keyframe cid {:time 1000 :property :trim-end :value 1})))
+                    :svg :svg/dash))))
+    (t/testing "gradients an SVG keeps as they rest, an issue of their own"
+      (let [radial (keyed :fill-gradient 0 linear (assoc linear :type :radial))
+            moved  (keyed :fill-gradient 0 linear (assoc linear :end-y 1))]
+        (t/is (has? (issues filled radial) :svg :svg/gradient) "a change of type")
+        (t/is (not (has? (issues filled radial) :svg :svg/appearance)) "not the appearance issue")
+        (t/is (has? (issues (assoc-in filled [cid :type] :text) moved) :svg :svg/gradient) "of a text")
+        (t/is (not (has? (issues filled moved) :svg :svg/gradient)) "a linear one of a rectangle plays")))
+    (t/testing "the sides of a stroke, the spacing of a layout and the type style in markup"
+      (let [sided  (issues dashed (keyed :stroke-width-top 0 2 8))
+            laid   (issues (assoc-in objects [bid :layout] :flex) (keyed :layout-row-gap nil 0 20 bid))
+            styled (issues (assoc-in objects [cid :type] :text) (keyed :font-size nil 12 36))]
+        (t/is (every? #(has? sided % :stroke-sides) [:svg :lottie :dotlottie]))
+        (t/is (not (has? sided :mp4 :stroke-sides)) "a video plays them")
+        (t/is (every? #(has? laid % :layout) [:svg :lottie :dotlottie]))
+        (t/is (not (has? laid :gif :layout)))
+        (t/is (every? #(has? styled % :text-style) [:svg :lottie :dotlottie]))
+        (t/is (not (has? styled :webm :text-style)))))))
 
 (t/deftest the-issues-of-copies-masks-and-transparency
   (let [{:keys [objects bid cid]} (test-objects)
