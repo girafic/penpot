@@ -1686,6 +1686,22 @@
                                                                  :value "#ff0000"}))
               "a colour is no gradient")))))
 
+(t/deftest the-gradient-of-a-fill-is-a-keyframe-value
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js timeline         (.addTimeline board)]
+        (set! (.-fills rect) #js [#js {:fillColorGradient #js {:type "linear" :startX 0 :startY 0 :endX 1 :endY 0 :width 1
+                                                               :stops #js [#js {:color "#ff0000" :opacity 1 :offset 0}
+                                                                           #js {:color "#0000ff" :opacity 1 :offset 1}]}}])
+        ;; the proxy the fill gives, not a plain object
+        (.addKeyframe timeline rect #js {:property "fillGradient" :index 0 :time 0
+                                         :value (.-fillColorGradient (aget (.-fills rect) 0))})
+        (let [kf (first (:keyframes (stored-track store context board rect)))]
+          (t/is (= :fill-gradient (:property kf)))
+          (t/is (= "#ff0000" (get-in kf [:value :stops 0 :color]))))))))
+
 (t/deftest a-gradient-stroke-blends-its-gradients
   (thw/with-wasm-mocks*
     (fn []

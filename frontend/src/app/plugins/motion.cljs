@@ -220,7 +220,10 @@
   others as they are."
   [property value]
   (if (cta/gradient-property? property)
-    (when (object? value) (parser/parse-gradient value))
+    ;; a plain object or the proxy of a fill or stroke
+    ;; (`fills[0].fillColorGradient`); `keyframe-value-fits?` checks it
+    (when (and (some? value) (not (string? value)) (not (number? value)))
+      (parser/parse-gradient value))
     value))
 
 (defn- format-value
