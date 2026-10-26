@@ -89,7 +89,7 @@
 
 .stroke-dash-options {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   column-gap: var(--sp-xs);
   align-items: center;
 }
@@ -125,17 +125,6 @@
 }
 
 // a side's width with its keyframe diamond in motion mode
-.stroke-side-cell {
-  display: flex;
-  align-items: center;
-  min-inline-size: 0;
-
-  > :first-child {
-    flex: 1;
-    min-inline-size: 0;
-  }
-}
-
 .stroke-side-input {
   @extend %input-element;
   @include t.use-typography("body-small");

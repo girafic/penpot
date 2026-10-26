@@ -105,6 +105,18 @@
                 :on-click on-toggle}
        [:span {:class (stl/css :diamond)}]])))
 
+(mf/defc keyed-field*
+  "`children`, a field, with the keyframe diamond of `properties`
+  (optional `index`) beside it in motion mode (see `keyframe-diamond*`),
+  the two placed by `class` as the field is in its grid; the field alone
+  outside it."
+  [{:keys [properties index class children]}]
+  (if (some? (mf/use-ctx ctx/motion-shape-id))
+    [:div {:class (dm/str (stl/css :keyed-field) (when (some? class) (dm/str " " class)))}
+     children
+     [:> keyframe-diamond* {:properties properties :index index}]]
+    children))
+
 ;; OUTLINE
 
 (def ^:private convertible-types
@@ -210,23 +222,25 @@
       [:div {:class (stl/css :trim-row)}
        [:span {:class (stl/css :trim-label)} (tr "workspace.animation.path-trim")]
        [:div {:class (stl/css :trim-fields)}
-        [:> numeric-input* {:text-icon "%"
-                            :property (tr "workspace.animation.trim-start")
-                            :min 0
-                            :max 100
-                            :value (display :trim-start)
-                            :on-change on-start}]
-        [:> numeric-input* {:text-icon "%"
-                            :property (tr "workspace.animation.trim-end")
-                            :min 0
-                            :max 100
-                            :value (display :trim-end)
-                            :on-change on-end}]
-        [:> numeric-input* {:text-icon "%"
-                            :property (tr "workspace.animation.trim-offset")
-                            :value (display :trim-offset)
-                            :on-change on-offset}]
-        [:> keyframe-diamond* {:properties [:trim-start :trim-end :trim-offset]}]]
+        [:> keyed-field* {:properties [:trim-start]}
+         [:> numeric-input* {:text-icon "%"
+                             :property (tr "workspace.animation.trim-start")
+                             :min 0
+                             :max 100
+                             :value (display :trim-start)
+                             :on-change on-start}]]
+        [:> keyed-field* {:properties [:trim-end]}
+         [:> numeric-input* {:text-icon "%"
+                             :property (tr "workspace.animation.trim-end")
+                             :min 0
+                             :max 100
+                             :value (display :trim-end)
+                             :on-change on-end}]]
+        [:> keyed-field* {:properties [:trim-offset]}
+         [:> numeric-input* {:text-icon "%"
+                             :property (tr "workspace.animation.trim-offset")
+                             :value (display :trim-offset)
+                             :on-change on-offset}]]]
        (when group
          [:> select* {:class (stl/css :trim-mode)
                       :options [{:id "together" :label (tr "workspace.animation.trim-together")}

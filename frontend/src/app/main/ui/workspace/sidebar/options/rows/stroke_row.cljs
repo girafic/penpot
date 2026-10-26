@@ -8,7 +8,6 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
-   [app.common.types.animation :as cta]
    [app.common.types.color :as ctc]
    [app.common.types.token :as ctt]
    [app.main.data.workspace.colors :as dc]
@@ -25,7 +24,7 @@
    [app.main.ui.hooks :as h]
    [app.main.ui.workspace.sidebar.options.common :as soc]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyed-field* keyframe-diamond*]]
    [app.main.ui.workspace.sidebar.options.rows.color-row :refer [color-row*]]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -415,14 +414,6 @@
                       :select-on-focus select-on-focus
                       :on-blur on-blur}]
 
-      (when (cta/solid-color-stroke? stroke)
-        [:> keyframe-diamond* {:properties [:stroke-color :stroke-opacity]
-                               :index index}])
-
-      (when (cta/gradient-stroke? stroke)
-        [:> keyframe-diamond* {:properties [:stroke-gradient]
-                               :index index}])
-
       (when (some? on-toggle-visibility)
         [:> icon-button* {:variant "ghost"
                           :aria-label (tr "workspace.options.stroke.toggle-stroke")
@@ -438,8 +429,8 @@
      (if token-numeric-inputs
        [:div {:class (stl/css-case :stroke-options-tokens true
                                    :stroke-options-tokens-with-toggle per-side-available)}
-        ;; the width with its keyframe diamond in motion mode
-        [:div {:class (stl/css :stroke-side-cell)}
+        ;; the width, with its keyframe diamond in the field in motion mode
+        [:> keyed-field* {:properties [:stroke-width] :index index}
          [:> numeric-input-wrapper* {:on-change on-width-change
                                      :on-detach on-detach-token-width
                                      :icon i/stroke-size
@@ -455,9 +446,7 @@
                                      :placeholder (if show-multiple-placeholder?
                                                     (tr "settings.multiple")
                                                     "--")
-                                     :value stroke-width-value}]
-         [:> keyframe-diamond* {:properties [:stroke-width]
-                                :index index}]]
+                                     :value stroke-width-value}]]
         [:> select* {:default-selected (d/name stroke-alignment)
                      :options stroke-alignment-options
                      :variant "icon-only"
@@ -529,7 +518,7 @@
      (when per-side?
        [:div {:class (stl/css :stroke-sides-options)
               :data-testid "stroke.per-side-options"}
-        [:div {:class (stl/css :stroke-side-cell)}
+        [:> keyed-field* {:properties [:stroke-width-top] :index index}
          [:> numeric-input-wrapper* {:on-change on-width-top-change
                                      :on-detach on-detach-token-width-top
                                      :icon i/stroke-top
@@ -542,10 +531,8 @@
                                      :applied-token (get applied-tokens :stroke-width-top)
                                      :token-disabled token-disabled?
                                      :token-tooltip token-tooltip
-                                     :value (d/nilv (:stroke-width-top stroke) stroke-width)}]
-         [:> keyframe-diamond* {:properties [:stroke-width-top]
-                                :index index}]]
-        [:div {:class (stl/css :stroke-side-cell)}
+                                     :value (d/nilv (:stroke-width-top stroke) stroke-width)}]]
+        [:> keyed-field* {:properties [:stroke-width-right] :index index}
          [:> numeric-input-wrapper* {:on-change on-width-right-change
                                      :on-detach on-detach-token-width-right
                                      :icon i/stroke-right
@@ -558,10 +545,8 @@
                                      :applied-token (get applied-tokens :stroke-width-right)
                                      :token-disabled token-disabled?
                                      :token-tooltip token-tooltip
-                                     :value (d/nilv (:stroke-width-right stroke) stroke-width)}]
-         [:> keyframe-diamond* {:properties [:stroke-width-right]
-                                :index index}]]
-        [:div {:class (stl/css :stroke-side-cell)}
+                                     :value (d/nilv (:stroke-width-right stroke) stroke-width)}]]
+        [:> keyed-field* {:properties [:stroke-width-bottom] :index index}
          [:> numeric-input-wrapper* {:on-change on-width-bottom-change
                                      :on-detach on-detach-token-width-bottom
                                      :icon i/stroke-bottom
@@ -574,10 +559,8 @@
                                      :applied-token (get applied-tokens :stroke-width-bottom)
                                      :token-disabled token-disabled?
                                      :token-tooltip token-tooltip
-                                     :value (d/nilv (:stroke-width-bottom stroke) stroke-width)}]
-         [:> keyframe-diamond* {:properties [:stroke-width-bottom]
-                                :index index}]]
-        [:div {:class (stl/css :stroke-side-cell)}
+                                     :value (d/nilv (:stroke-width-bottom stroke) stroke-width)}]]
+        [:> keyed-field* {:properties [:stroke-width-left] :index index}
          [:> numeric-input-wrapper* {:on-change on-width-left-change
                                      :on-detach on-detach-token-width-left
                                      :icon i/stroke-left
@@ -590,43 +573,42 @@
                                      :applied-token (get applied-tokens :stroke-width-left)
                                      :token-disabled token-disabled?
                                      :token-tooltip token-tooltip
-                                     :value (d/nilv (:stroke-width-left stroke) stroke-width)}]
-         [:> keyframe-diamond* {:properties [:stroke-width-left]
-                                :index index}]]])
+                                     :value (d/nilv (:stroke-width-left stroke) stroke-width)}]]])
 
      ;; Stroke Dash / Gap (only visible for dashed style)
      (when (= stroke-style :dashed)
        [:div {:class (stl/css :stroke-dash-options)
               :data-testid "stroke.dash-options"}
-        [:> numeric-input-wrapper* {:on-change on-dash-change
-                                    :text-icon "DASH"
-                                    :min 0
-                                    :on-focus on-focus
-                                    :on-blur on-blur
-                                    :attr :stroke-dash
-                                    :class (stl/css :numeric-input-wrapper)
-                                    :property (tr "workspace.options.stroke-dash")
-                                    :value stroke-dash}]
-        [:> numeric-input-wrapper* {:on-change on-gap-change
-                                    :text-icon "GAP"
-                                    :min 0
-                                    :on-focus on-focus
-                                    :on-blur on-blur
-                                    :attr :stroke-gap
-                                    :class (stl/css :numeric-input-wrapper)
-                                    :property (tr "workspace.options.stroke-gap")
-                                    :value stroke-gap}]
-        [:> numeric-input-wrapper* {:on-change on-dash-offset-change
-                                    :text-icon "OFFS"
-                                    :on-focus on-focus
-                                    :on-blur on-blur
-                                    :attr :stroke-dash-offset
-                                    :tooltip-placement "top-left"
-                                    :class (stl/css :numeric-input-wrapper)
-                                    :property (tr "workspace.options.stroke-dash-offset")
-                                    :value stroke-dash-offset}]
-        [:> keyframe-diamond* {:properties [:stroke-dash :stroke-gap :stroke-dash-offset]
-                               :index index}]])
+        [:> keyed-field* {:properties [:stroke-dash] :index index}
+         [:> numeric-input-wrapper* {:on-change on-dash-change
+                                     :text-icon "DASH"
+                                     :min 0
+                                     :on-focus on-focus
+                                     :on-blur on-blur
+                                     :attr :stroke-dash
+                                     :class (stl/css :numeric-input-wrapper)
+                                     :property (tr "workspace.options.stroke-dash")
+                                     :value stroke-dash}]]
+        [:> keyed-field* {:properties [:stroke-gap] :index index}
+         [:> numeric-input-wrapper* {:on-change on-gap-change
+                                     :text-icon "GAP"
+                                     :min 0
+                                     :on-focus on-focus
+                                     :on-blur on-blur
+                                     :attr :stroke-gap
+                                     :class (stl/css :numeric-input-wrapper)
+                                     :property (tr "workspace.options.stroke-gap")
+                                     :value stroke-gap}]]
+        [:> keyed-field* {:properties [:stroke-dash-offset] :index index}
+         [:> numeric-input-wrapper* {:on-change on-dash-offset-change
+                                     :text-icon "OFFS"
+                                     :on-focus on-focus
+                                     :on-blur on-blur
+                                     :attr :stroke-dash-offset
+                                     :tooltip-placement "top-left"
+                                     :class (stl/css :numeric-input-wrapper)
+                                     :property (tr "workspace.options.stroke-dash-offset")
+                                     :value stroke-dash-offset}]]])
 
      ;; Stroke Caps
      (when show-caps

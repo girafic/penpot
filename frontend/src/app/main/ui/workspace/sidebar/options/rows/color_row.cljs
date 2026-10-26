@@ -389,6 +389,21 @@
            :data {:index index})
           [nil nil])
 
+        ;; in motion mode, the keyframes of the paint of the row, each in
+        ;; its field: a flat colour its colour and its opacity, a gradient
+        ;; its gradient (its opacity takes none)
+        solid?
+        (and (some? (:color color)) (nil? (:gradient color)) (nil? (:image color)))
+
+        [kf-color kf-opacity]
+        (case origin
+          :fill         (cond (some? (:gradient color)) [:fill-gradient nil]
+                              solid?                    [:fill-color :fill-opacity])
+          :stroke-color (cond (some? (:gradient color)) [:stroke-gradient nil]
+                              solid?                    [:stroke-color :stroke-opacity])
+          :shadow       [:shadow-color :shadow-opacity]
+          nil)
+
         row-class
         (stl/css-case :color-data true
                       :hidden hidden
@@ -421,7 +436,9 @@
                                                      :library-name-wrapper true)
                                 :handle-click-color handle-click-color
                                 :opacity false
-                                :color color}
+                                :color color
+                                :color-property kf-color
+                                :keyframe-index index}
         [:*
          [:div {:class (stl/css :color-name)
                 :title (str color-name)}
@@ -443,7 +460,9 @@
                                 :select-on-focus select-on-focus
                                 :on-focus on-focus'
                                 :on-blur on-blur'
-                                :on-opacity-change on-opacity-change}
+                                :on-opacity-change on-opacity-change
+                                :color-property kf-color
+                                :keyframe-index index}
         [:div {:class (stl/css :color-name)}
          (uc/gradient-type->string (dm/get-in color [:gradient :type]))]]
 
@@ -473,8 +492,8 @@
                                 :on-focus on-focus'
                                 :on-blur on-blur'
                                 :on-opacity-change on-opacity-change
-                                :color-property (when (= origin :shadow) :shadow-color)
-                                :opacity-property (when (= origin :shadow) :shadow-opacity)
+                                :color-property kf-color
+                                :opacity-property kf-opacity
                                 :keyframe-index index}
 
         [:span {:class (stl/css :color-input-wrapper)}
@@ -488,16 +507,9 @@
                            :on-blur on-blur'
                            :on-change on-color-change}]]])
 
-     (when (and (= origin :fill)
-                (some? (:color color))
-                (nil? (:gradient color))
-                (nil? (:image color)))
-       [:> keyframe-diamond* {:properties [:fill-color :fill-opacity]
-                              :index index}])
-
-     (when (and (= origin :fill)
-                (some? (:gradient color)))
-       [:> keyframe-diamond* {:properties [:fill-gradient]
+     ;; a token row has no fields of its own to hold them
+     (when (and token-color applied-token (some? kf-color))
+       [:> keyframe-diamond* {:properties (filterv some? [kf-color kf-opacity])
                               :index index}])
 
      (when (some? on-remove)

@@ -257,6 +257,24 @@ $font-preview-box-height: 28px;
   inline-size: 100%;
 }
 
+// In motion mode the keyframe diamond is the trailing part of a field, one
+// control with its input (see `keyframe-diamond*`).
+%keyframe-trailing {
+  &:has(> button) {
+    padding-inline-end: 0;
+  }
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
+}
+
 .font-modifiers {
   display: flex;
   gap: var(--sp-xs);
@@ -264,6 +282,7 @@ $font-preview-box-height: 28px;
 
 .font-size-options {
   @extend %asset-element;
+  @extend %keyframe-trailing;
   @include t.use-typography("body-small");
 
   flex-grow: 1;
@@ -275,8 +294,23 @@ $font-preview-box-height: 28px;
 }
 
 .font-variant-options {
+  @extend %keyframe-trailing;
+
   padding: 0;
   flex-grow: 2;
+
+  // the box of its select goes on round the diamond
+  &:has(> button) {
+    display: flex;
+    align-items: center;
+    border-radius: $br-8;
+    background-color: var(--color-background-tertiary);
+
+    > :first-child {
+      flex: 1;
+      min-inline-size: 0;
+    }
+  }
 }
 
 .typography-variations {
@@ -294,6 +328,7 @@ $font-preview-box-height: 28px;
 .line-height,
 .letter-spacing {
   @extend %input-element;
+  @extend %keyframe-trailing;
   @include t.use-typography("body-small");
 
   .icon {

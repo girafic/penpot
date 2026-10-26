@@ -105,14 +105,6 @@
       min-inline-size: 0;
     }
   }
-
-  .with-keyframe > button {
-    flex: none;
-    align-self: stretch;
-    inline-size: px2rem(28);
-    block-size: auto;
-    margin: 0;
-  }
 }
 
 .hidden-select {

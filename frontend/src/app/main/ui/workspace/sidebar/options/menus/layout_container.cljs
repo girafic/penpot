@@ -25,7 +25,6 @@
    [app.main.ui.components.radio-buttons :refer [radio-button radio-buttons]]
    [app.main.ui.components.select :refer [select]]
    [app.main.ui.components.title-bar :refer [title-bar*]]
-   [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.formats :as fmt]
@@ -33,7 +32,7 @@
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.workspace.sidebar.options.common :as soc]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyed-field*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -372,76 +371,78 @@
         (mf/use-fn (mf/deps on-change') #(on-change' % #{:p2 :p4}))]
 
     [:div {:class (stl/css :paddings-simple)}
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-p1-change
-         :on-detach on-detach-token
-         :on-blur on-padding-blur
-         :on-focus on-focus-p1
-         :icon i/padding-top-bottom
-         :min 0
-         :attr :p1
-         :input-type :vertical-padding
-         :property (tr "workspace.layout-grid.editor.padding.vertical")
-         :nillable true
-         :placeholder (if (or (= :multiple applied-to-p1)
-                              (= :multiple p1)
-                              (nil? p1))
-                        (tr "settings.multiple")
-                        "--")
-         :applied-token applied-to-p1
-         :value p1}]
-
-       [:div {:class (stl/css :padding-simple)
-              :title (tr "workspace.layout-grid.editor.padding.vertical")}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/padding-top-bottom]
-        [:> deprecated-input/numeric-input*
-         {:class (stl/css :numeric-input)
-          :placeholder (tr "settings.multiple")
-          :aria-label (tr "workspace.layout-grid.editor.padding.vertical")
-          :on-change on-p1-change
+     [:> keyed-field* {:properties [:layout-padding-top :layout-padding-bottom]}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-p1-change
+          :on-detach on-detach-token
+          :on-blur on-padding-blur
           :on-focus on-focus-p1
-          :on-blur on-padding-blur
-          :is-nillable true
+          :icon i/padding-top-bottom
           :min 0
-          :value p1}]])
+          :attr :p1
+          :input-type :vertical-padding
+          :property (tr "workspace.layout-grid.editor.padding.vertical")
+          :nillable true
+          :placeholder (if (or (= :multiple applied-to-p1)
+                               (= :multiple p1)
+                               (nil? p1))
+                         (tr "settings.multiple")
+                         "--")
+          :applied-token applied-to-p1
+          :value p1}]
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-p2-change
-         :on-detach on-detach-token
-         :on-blur on-padding-blur
-         :on-focus on-focus-p2
-         :icon i/padding-left-right
-         :min 0
-         :attr :p2
-         :input-type :horizontal-padding
-         :align :right
-         :property (tr "workspace.layout-grid.editor.padding.horizontal")
-         :nillable true
-         :applied-token applied-to-p2
-         :placeholder (if (or (= :multiple applied-to-p2)
-                              (= :multiple p2)
-                              (nil? p2))
-                        (tr "settings.multiple")
-                        "--")
-         :value p2}]
+        [:div {:class (stl/css :padding-simple)
+               :title (tr "workspace.layout-grid.editor.padding.vertical")}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/padding-top-bottom]
+         [:> deprecated-input/numeric-input*
+          {:class (stl/css :numeric-input)
+           :placeholder (tr "settings.multiple")
+           :aria-label (tr "workspace.layout-grid.editor.padding.vertical")
+           :on-change on-p1-change
+           :on-focus on-focus-p1
+           :on-blur on-padding-blur
+           :is-nillable true
+           :min 0
+           :value p1}]])]
 
-       [:div {:class (stl/css :padding-simple)
-              :title (tr "workspace.layout-grid.editor.padding.horizontal")}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/padding-left-right]
-        [:> deprecated-input/numeric-input*
-         {:class (stl/css :numeric-input)
-          :placeholder (tr "settings.multiple")
-          :aria-label (tr "workspace.layout-grid.editor.padding.horizontal")
-          :on-change on-p2-change
+     [:> keyed-field* {:properties [:layout-padding-right :layout-padding-left]}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-p2-change
+          :on-detach on-detach-token
+          :on-blur on-padding-blur
           :on-focus on-focus-p2
-          :on-blur on-padding-blur
+          :icon i/padding-left-right
           :min 0
-          :is-nillable true
-          :value p2}]])]))
+          :attr :p2
+          :input-type :horizontal-padding
+          :align :right
+          :property (tr "workspace.layout-grid.editor.padding.horizontal")
+          :nillable true
+          :applied-token applied-to-p2
+          :placeholder (if (or (= :multiple applied-to-p2)
+                               (= :multiple p2)
+                               (nil? p2))
+                         (tr "settings.multiple")
+                         "--")
+          :value p2}]
+
+        [:div {:class (stl/css :padding-simple)
+               :title (tr "workspace.layout-grid.editor.padding.horizontal")}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/padding-left-right]
+         [:> deprecated-input/numeric-input*
+          {:class (stl/css :numeric-input)
+           :placeholder (tr "settings.multiple")
+           :aria-label (tr "workspace.layout-grid.editor.padding.horizontal")
+           :on-change on-p2-change
+           :on-focus on-focus-p2
+           :on-blur on-padding-blur
+           :min 0
+           :is-nillable true
+           :value p2}]])]]))
 
 (mf/defc multiple-padding-selection*
   [{:keys [value on-change applied-tokens ids]}]
@@ -505,160 +506,143 @@
         (mf/use-fn (mf/deps on-focus) #(on-focus :p4))]
 
     [:div {:class (stl/css :paddings-multiple)}
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-p1-change
-         :on-detach on-detach-token
-         :on-blur on-padding-blur
-         :on-focus on-focus-p1
-         :icon i/padding-top
-         :min 0
-         :attr :p1
-         :input-type :vertical-padding
-         :property (tr "workspace.layout-grid.editor.padding.top")
-         :placeholder (if (or (= :multiple applied-to-p1)
-                              (= :multiple p1))
-                        (tr "settings.multiple")
-                        "--")
-         :applied-token applied-to-p1
-         :value p1}]
-
-       [:div {:class (stl/css :padding-multiple)
-              :title (tr "workspace.layout-grid.editor.padding.top")}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/padding-top]
-        [:> deprecated-input/numeric-input*
-         {:class (stl/css :numeric-input)
-          :placeholder "--"
-          :aria-label (tr "workspace.layout-grid.editor.padding.top")
-          :data-attr "p1"
-          :on-change on-p1-change
+     [:> keyed-field* {:properties [:layout-padding-top]}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-p1-change
+          :on-detach on-detach-token
+          :on-blur on-padding-blur
           :on-focus on-focus-p1
-          :on-blur on-padding-blur
+          :icon i/padding-top
           :min 0
-          :value p1}]])
+          :attr :p1
+          :input-type :vertical-padding
+          :property (tr "workspace.layout-grid.editor.padding.top")
+          :placeholder (if (or (= :multiple applied-to-p1)
+                               (= :multiple p1))
+                         (tr "settings.multiple")
+                         "--")
+          :applied-token applied-to-p1
+          :value p1}]
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-p2-change
-         :on-detach on-detach-token
-         :on-blur on-padding-blur
-         :on-focus on-focus-p2
-         :icon i/padding-right
-         :min 0
-         :attr :p2
-         :input-type :horizontal-padding
-         :align :right
-         :property (tr "workspace.layout-grid.editor.padding.right")
-         :placeholder (if (or (= :multiple applied-to-p2)
-                              (= :multiple p2))
-                        (tr "settings.multiple")
-                        "--")
-         :applied-token applied-to-p2
-         :value p2}]
+        [:div {:class (stl/css :padding-multiple)
+               :title (tr "workspace.layout-grid.editor.padding.top")}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/padding-top]
+         [:> deprecated-input/numeric-input*
+          {:class (stl/css :numeric-input)
+           :placeholder "--"
+           :aria-label (tr "workspace.layout-grid.editor.padding.top")
+           :data-attr "p1"
+           :on-change on-p1-change
+           :on-focus on-focus-p1
+           :on-blur on-padding-blur
+           :min 0
+           :value p1}]])]
 
-       [:div {:class (stl/css :padding-multiple)
-              :title (tr "workspace.layout-grid.editor.padding.right")}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/padding-right]
-        [:> deprecated-input/numeric-input*
-         {:class (stl/css :numeric-input)
-          :placeholder "--"
-          :aria-label (tr "workspace.layout-grid.editor.padding.right")
-          :data-attr "p2"
-          :on-change on-p2-change
+     [:> keyed-field* {:properties [:layout-padding-right]}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-p2-change
+          :on-detach on-detach-token
+          :on-blur on-padding-blur
           :on-focus on-focus-p2
-          :on-blur on-padding-blur
+          :icon i/padding-right
           :min 0
-          :value p2}]])
+          :attr :p2
+          :input-type :horizontal-padding
+          :align :right
+          :property (tr "workspace.layout-grid.editor.padding.right")
+          :placeholder (if (or (= :multiple applied-to-p2)
+                               (= :multiple p2))
+                         (tr "settings.multiple")
+                         "--")
+          :applied-token applied-to-p2
+          :value p2}]
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-p3-change
-         :on-detach on-detach-token
-         :on-blur on-padding-blur
-         :on-focus on-focus-p3
-         :icon i/padding-bottom
-         :min 0
-         :attr :p3
-         :input-type :vertical-padding
-         :property (tr "workspace.layout-grid.editor.padding.bottom")
-         :placeholder (if (or (= :multiple applied-to-p3)
-                              (= :multiple p3))
-                        (tr "settings.multiple")
-                        "--")
-         :applied-token applied-to-p3
-         :value p3}]
+        [:div {:class (stl/css :padding-multiple)
+               :title (tr "workspace.layout-grid.editor.padding.right")}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/padding-right]
+         [:> deprecated-input/numeric-input*
+          {:class (stl/css :numeric-input)
+           :placeholder "--"
+           :aria-label (tr "workspace.layout-grid.editor.padding.right")
+           :data-attr "p2"
+           :on-change on-p2-change
+           :on-focus on-focus-p2
+           :on-blur on-padding-blur
+           :min 0
+           :value p2}]])]
 
-       [:div {:class (stl/css :padding-multiple)
-              :title (tr "workspace.layout-grid.editor.padding.bottom")}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/padding-bottom]
-        [:> deprecated-input/numeric-input*
-         {:class (stl/css :numeric-input)
-          :placeholder "--"
-          :aria-label (tr "workspace.layout-grid.editor.padding.bottom")
-          :data-attr "p3"
-          :on-change on-p3-change
+     [:> keyed-field* {:properties [:layout-padding-bottom]}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-p3-change
+          :on-detach on-detach-token
+          :on-blur on-padding-blur
           :on-focus on-focus-p3
-          :on-blur on-padding-blur
+          :icon i/padding-bottom
           :min 0
-          :value p3}]])
+          :attr :p3
+          :input-type :vertical-padding
+          :property (tr "workspace.layout-grid.editor.padding.bottom")
+          :placeholder (if (or (= :multiple applied-to-p3)
+                               (= :multiple p3))
+                         (tr "settings.multiple")
+                         "--")
+          :applied-token applied-to-p3
+          :value p3}]
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-p4-change
-         :on-detach on-detach-token
-         :on-blur on-padding-blur
-         :on-focus on-focus-p4
-         :icon i/padding-left
-         :min 0
-         :align :right
-         :attr :p4
-         :input-type :horizontal-padding
-         :property (tr "workspace.layout-grid.editor.padding.left")
-         :placeholder (if (or (= :multiple applied-to-p4)
-                              (= :multiple p4))
-                        (tr "settings.multiple")
-                        "--")
-         :applied-token applied-to-p4
-         :value p4}]
+        [:div {:class (stl/css :padding-multiple)
+               :title (tr "workspace.layout-grid.editor.padding.bottom")}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/padding-bottom]
+         [:> deprecated-input/numeric-input*
+          {:class (stl/css :numeric-input)
+           :placeholder "--"
+           :aria-label (tr "workspace.layout-grid.editor.padding.bottom")
+           :data-attr "p3"
+           :on-change on-p3-change
+           :on-focus on-focus-p3
+           :on-blur on-padding-blur
+           :min 0
+           :value p3}]])]
 
-       [:div {:class (stl/css :padding-multiple)
-              :title (tr "workspace.layout-grid.editor.padding.left")}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/padding-left]
-        [:> deprecated-input/numeric-input*
-         {:class (stl/css :numeric-input)
-          :placeholder "--"
-          :aria-label (tr "workspace.layout-grid.editor.padding.left")
-          :data-attr "p4"
-          :on-change on-p4-change
+     [:> keyed-field* {:properties [:layout-padding-left]}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-p4-change
+          :on-detach on-detach-token
+          :on-blur on-padding-blur
           :on-focus on-focus-p4
-          :on-blur on-padding-blur
+          :icon i/padding-left
           :min 0
-          :value p4}]])]))
+          :align :right
+          :attr :p4
+          :input-type :horizontal-padding
+          :property (tr "workspace.layout-grid.editor.padding.left")
+          :placeholder (if (or (= :multiple applied-to-p4)
+                               (= :multiple p4))
+                         (tr "settings.multiple")
+                         "--")
+          :applied-token applied-to-p4
+          :value p4}]
 
-(defn layout-keyframe-groups
-  "The groups of keyframes of the spacing of an auto layout (see
-  `layout-keyframes*`)."
-  []
-  [[(tr "workspace.animation.layout-keys.gap") [:layout-row-gap :layout-column-gap]]
-   [(tr "workspace.animation.layout-keys.padding")
-    [:layout-padding-top :layout-padding-right :layout-padding-bottom :layout-padding-left]]])
-
-(mf/defc layout-keyframes*
-  "In motion mode, the keyframe diamonds of the spacing of an auto layout
-  or of a layer in one at the playhead, by group: `groups`, `[label
-  properties]` each (see `cta/layout-paths`). Its spacing fields sit too
-  close for a diamond each; the timeline has a row each."
-  [{:keys [groups]}]
-  (when (some? (mf/use-ctx ctx/motion-shape-id))
-    [:div {:class (stl/css :layout-keyframes)}
-     (for [[label properties] groups]
-       [:div {:key label :class (stl/css :layout-keyframe)}
-        [:> keyframe-diamond* {:properties properties}]
-        [:span label]])]))
+        [:div {:class (stl/css :padding-multiple)
+               :title (tr "workspace.layout-grid.editor.padding.left")}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/padding-left]
+         [:> deprecated-input/numeric-input*
+          {:class (stl/css :numeric-input)
+           :placeholder "--"
+           :aria-label (tr "workspace.layout-grid.editor.padding.left")
+           :data-attr "p4"
+           :on-change on-p4-change
+           :on-focus on-focus-p4
+           :on-blur on-padding-blur
+           :min 0
+           :value p4}]])]]))
 
 (mf/defc padding-section*
   [{:keys [type on-type-change] :as props}]
@@ -760,83 +744,85 @@
 
     [:div {:class (stl/css :gap-group)}
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-row-gap-change
-         :on-detach on-detach-token
-         :on-focus on-focus-row-gap
-         :on-blur on-gap-blur
-         :icon i/gap-vertical
-         :nillable true
-         :min 0
-         :attr :row-gap
-         :property "Row gap"
-         :values {:row-gap (:row-gap value)}
-         :disabled row-gap-disabled?
-         :placeholder (if (or (= :multiple (:row-gap applied-tokens))
-                              (= :multiple (:row-gap value)))
-                        (tr "settings.multiple")
-                        "--")
-         :applied-token (:row-gap applied-tokens)
-         :value (:row-gap value)}]
-
-       [:div {:class (stl/css-case
-                      :row-gap true
-                      :disabled row-gap-disabled?)
-              :title "Row gap"}
-        [:span {:class (stl/css :icon)} deprecated-icon/gap-vertical]
-        [:> deprecated-input/numeric-input*
-         {:class (stl/css :numeric-input true)
-          :no-validate true
-          :placeholder "--"
-          :data-type "row-gap"
-          :data-wrap-type (d/name wrap-type)
+     [:> keyed-field* {:properties [:layout-row-gap]}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-row-gap-change
+          :on-detach on-detach-token
           :on-focus on-focus-row-gap
-          :on-change on-row-gap-change
           :on-blur on-gap-blur
-          :is-nillable true
+          :icon i/gap-vertical
+          :nillable true
           :min 0
-          :value (:row-gap value)
-          :is-disabled row-gap-disabled?}]])
+          :attr :row-gap
+          :property "Row gap"
+          :values {:row-gap (:row-gap value)}
+          :disabled row-gap-disabled?
+          :placeholder (if (or (= :multiple (:row-gap applied-tokens))
+                               (= :multiple (:row-gap value)))
+                         (tr "settings.multiple")
+                         "--")
+          :applied-token (:row-gap applied-tokens)
+          :value (:row-gap value)}]
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-column-gap-change
-         :on-detach on-detach-token
-         :on-focus on-focus-column-gap
-         :on-blur on-gap-blur
-         :icon i/gap-horizontal
-         :nillable true
-         :min 0
-         :attr :column-gap
-         :align :right
-         :property "Column gap"
-         :placeholder (if (or (= :multiple (:column-gap applied-tokens))
-                              (= :multiple (:column-gap value)))
-                        (tr "settings.multiple")
-                        "--")
-         :applied-token (:column-gap applied-tokens)
-         :value (:column-gap value)
-         :disabled col-gap-disabled?}]
+        [:div {:class (stl/css-case
+                       :row-gap true
+                       :disabled row-gap-disabled?)
+               :title "Row gap"}
+         [:span {:class (stl/css :icon)} deprecated-icon/gap-vertical]
+         [:> deprecated-input/numeric-input*
+          {:class (stl/css :numeric-input true)
+           :no-validate true
+           :placeholder "--"
+           :data-type "row-gap"
+           :data-wrap-type (d/name wrap-type)
+           :on-focus on-focus-row-gap
+           :on-change on-row-gap-change
+           :on-blur on-gap-blur
+           :is-nillable true
+           :min 0
+           :value (:row-gap value)
+           :is-disabled row-gap-disabled?}]])]
 
-       [:div {:class (stl/css-case
-                      :column-gap true
-                      :disabled col-gap-disabled?)
-              :title "Column gap"}
-        [:span {:class (stl/css :icon)} deprecated-icon/gap-horizontal]
-        [:> deprecated-input/numeric-input*
-         {:class (stl/css :numeric-input true)
-          :no-validate true
-          :placeholder "--"
-          :data-type "column-gap"
-          :data-wrap-type (d/name wrap-type)
+     [:> keyed-field* {:properties [:layout-column-gap]}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-column-gap-change
+          :on-detach on-detach-token
           :on-focus on-focus-column-gap
-          :on-change on-column-gap-change
           :on-blur on-gap-blur
-          :is-nillable true
+          :icon i/gap-horizontal
+          :nillable true
           :min 0
+          :attr :column-gap
+          :align :right
+          :property "Column gap"
+          :placeholder (if (or (= :multiple (:column-gap applied-tokens))
+                               (= :multiple (:column-gap value)))
+                         (tr "settings.multiple")
+                         "--")
+          :applied-token (:column-gap applied-tokens)
           :value (:column-gap value)
-          :disabled col-gap-disabled?}]])]))
+          :disabled col-gap-disabled?}]
+
+        [:div {:class (stl/css-case
+                       :column-gap true
+                       :disabled col-gap-disabled?)
+               :title "Column gap"}
+         [:span {:class (stl/css :icon)} deprecated-icon/gap-horizontal]
+         [:> deprecated-input/numeric-input*
+          {:class (stl/css :numeric-input true)
+           :no-validate true
+           :placeholder "--"
+           :data-type "column-gap"
+           :data-wrap-type (d/name wrap-type)
+           :on-focus on-focus-column-gap
+           :on-change on-column-gap-change
+           :on-blur on-gap-blur
+           :is-nillable true
+           :min 0
+           :value (:column-gap value)
+           :disabled col-gap-disabled?}]])]]))
 
 ;; GRID COMPONENTS
 
@@ -1393,8 +1379,7 @@
                                  :on-type-change on-padding-type-change
                                  :ids ids
                                  :applied-tokens applied-tokens
-                                 :on-change on-padding-change}]]
-          [:> layout-keyframes* {:groups (layout-keyframe-groups)}]]
+                                 :on-change on-padding-change}]]]
 
          :grid
          [:div {:class (stl/css :grid-layout-menu)}
@@ -1438,8 +1423,7 @@
                                  :ids ids
                                  :applied-tokens applied-tokens
                                  :on-type-change on-padding-type-change
-                                 :on-change on-padding-change}]]
-          [:> layout-keyframes* {:groups (layout-keyframe-groups)}]]
+                                 :on-change on-padding-change}]]]
 
          nil))]))
 

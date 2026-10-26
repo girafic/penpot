@@ -23,7 +23,8 @@
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.workspace.sidebar.options.common :as soc]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [get-layout-flex-icon layout-keyframes*]]
+   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [get-layout-flex-icon]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyed-field*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -136,66 +137,70 @@
         (mf/use-fn (mf/deps on-change') #(on-change' % :m2))]
 
     [:div {:class (stl/css :margin-simple)}
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-m1-change
-         :on-detach on-detach-vertical
-         :class (stl/css :vertical-margin-wrapper)
-         :on-blur on-blur
-         :on-focus on-focus-m1
-         :placeholder m1-placeholder
-         :icon i/margin-top-bottom
-         :attr :m1
-         :default nil
-         :input-type :vertical-margin
-         :property "Vertical margin "
-         :nillable true
-         :applied-token token-applied-m1
-         :value m1}]
+     [:> keyed-field* {:properties [:layout-margin-top :layout-margin-bottom]
+                       :class (stl/css :vertical-margin-wrapper)}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-m1-change
+          :on-detach on-detach-vertical
+          :class (stl/css :vertical-margin-wrapper)
+          :on-blur on-blur
+          :on-focus on-focus-m1
+          :placeholder m1-placeholder
+          :icon i/margin-top-bottom
+          :attr :m1
+          :default nil
+          :input-type :vertical-margin
+          :property "Vertical margin "
+          :nillable true
+          :applied-token token-applied-m1
+          :value m1}]
 
-       [:div {:class (stl/css :vertical-margin)
-              :title "Vertical margin"}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/margin-top-bottom]
-        [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
-                                             :placeholder m1-placeholder
-                                             :data-name "m1"
-                                             :on-focus on-focus-m1
-                                             :on-change on-m1-change
-                                             :on-blur on-blur
-                                             :is-nillable true
-                                             :value m1}]])
+        [:div {:class (stl/css :vertical-margin)
+               :title "Vertical margin"}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/margin-top-bottom]
+         [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
+                                              :placeholder m1-placeholder
+                                              :data-name "m1"
+                                              :on-focus on-focus-m1
+                                              :on-change on-m1-change
+                                              :on-blur on-blur
+                                              :is-nillable true
+                                              :value m1}]])]
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-m2-change
-         :on-detach on-detach-horizontal
-         :on-blur on-blur
-         :on-focus on-focus-m2
-         :placeholder m2-placeholder
-         :icon i/margin-left-right
-         :class (stl/css :horizontal-margin-wrapper)
-         :attr :m2
-         :align :right
-         :default nil
-         :input-type :horizontal-margin
-         :property "Horizontal margin"
-         :nillable true
-         :applied-token token-applied-m2
-         :value m2}]
+     [:> keyed-field* {:properties [:layout-margin-right :layout-margin-left]
+                       :class (stl/css :horizontal-margin-wrapper)}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-m2-change
+          :on-detach on-detach-horizontal
+          :on-blur on-blur
+          :on-focus on-focus-m2
+          :placeholder m2-placeholder
+          :icon i/margin-left-right
+          :class (stl/css :horizontal-margin-wrapper)
+          :attr :m2
+          :align :right
+          :default nil
+          :input-type :horizontal-margin
+          :property "Horizontal margin"
+          :nillable true
+          :applied-token token-applied-m2
+          :value m2}]
 
-       [:div {:class (stl/css :horizontal-margin)
-              :title "Horizontal margin"}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/margin-left-right]
-        [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
-                                             :placeholder m2-placeholder
-                                             :data-name "m2"
-                                             :on-focus on-focus-m2
-                                             :on-change on-m2-change
-                                             :on-blur on-blur
-                                             :is-nillable true
-                                             :value m2}]])]))
+        [:div {:class (stl/css :horizontal-margin)
+               :title "Horizontal margin"}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/margin-left-right]
+         [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
+                                              :placeholder m2-placeholder
+                                              :data-name "m2"
+                                              :on-focus on-focus-m2
+                                              :on-change on-m2-change
+                                              :on-blur on-blur
+                                              :is-nillable true
+                                              :value m2}]])]]))
 
 (mf/defc margin-multiple*
   [{:keys [value on-change on-blur applied-tokens ids]}]
@@ -261,122 +266,126 @@
         (mf/use-fn (mf/deps on-change') #(on-change' % :m4))]
 
     [:div {:class (stl/css :margin-multiple)}
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-m1-change
-         :on-detach on-detach-token
-         :on-blur on-blur
-         :on-focus on-focus-m1
-         :icon i/margin-top
-         :class (stl/css :top-margin-wrapper)
-         :default nil
-         :attr :m1
-         :input-type :vertical-margin
-         :property "Top margin"
-         :nillable true
-         :applied-token applied-token-to-m1
-         :value m1}]
+     [:> keyed-field* {:properties [:layout-margin-top] :class (stl/css :top-margin-wrapper)}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-m1-change
+          :on-detach on-detach-token
+          :on-blur on-blur
+          :on-focus on-focus-m1
+          :icon i/margin-top
+          :class (stl/css :top-margin-wrapper)
+          :default nil
+          :attr :m1
+          :input-type :vertical-margin
+          :property "Top margin"
+          :nillable true
+          :applied-token applied-token-to-m1
+          :value m1}]
 
-       [:div {:class (stl/css :top-margin)
-              :title "Top margin"}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/margin-top]
-        [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
-                                             :placeholder "--"
-                                             :data-name "m1"
-                                             :on-focus on-focus-m1
-                                             :on-change on-m1-change
-                                             :on-blur on-blur
-                                             :is-nillable true
-                                             :value m1}]])
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-m2-change
-         :on-detach on-detach-token
-         :on-blur on-blur
-         :on-focus on-focus-m2
-         :icon i/margin-right
-         :class (stl/css :right-margin-wrapper)
-         :default nil
-         :attr :m2
-         :align :right
-         :input-type :horizontal-margin
-         :property "Right margin"
-         :nillable true
-         :applied-token applied-token-to-m2
-         :value m2}]
+        [:div {:class (stl/css :top-margin)
+               :title "Top margin"}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/margin-top]
+         [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
+                                              :placeholder "--"
+                                              :data-name "m1"
+                                              :on-focus on-focus-m1
+                                              :on-change on-m1-change
+                                              :on-blur on-blur
+                                              :is-nillable true
+                                              :value m1}]])]
+     [:> keyed-field* {:properties [:layout-margin-right] :class (stl/css :right-margin-wrapper)}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-m2-change
+          :on-detach on-detach-token
+          :on-blur on-blur
+          :on-focus on-focus-m2
+          :icon i/margin-right
+          :class (stl/css :right-margin-wrapper)
+          :default nil
+          :attr :m2
+          :align :right
+          :input-type :horizontal-margin
+          :property "Right margin"
+          :nillable true
+          :applied-token applied-token-to-m2
+          :value m2}]
 
-       [:div {:class (stl/css :right-margin)
-              :title "Right margin"}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/margin-right]
-        [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
-                                             :placeholder "--"
-                                             :data-name "m2"
-                                             :on-focus on-focus-m2
-                                             :on-change on-m2-change
-                                             :on-blur on-blur
-                                             :is-nillable true
-                                             :value m2}]])
+        [:div {:class (stl/css :right-margin)
+               :title "Right margin"}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/margin-right]
+         [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
+                                              :placeholder "--"
+                                              :data-name "m2"
+                                              :on-focus on-focus-m2
+                                              :on-change on-m2-change
+                                              :on-blur on-blur
+                                              :is-nillable true
+                                              :value m2}]])]
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-m3-change
-         :on-detach on-detach-token
-         :on-blur on-blur
-         :on-focus on-focus-m3
-         :icon i/margin-bottom
-         :class (stl/css :bottom-margin-wrapper)
-         :attr :m3
-         :default nil
-         :input-type :vertical-margin
-         :property "Bottom margin"
-         :nillable true
-         :applied-token applied-token-to-m3
-         :value m3}]
+     [:> keyed-field* {:properties [:layout-margin-bottom] :class (stl/css :bottom-margin-wrapper)}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-m3-change
+          :on-detach on-detach-token
+          :on-blur on-blur
+          :on-focus on-focus-m3
+          :icon i/margin-bottom
+          :class (stl/css :bottom-margin-wrapper)
+          :attr :m3
+          :default nil
+          :input-type :vertical-margin
+          :property "Bottom margin"
+          :nillable true
+          :applied-token applied-token-to-m3
+          :value m3}]
 
-       [:div {:class (stl/css :bottom-margin)
-              :title "Bottom margin"}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/margin-bottom]
-        [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
-                                             :placeholder "--"
-                                             :data-name "m3"
-                                             :on-focus on-focus-m3
-                                             :on-change on-m3-change
-                                             :on-blur on-blur
-                                             :is-nillable true
-                                             :value m3}]])
+        [:div {:class (stl/css :bottom-margin)
+               :title "Bottom margin"}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/margin-bottom]
+         [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
+                                              :placeholder "--"
+                                              :data-name "m3"
+                                              :on-focus on-focus-m3
+                                              :on-change on-m3-change
+                                              :on-blur on-blur
+                                              :is-nillable true
+                                              :value m3}]])]
 
-     (if token-numeric-inputs
-       [:> numeric-input-wrapper*
-        {:on-change on-m4-change
-         :on-detach on-detach-token
-         :on-blur on-blur
-         :on-focus on-focus-m4
-         :icon i/margin-left
-         :class (stl/css :left-margin-wrapper)
-         :default nil
-         :attr :m4
-         :align :right
-         :property "Left margin"
-         :input-type :horizontal-margin
-         :nillable true
-         :applied-token applied-token-to-m4
-         :value m4}]
+     [:> keyed-field* {:properties [:layout-margin-left] :class (stl/css :left-margin-wrapper)}
+      (if token-numeric-inputs
+        [:> numeric-input-wrapper*
+         {:on-change on-m4-change
+          :on-detach on-detach-token
+          :on-blur on-blur
+          :on-focus on-focus-m4
+          :icon i/margin-left
+          :class (stl/css :left-margin-wrapper)
+          :default nil
+          :attr :m4
+          :align :right
+          :property "Left margin"
+          :input-type :horizontal-margin
+          :nillable true
+          :applied-token applied-token-to-m4
+          :value m4}]
 
-       [:div {:class (stl/css :left-margin)
-              :title "Left margin"}
-        [:span {:class (stl/css :icon)}
-         deprecated-icon/margin-left]
-        [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
-                                             :placeholder "--"
-                                             :data-name "m4"
-                                             :on-focus on-focus-m4
-                                             :on-change on-m4-change
-                                             :on-blur on-blur
-                                             :is-nillable true
-                                             :value m4}]])]))
+        [:div {:class (stl/css :left-margin)
+               :title "Left margin"}
+         [:span {:class (stl/css :icon)}
+          deprecated-icon/margin-left]
+         [:> deprecated-input/numeric-input* {:class (stl/css :numeric-input)
+                                              :placeholder "--"
+                                              :data-name "m4"
+                                              :on-focus on-focus-m4
+                                              :on-change on-m4-change
+                                              :on-blur on-blur
+                                              :is-nillable true
+                                              :value m4}]])]]))
 
 (mf/defc margin-section*
   {::mf/private true
@@ -591,128 +600,132 @@
                :aria-label "Layout item size constraints"}
      (when (= (:layout-item-h-sizing values) :fill)
        [:div {:class (stl/css :horizontal-fill)}
-        (if token-numeric-inputs
-          [:> numeric-input-wrapper*
-           {:on-change on-layout-item-min-w-change
-            :on-detach on-detach-token
-            :min 0
-            :attr :layout-item-min-w
-            :property (tr "workspace.options.layout-item.layout-item-min-w")
-            :text-icon "MIN W"
-            :input-type :min-width
-            :nillable true
-            :applied-token applied-token-to-min-w
-            :tooltip-class (stl/css :tooltip-wrapper)
-            :value min-w}]
-
-          [:div {:class (stl/css :layout-item-min-w)
-                 :title (tr "workspace.options.layout-item.layout-item-min-w")}
-
-           [:span {:class (stl/css :icon-text)} "MIN W"]
-           [:> deprecated-input/numeric-input*
-            {:class (stl/css :numeric-input)
-             :no-validate true
+        [:> keyed-field* {:properties [:layout-min-width]}
+         (if token-numeric-inputs
+           [:> numeric-input-wrapper*
+            {:on-change on-layout-item-min-w-change
+             :on-detach on-detach-token
              :min 0
-             :data-wrap true
-             :placeholder "--"
-             :data-attr "layout-item-min-w"
-             :on-focus dom/select-target
-             :on-change on-layout-item-min-w-change
-             :value (get values :layout-item-min-w)
-             :is-nillable true}]])
+             :attr :layout-item-min-w
+             :property (tr "workspace.options.layout-item.layout-item-min-w")
+             :text-icon "MIN W"
+             :input-type :min-width
+             :nillable true
+             :applied-token applied-token-to-min-w
+             :tooltip-class (stl/css :tooltip-wrapper)
+             :value min-w}]
 
-        (if token-numeric-inputs
-          [:> numeric-input-wrapper*
-           {:on-change on-layout-item-max-w-change
-            :on-detach on-detach-token
-            :text-icon "MAX W"
-            :min 0
-            :align :right
-            :input-type :max-width
-            :attr :layout-item-max-w
-            :property (tr "workspace.options.layout-item.layout-item-max-w")
-            :nillable true
-            :tooltip-class (stl/css :tooltip-wrapper)
-            :applied-token applied-token-to-max-w
-            :value max-w}]
+           [:div {:class (stl/css :layout-item-min-w)
+                  :title (tr "workspace.options.layout-item.layout-item-min-w")}
 
-          [:div {:class (stl/css :layout-item-max-w)
-                 :title (tr "workspace.options.layout-item.layout-item-max-w")}
-           [:span {:class (stl/css :icon-text)} "MAX W"]
-           [:> deprecated-input/numeric-input*
-            {:class (stl/css :numeric-input)
-             :no-validate true
+            [:span {:class (stl/css :icon-text)} "MIN W"]
+            [:> deprecated-input/numeric-input*
+             {:class (stl/css :numeric-input)
+              :no-validate true
+              :min 0
+              :data-wrap true
+              :placeholder "--"
+              :data-attr "layout-item-min-w"
+              :on-focus dom/select-target
+              :on-change on-layout-item-min-w-change
+              :value (get values :layout-item-min-w)
+              :is-nillable true}]])]
+
+        [:> keyed-field* {:properties [:layout-max-width]}
+         (if token-numeric-inputs
+           [:> numeric-input-wrapper*
+            {:on-change on-layout-item-max-w-change
+             :on-detach on-detach-token
+             :text-icon "MAX W"
              :min 0
-             :data-wrap true
-             :placeholder "--"
-             :data-attr "layout-item-max-w"
-             :on-focus dom/select-target
-             :on-change on-layout-item-max-w-change
-             :value (get values :layout-item-max-w)
-             :is-nillable true}]])])
+             :align :right
+             :input-type :max-width
+             :attr :layout-item-max-w
+             :property (tr "workspace.options.layout-item.layout-item-max-w")
+             :nillable true
+             :tooltip-class (stl/css :tooltip-wrapper)
+             :applied-token applied-token-to-max-w
+             :value max-w}]
+
+           [:div {:class (stl/css :layout-item-max-w)
+                  :title (tr "workspace.options.layout-item.layout-item-max-w")}
+            [:span {:class (stl/css :icon-text)} "MAX W"]
+            [:> deprecated-input/numeric-input*
+             {:class (stl/css :numeric-input)
+              :no-validate true
+              :min 0
+              :data-wrap true
+              :placeholder "--"
+              :data-attr "layout-item-max-w"
+              :on-focus dom/select-target
+              :on-change on-layout-item-max-w-change
+              :value (get values :layout-item-max-w)
+              :is-nillable true}]])]])
 
      (when (= v-sizing :fill)
        [:div {:class (stl/css :vertical-fill)}
-        (if token-numeric-inputs
-          [:> numeric-input-wrapper*
-           {:on-change on-layout-item-min-h-change
-            :on-detach on-detach-token
-            :text-icon "MIN H"
-            :input-type :max-height
-            :min 0
-            :attr :layout-item-min-h
-            :property (tr "workspace.options.layout-item.layout-item-min-h")
-            :nillable true
-            :tooltip-class (stl/css :tooltip-wrapper)
-
-            :applied-token applied-token-to-min-h
-            :value min-h}]
-
-          [:div {:class (stl/css :layout-item-min-h)
-                 :title (tr "workspace.options.layout-item.layout-item-min-h")}
-           [:span {:class (stl/css :icon-text)} "MIN H"]
-           [:> deprecated-input/numeric-input*
-            {:class (stl/css :numeric-input)
-             :no-validate true
+        [:> keyed-field* {:properties [:layout-min-height]}
+         (if token-numeric-inputs
+           [:> numeric-input-wrapper*
+            {:on-change on-layout-item-min-h-change
+             :on-detach on-detach-token
+             :text-icon "MIN H"
+             :input-type :max-height
              :min 0
-             :data-wrap true
-             :placeholder "--"
-             :data-attr "layout-item-min-h"
-             :on-focus dom/select-target
-             :on-change on-layout-item-min-h-change
-             :value (get values :layout-item-min-h)
-             :is-nillable true}]])
+             :attr :layout-item-min-h
+             :property (tr "workspace.options.layout-item.layout-item-min-h")
+             :nillable true
+             :tooltip-class (stl/css :tooltip-wrapper)
 
-        (if token-numeric-inputs
-          [:> numeric-input-wrapper*
-           {:on-change on-layout-item-max-h-change
-            :on-detach on-detach-token
-            :min 0
-            :text-icon "MAX H"
-            :align :right
-            :input-type :max-height
-            :attr :layout-item-max-h
-            :property (tr "workspace.options.layout-item.layout-item-max-h")
-            :nillable true
-            :tooltip-class (stl/css :tooltip-wrapper)
-            :applied-token applied-token-to-max-h
-            :value max-h}]
+             :applied-token applied-token-to-min-h
+             :value min-h}]
 
-          [:div {:class (stl/css :layout-item-max-h)
-                 :title (tr "workspace.options.layout-item.layout-item-max-h")}
+           [:div {:class (stl/css :layout-item-min-h)
+                  :title (tr "workspace.options.layout-item.layout-item-min-h")}
+            [:span {:class (stl/css :icon-text)} "MIN H"]
+            [:> deprecated-input/numeric-input*
+             {:class (stl/css :numeric-input)
+              :no-validate true
+              :min 0
+              :data-wrap true
+              :placeholder "--"
+              :data-attr "layout-item-min-h"
+              :on-focus dom/select-target
+              :on-change on-layout-item-min-h-change
+              :value (get values :layout-item-min-h)
+              :is-nillable true}]])]
 
-           [:span {:class (stl/css :icon-text)} "MAX H"]
-           [:> deprecated-input/numeric-input*
-            {:class (stl/css :numeric-input)
-             :no-validate true
+        [:> keyed-field* {:properties [:layout-max-height]}
+         (if token-numeric-inputs
+           [:> numeric-input-wrapper*
+            {:on-change on-layout-item-max-h-change
+             :on-detach on-detach-token
              :min 0
-             :data-wrap true
-             :placeholder "--"
-             :data-attr "layout-item-max-h"
-             :on-focus dom/select-target
-             :on-change on-layout-item-max-h-change
-             :value (get values :layout-item-max-h)
-             :is-nillable true}]])])]))
+             :text-icon "MAX H"
+             :align :right
+             :input-type :max-height
+             :attr :layout-item-max-h
+             :property (tr "workspace.options.layout-item.layout-item-max-h")
+             :nillable true
+             :tooltip-class (stl/css :tooltip-wrapper)
+             :applied-token applied-token-to-max-h
+             :value max-h}]
+
+           [:div {:class (stl/css :layout-item-max-h)
+                  :title (tr "workspace.options.layout-item.layout-item-max-h")}
+
+            [:span {:class (stl/css :icon-text)} "MAX H"]
+            [:> deprecated-input/numeric-input*
+             {:class (stl/css :numeric-input)
+              :no-validate true
+              :min 0
+              :data-wrap true
+              :placeholder "--"
+              :data-attr "layout-item-max-h"
+              :on-focus dom/select-target
+              :on-change on-layout-item-max-h-change
+              :value (get values :layout-item-max-h)
+              :is-nillable true}]])]])]))
 
 (defn- check-layout-item-menu-props
   [old-props new-props]
@@ -949,12 +962,4 @@
                   (= v-sizing :fill))
           [:> layout-size-constraints* {:ids ids
                                         :values values
-                                        :applied-tokens applied-tokens}])
-
-        (when is-layout-child?
-          [:> layout-keyframes*
-           {:groups (cond-> [[(tr "workspace.animation.layout-keys.margin")
-                              [:layout-margin-top :layout-margin-right :layout-margin-bottom :layout-margin-left]]]
-                      (or (= h-sizing :fill) (= v-sizing :fill))
-                      (conj [(tr "workspace.animation.layout-keys.size")
-                             [:layout-min-width :layout-max-width :layout-min-height :layout-max-height]]))}])])]))
+                                        :applied-tokens applied-tokens}])])]))

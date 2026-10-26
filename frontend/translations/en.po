@@ -7260,18 +7260,6 @@ msgstr "Layer blur"
 msgid "workspace.animation.background-blur"
 msgstr "Background blur"
 
-msgid "workspace.animation.layout-keys.gap"
-msgstr "Gap"
-
-msgid "workspace.animation.layout-keys.padding"
-msgstr "Padding"
-
-msgid "workspace.animation.layout-keys.margin"
-msgstr "Margin"
-
-msgid "workspace.animation.layout-keys.size"
-msgstr "Min & max size"
-
 msgid "workspace.animation.layout-row-gap"
 msgstr "Row gap"
 

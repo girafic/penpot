@@ -103,6 +103,38 @@
   border-radius: 0 $br-8 $br-8 0;
 }
 
+// In motion mode the type and its keyframe diamond, one field: the
+// diamond is its trailing part (see `keyframe-diamond*`).
+.blur-type {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+  min-inline-size: 0;
+  align-self: stretch;
+  border-radius: 0 $br-8 $br-8 0;
+  background-color: var(--color-background-tertiary);
+
+  > :first-child {
+    flex-grow: 1;
+    min-inline-size: 0;
+    border-radius: 0;
+  }
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
+}
+
+.hidden .blur-type {
+  background-color: transparent;
+}
+
 .actions {
   display: flex;
   align-items: center;

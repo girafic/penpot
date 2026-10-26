@@ -5,6 +5,7 @@
 // Copyright (c) KALEIDOS INC
 
 @use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_utils.scss" as *;
 
 // The 3D rotation tool of the design tab (Penpot Motion)
 .tilt-tool {
@@ -53,6 +54,11 @@
   background-color: var(--color-background-primary);
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
   outline: none;
+
+  // in motion mode its fields hold keyframe diamonds too
+  &:has(.tilt-field > button) {
+    width: px2rem(344);
+  }
 }
 
 .tilt-header {
@@ -145,6 +151,26 @@
 
   &.wide {
     grid-column: 1 / -1;
+  }
+
+  // the keyframe diamond is the trailing part of the field; a turn then
+  // without its degree sign, as in the design tab, so its value has room
+  &:has(> button) {
+    padding-inline-end: 0;
+  }
+
+  &:not(.wide):has(> button) .tilt-field-unit {
+    display: none;
+  }
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
   }
 }
 

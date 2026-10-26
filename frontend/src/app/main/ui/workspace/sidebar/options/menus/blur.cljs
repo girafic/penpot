@@ -15,6 +15,7 @@
    [app.main.features :as features]
    [app.main.store :as st]
    [app.main.ui.components.title-bar :refer [title-bar*]]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.controls.numeric-input :refer [numeric-input*]]
    [app.main.ui.ds.controls.select :refer [select*]]
@@ -94,6 +95,7 @@
         lb-disabled? (and (= 2 (count blur-values))
                           (not= blur-key :blur))
         label-ref (mf/use-ref nil)
+        motion-id (mf/use-ctx ctx/motion-shape-id)
 
         type-options
         [{:value "layer-blur"  :disabled lb-disabled? :id "layer-blur" :label (tr "workspace.options.blur-options.layer-blur")}
@@ -138,26 +140,31 @@
                                          (= false bg-blur?)))
                          :aria-label (tr "workspace.options.blur-options.toggle-more-options")
                          :icon i/menu}]
-       (cond bg-blur?
-             [:> select*
-              {:class (stl/css :blur-type-select)
-               :default-selected (d/name (:type value))
-               :aria-label (tr "workspace.options.blur-options.blur-type-select")
-               :options type-options
-               :disabled is-hidden
-               :on-change handle-type-change}]
-             background-blur-disabled?
-             [:> tooltip*
-              {:trigger-ref label-ref
-               :id "background-blur-disabled-label"
-               :class (stl/css :disabled-label-tooltip)
-               :content (tr "workspace.options.blur-options.disabled-blur-label")}
-              label]
-             :else
-             label)
-       [:> keyframe-diamond* {:properties [(if (= blur-key :background-blur)
-                                             :background-blur
-                                             :blur)]}]]
+       ;; in motion mode the keyframe diamond is the trailing part of the type
+       (let [kind (mf/html [:* (cond bg-blur?
+                                     [:> select*
+                                      {:class (stl/css :blur-type-select)
+                                       :default-selected (d/name (:type value))
+                                       :aria-label (tr "workspace.options.blur-options.blur-type-select")
+                                       :options type-options
+                                       :disabled is-hidden
+                                       :on-change handle-type-change}]
+                                     background-blur-disabled?
+                                     [:> tooltip*
+                                      {:trigger-ref label-ref
+                                       :id "background-blur-disabled-label"
+                                       :class (stl/css :disabled-label-tooltip)
+                                       :content (tr "workspace.options.blur-options.disabled-blur-label")}
+                                      label]
+                                     :else
+                                     label)])]
+         (if (some? motion-id)
+           [:div {:class (stl/css :blur-type)}
+            kind
+            [:> keyframe-diamond* {:properties [(if (= blur-key :background-blur)
+                                                  :background-blur
+                                                  :blur)]}]]
+           kind))]
 
       [:div {:class (stl/css :actions)}
        [:> icon-button* {:variant "ghost"

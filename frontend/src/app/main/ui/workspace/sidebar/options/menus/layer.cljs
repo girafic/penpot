@@ -21,7 +21,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyed-field* keyframe-diamond*]]
    [app.render-wasm.api :as wasm.api]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -236,29 +236,27 @@
          :on-pointer-enter-option handle-blend-mode-enter
          :on-pointer-leave-option handle-blend-mode-leave}]
 
-       [:div {:class (stl/css-case :fused-input true
-                                   :with-keyframe (some? motion-id))}
-        [:> numeric-input-wrapper*
-         {:on-change on-opacity-change
-          :on-detach on-detach-token
-          :icon i/percentage
-          :min 0
-          :max 100
-          :attr :opacity
-          :property (tr "workspace.options.opacity")
-          :applied-token (get applied-tokens :opacity)
-          :placeholder (if (or (= :multiple (get applied-tokens :opacity))
-                               (= :multiple (or (get values :opacity) 1)))
-                         (tr "settings.multiple")
-                         "--")
-          :align :right
-          :disabled (if (or (= :multiple hidden?) hidden?) true false)
-          :class (stl/css :numeric-input-wrapper)
-          :value (if (= :multiple opacity)
-                   opacity
-                   (* 100 (d/nilv opacity 1)))}]
-        (when motion-id
-          [:> keyframe-diamond* {:properties [:opacity]}])]
+       [:div {:class (stl/css :fused-input)}
+        [:> keyed-field* {:properties [:opacity]}
+         [:> numeric-input-wrapper*
+          {:on-change on-opacity-change
+           :on-detach on-detach-token
+           :icon i/percentage
+           :min 0
+           :max 100
+           :attr :opacity
+           :property (tr "workspace.options.opacity")
+           :applied-token (get applied-tokens :opacity)
+           :placeholder (if (or (= :multiple (get applied-tokens :opacity))
+                                (= :multiple (or (get values :opacity) 1)))
+                          (tr "settings.multiple")
+                          "--")
+           :align :right
+           :disabled (if (or (= :multiple hidden?) hidden?) true false)
+           :class (stl/css :numeric-input-wrapper)
+           :value (if (= :multiple opacity)
+                    opacity
+                    (* 100 (d/nilv opacity 1)))}]]]
 
        (cond
          (or (= :multiple hidden?) (not hidden?))

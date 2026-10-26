@@ -4,6 +4,7 @@
 //
 // Copyright (c) KALEIDOS INC
 
+@use "refactor/common-refactor.scss" as deprecated;
 @use "ds/_borders.scss" as *;
 @use "ds/_sizes.scss" as *;
 @use "ds/_utils.scss" as *;
@@ -362,7 +363,7 @@
 
 .trim-fields {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
   gap: var(--sp-xs);
 }
@@ -370,4 +371,62 @@
 // How the trim of a group draws the layers in it.
 .trim-mode {
   inline-size: 100%;
+}
+
+// A field with its keyframe diamond (see `keyed-field*`): the diamond is
+// the trailing part of the field, one control with the input, as in the
+// measures.
+.keyed-field {
+  @extend %input-element;
+
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+  padding-inline-end: 0;
+
+  input {
+    min-inline-size: 0;
+    inline-size: auto;
+    flex: 1;
+  }
+
+  > :first-child {
+    flex: 1;
+    min-inline-size: 0;
+    border: none;
+    background: transparent;
+    block-size: 100%;
+
+    // the input inside the box, not a pixel below it
+    > :first-child {
+      block-size: 100%;
+    }
+  }
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
+
+  // the word before the value (DASH, %) only as wide as it is, so the
+  // value keeps room beside the diamond in a narrow field
+  :global(.main_ui_ds_controls_numeric_input__text-icon) {
+    flex-shrink: 0;
+    min-inline-size: 0;
+  }
+
+  // a disabled field looks disabled as a whole, as its input does alone
+  &:has(input:disabled) {
+    background-color: var(--color-background-primary);
+    border-color: var(--color-background-quaternary);
+
+    > :first-child > :first-child {
+      --input-outline-color: transparent;
+    }
+  }
 }

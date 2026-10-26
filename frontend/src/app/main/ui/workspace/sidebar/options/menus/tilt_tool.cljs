@@ -20,6 +20,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -66,8 +67,9 @@
 
 (mf/defc ^:private axis-field*
   "A number of the tool, `label` before it and `unit` after it, `wide`
-  across the row."
-  [{:keys [label title unit value on-change wide]}]
+  across the row; in motion mode the keyframe diamond of its property
+  `keyframes` ends it."
+  [{:keys [label title unit value on-change wide keyframes]}]
   [:div {:class (stl/css-case :tilt-field true
                               :wide (true? wide))
          :title title}
@@ -79,7 +81,8 @@
      :on-change on-change
      :class (stl/css :tilt-field-input)
      :value (if (= :multiple value) value (or value 0))}]
-   [:span {:class (stl/css :tilt-field-unit)} unit]])
+   [:span {:class (stl/css :tilt-field-unit)} unit]
+   [:> keyframe-diamond* {:properties [keyframes]}]])
 
 (mf/defc tilt-tool*
   "The button of the tool and, open, its pad. `rotate-x`, `rotate-y`,
@@ -251,16 +254,20 @@
           [:div {:class (stl/css :tilt-fields)}
            [:> axis-field* {:label "X" :unit "°" :value rotate-x
                             :title (tr "workspace.options.rotate-x")
+                            :keyframes :rotate-x
                             :on-change on-x}]
            [:> axis-field* {:label "Y" :unit "°" :value rotate-y
                             :title (tr "workspace.options.rotate-y")
+                            :keyframes :rotate-y
                             :on-change on-y}]
            [:> axis-field* {:label "Z" :unit "°" :value rotation
                             :title (tr "workspace.options.rotation")
+                            :keyframes :rotation
                             :on-change on-rotation-change}]
            [:> axis-field* {:label (tr "workspace.options.tilt-tool.depth") :unit "px" :value translate-z
                             :title (tr "workspace.options.depth")
                             :wide true
+                            :keyframes :translate-z
                             :on-change on-depth}]]
           [:> button* {:variant "secondary"
                        :class (stl/css :tilt-isometric)

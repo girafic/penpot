@@ -216,9 +216,10 @@
   border: $b-1 solid var(--opacity-input-boder-color);
   background-color: var(--opacity-input-background-color);
 
+  // with its keyframe diamond: as wide again as the diamond, not as wide
+  // as its input would grow in the auto column of the row
   &:has(button) {
-    inline-size: auto;
-    min-inline-size: px2rem(84);
+    inline-size: px2rem(84);
   }
 
   &:hover {
