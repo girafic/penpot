@@ -476,6 +476,36 @@ fn reflow_shape(
     Ok(())
 }
 
+/// A layout that resizes itself to its content (auto width or height) gives
+/// entries only to the children it moves. `set_modifiers` hands a shape
+/// without an entry the transform of its nearest ancestor, so the children
+/// that stay put would take the layout's own resize. An identity entry
+/// keeps them as they are.
+fn keep_unmoved_layout_children(shapes: ShapesPoolRef, modifiers: &mut HashMap<Uuid, Matrix>) {
+    let resized: Vec<Uuid> = modifiers
+        .iter()
+        .filter(|(_, transform)| !math::is_move_only_matrix(transform))
+        .map(|(id, _)| *id)
+        .collect();
+
+    for id in resized {
+        let Some(shape) = shapes.get(&id) else {
+            continue;
+        };
+        if !shape.has_layout() {
+            continue;
+        }
+        for child_id in shape.children_ids_iter(true) {
+            if shapes
+                .get(child_id)
+                .is_some_and(|child| !child.is_absolute())
+            {
+                modifiers.entry(*child_id).or_default();
+            }
+        }
+    }
+}
+
 /// Propagates a set of transforms through the shape tree, returning one
 /// transform per affected shape.
 ///
@@ -573,6 +603,8 @@ pub fn propagate_modifiers(
             reflow_shape(id, state, &mut reflown, &mut entries, &mut bounds_temp)?;
         }
     }
+
+    keep_unmoved_layout_children(shapes, &mut modifiers);
 
     Ok(modifiers
         .iter()
@@ -1033,6 +1065,73 @@ mod tests {
         assert!(is_close_to(bounds.height(), 50.3));
         assert!(is_close_to(bounds.min_x(), 10.4));
         assert!(is_close_to(bounds.min_y(), 20.6));
+    }
+
+    #[test]
+    fn test_auto_width_layout_keeps_its_unmoved_children() {
+        let bar_id = Uuid::new_v4();
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let mut state = State::new();
+        state.shapes.initialize(10);
+        {
+            let bar = state.shapes.add_shape(bar_id);
+            bar.set_shape_type(Type::Frame(Frame::default()));
+            bar.set_selrect(0.0, 0.0, 100.0, 40.0);
+            bar.set_flex_layout_data(
+                FlexDirection::Row,
+                0.0,
+                0.0,
+                AlignItems::Start,
+                AlignContent::Start,
+                JustifyItems::Start,
+                JustifyContent::Start,
+                WrapType::NoWrap,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            );
+            bar.set_flex_layout_child_data(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                Sizing::Auto,
+                Sizing::Fix,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                None,
+            );
+            // a layout flows its children from the end of the list
+            bar.add_child(second_id);
+            bar.add_child(first_id);
+        }
+        for (id, left) in [(first_id, 0.0), (second_id, 50.0)] {
+            let child = state.shapes.add_shape(id);
+            child.set_parent(bar_id);
+            child.set_selrect(left, 0.0, left + 50.0, 40.0);
+        }
+
+        // the second child doubles its width, the bar grows along
+        let mut widen = Matrix::scale((2.0, 1.0));
+        widen.post_translate(Point::new(50.0, 0.0));
+        widen.pre_translate(Point::new(-50.0, 0.0));
+        let entry = TransformEntry::from_input(second_id, widen);
+        let result = propagate_modifiers(&state, &[entry], PixelPrecision::Disabled).unwrap();
+        state
+            .shapes
+            .set_modifiers(result.iter().map(|e| (e.id, e.transform)).collect());
+
+        let bar = state.shapes.get(&bar_id).unwrap();
+        assert!(is_close_to(bar.selrect.width(), 150.0));
+        let first = state.shapes.get(&first_id).unwrap();
+        assert!(is_close_to(first.selrect.width(), 50.0));
+        assert!(is_close_to(first.selrect.x(), 0.0));
     }
 
     #[test]
