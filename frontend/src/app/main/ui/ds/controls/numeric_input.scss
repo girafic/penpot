@@ -45,7 +45,9 @@
 
   color: var(--color-foreground-secondary);
   inline-size: fit-content;
-  min-inline-size: px2rem(46);
+
+  // a field narrower than most sets it smaller
+  min-inline-size: var(--numeric-input-text-icon-min-size, #{px2rem(46)});
   padding-inline-start: var(--sp-xs);
 }
 

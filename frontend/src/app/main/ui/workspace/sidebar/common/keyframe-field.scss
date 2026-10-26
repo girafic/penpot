@@ -1,0 +1,26 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/_utils.scss" as *;
+
+// In motion mode the keyframe diamond of a field (`keyframe-diamond*`) is
+// its trailing part, one control with its input: `$size` wide, as tall as
+// the field and with its end corners. The field needs no end padding then.
+@mixin keyframe-trailing($size: px2rem(28)) {
+  &:has(> button) {
+    padding-inline-end: 0;
+  }
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: $size;
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
+}

@@ -9,6 +9,7 @@
 @use "ds/_sizes.scss" as *;
 @use "ds/_utils.scss" as *;
 @use "../../../sidebar/common/sidebar.scss" as sidebar;
+@use "../../../sidebar/common/keyframe-field.scss" as kf;
 
 .element-set {
   max-width: var(--options-width);
@@ -106,6 +107,8 @@
 // In motion mode the type and its keyframe diamond, one field: the
 // diamond is its trailing part (see `keyframe-diamond*`).
 .blur-type {
+  @include kf.keyframe-trailing;
+
   display: flex;
   align-items: center;
   flex-grow: 1;
@@ -118,16 +121,6 @@
     flex-grow: 1;
     min-inline-size: 0;
     border-radius: 0;
-  }
-
-  > button {
-    flex: none;
-    align-self: stretch;
-    inline-size: px2rem(28);
-    block-size: auto;
-    margin: 0;
-    border-start-end-radius: inherit;
-    border-end-end-radius: inherit;
   }
 }
 

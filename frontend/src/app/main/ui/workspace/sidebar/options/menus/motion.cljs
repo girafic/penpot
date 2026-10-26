@@ -121,7 +121,9 @@
   "`children`, a field, with the keyframe diamond of `properties`
   (optional `index`) beside it in motion mode (see `keyframe-diamond*`),
   the two placed by `class` as the field is in its grid; the field alone
-  outside it, or when the diamond does not fit the layer."
+  outside it, or when the diamond does not fit the layer. Its box is the
+  box of the field: it makes the field it wraps borderless and see-through
+  and narrows the word before its value (`.keyed-field`)."
   [{:keys [properties index class children]}]
   (if (use-fits (mf/use-ctx ctx/motion-shape-id) properties index)
     [:div {:class (dm/str (stl/css :keyed-field) (when (some? class) (dm/str " " class)))}

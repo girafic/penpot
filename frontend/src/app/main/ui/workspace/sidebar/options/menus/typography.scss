@@ -10,6 +10,7 @@
 @use "ds/_borders.scss" as *;
 @use "ds/mixins.scss" as *;
 @use "ds/_utils.scss" as *;
+@use "../../../sidebar/common/keyframe-field.scss" as kf;
 
 // Must match BOX_HEIGHT in scripts/build-fonts-preview.js (the sprite bakes each
 // font name into that box at 1 unit == 1px).
@@ -257,24 +258,6 @@ $font-preview-box-height: 28px;
   inline-size: 100%;
 }
 
-// In motion mode the keyframe diamond is the trailing part of a field, one
-// control with its input (see `keyframe-diamond*`).
-%keyframe-trailing {
-  &:has(> button) {
-    padding-inline-end: 0;
-  }
-
-  > button {
-    flex: none;
-    align-self: stretch;
-    inline-size: px2rem(28);
-    block-size: auto;
-    margin: 0;
-    border-start-end-radius: inherit;
-    border-end-end-radius: inherit;
-  }
-}
-
 .font-modifiers {
   display: flex;
   gap: var(--sp-xs);
@@ -282,7 +265,7 @@ $font-preview-box-height: 28px;
 
 .font-size-options {
   @extend %asset-element;
-  @extend %keyframe-trailing;
+  @include kf.keyframe-trailing;
   @include t.use-typography("body-small");
 
   flex-grow: 1;
@@ -294,7 +277,7 @@ $font-preview-box-height: 28px;
 }
 
 .font-variant-options {
-  @extend %keyframe-trailing;
+  @include kf.keyframe-trailing;
 
   padding: 0;
   flex-grow: 2;
@@ -328,7 +311,7 @@ $font-preview-box-height: 28px;
 .line-height,
 .letter-spacing {
   @extend %input-element;
-  @extend %keyframe-trailing;
+  @include kf.keyframe-trailing;
   @include t.use-typography("body-small");
 
   .icon {

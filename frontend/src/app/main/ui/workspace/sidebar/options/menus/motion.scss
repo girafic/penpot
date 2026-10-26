@@ -10,6 +10,7 @@
 @use "ds/_utils.scss" as *;
 @use "ds/typography.scss" as t;
 @use "../../../sidebar/common/sidebar.scss" as sidebar;
+@use "../../../sidebar/common/keyframe-field.scss" as kf;
 
 .keyframe-toggle {
   display: grid;
@@ -378,11 +379,11 @@
 // measures.
 .keyed-field {
   @extend %input-element;
+  @include kf.keyframe-trailing;
 
   display: flex;
   align-items: center;
   min-inline-size: 0;
-  padding-inline-end: 0;
 
   input {
     min-inline-size: 0;
@@ -403,22 +404,9 @@
     }
   }
 
-  > button {
-    flex: none;
-    align-self: stretch;
-    inline-size: px2rem(28);
-    block-size: auto;
-    margin: 0;
-    border-start-end-radius: inherit;
-    border-end-end-radius: inherit;
-  }
-
   // the word before the value (DASH, %) only as wide as it is, so the
   // value keeps room beside the diamond in a narrow field
-  :global(.main_ui_ds_controls_numeric_input__text-icon) {
-    flex-shrink: 0;
-    min-inline-size: 0;
-  }
+  --numeric-input-text-icon-min-size: min-content;
 
   // a disabled field looks disabled as a whole, as its input does alone
   &:has(input:disabled) {

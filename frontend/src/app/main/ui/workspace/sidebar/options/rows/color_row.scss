@@ -9,6 +9,7 @@
 @use "ds/_borders.scss" as *;
 @use "ds/mixins.scss" as *;
 @use "ds/_utils.scss" as *;
+@use "../../../sidebar/common/keyframe-field.scss" as kf;
 
 .color-data {
   display: flex;
@@ -190,15 +191,7 @@
 
 .color-name-wrapper,
 .opacity-element-wrapper {
-  > button {
-    flex: none;
-    align-self: stretch;
-    inline-size: px2rem(24);
-    block-size: auto;
-    margin: 0;
-    border-start-end-radius: inherit;
-    border-end-end-radius: inherit;
-  }
+  @include kf.keyframe-trailing(px2rem(24));
 }
 
 .opacity-element-wrapper {

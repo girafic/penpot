@@ -7,6 +7,7 @@
 @use "refactor/common-refactor.scss" as deprecated;
 @use "../../../sidebar/common/sidebar.scss" as sidebar;
 @use "ds/_utils.scss" as *;
+@use "../../../sidebar/common/keyframe-field.scss" as kf;
 
 .element-set {
   display: grid;
@@ -266,7 +267,7 @@
 
 // The diamond is the trailing part of the field, one control with the input.
 .with-keyframe {
-  padding-inline-end: 0;
+  @include kf.keyframe-trailing;
 
   input {
     min-inline-size: 0;
@@ -285,16 +286,6 @@
     > :first-child {
       block-size: 100%;
     }
-  }
-
-  > button {
-    flex: none;
-    align-self: stretch;
-    inline-size: px2rem(28);
-    block-size: auto;
-    margin: 0;
-    border-start-end-radius: inherit;
-    border-end-end-radius: inherit;
   }
 }
 
@@ -319,10 +310,7 @@
 // as it is, so the value starts where it does in the fields with an icon.
 .tilt,
 .depth {
-  :global(.main_ui_ds_controls_numeric_input__text-icon) {
-    flex-shrink: 0;
-    min-inline-size: px2rem(16);
-  }
+  --numeric-input-text-icon-min-size: #{px2rem(16)};
 }
 
 // The heading of the 3D view of a board, whose arrow folds it.
