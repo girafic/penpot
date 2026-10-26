@@ -280,6 +280,11 @@
     border: none;
     background: transparent;
     block-size: 100%;
+
+    // the input inside the box, not a pixel below it
+    > :first-child {
+      block-size: 100%;
+    }
   }
 
   > button {
@@ -308,6 +313,16 @@
 // its rows as far apart as those of the fields above
 .perspective {
   row-gap: var(--sp-xs);
+}
+
+// The word before the value of a tilt or the depth (X°, Y°, Z) only as wide
+// as it is, so the value starts where it does in the fields with an icon.
+.tilt,
+.depth {
+  :global(.main_ui_ds_controls_numeric_input__text-icon) {
+    flex-shrink: 0;
+    min-inline-size: px2rem(16);
+  }
 }
 
 // The heading of the 3D view of a board, whose arrow folds it.
