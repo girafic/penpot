@@ -7206,6 +7206,18 @@ msgid "workspace.animation.stroke-width"
 msgstr "Stroke %s width"
 
 #: src/app/util/motion_labels.cljs
+msgid "workspace.animation.stroke-width-top"
+msgstr "Stroke %s top width"
+
+msgid "workspace.animation.stroke-width-right"
+msgstr "Stroke %s right width"
+
+msgid "workspace.animation.stroke-width-bottom"
+msgstr "Stroke %s bottom width"
+
+msgid "workspace.animation.stroke-width-left"
+msgstr "Stroke %s left width"
+
 msgid "workspace.animation.stroke-dash"
 msgstr "Stroke %s dash"
 
@@ -8787,6 +8799,14 @@ msgstr "Gradients · Partly kept at rest in %s"
 #: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
 msgid "workspace.options.export.issue.svg-gradient.text"
 msgstr "The gradients of texts, the points of radial gradients of paths and a change from linear to radial stay as they rest in %s. The other gradients play."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.stroke-sides"
+msgstr "Stroke widths per side · Even in %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.stroke-sides.text"
+msgstr "An %s draws a stroke as wide all round, as wide as its top side: the widths of the other sides and their keyframes stay out. Video and GIF play them."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
 msgid "workspace.options.export.issue.text-style"

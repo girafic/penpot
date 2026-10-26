@@ -475,6 +475,9 @@
      :stroke-color   (:stroke-color (item-at (:strokes shape) index))
      :stroke-opacity (or (:stroke-opacity (item-at (:strokes shape) index)) 1)
      :stroke-width   (or (:stroke-width (item-at (:strokes shape) index)) 0)
+     ;; a side of a stroke: its own width, or the stroke's
+     (:stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left)
+     (cta/stroke-side-width (item-at (:strokes shape) index) property)
      ;; the dash pattern as a dashed stroke draws it (see `cta/stroke-dash`)
      :stroke-dash    (first (cta/stroke-dash (item-at (:strokes shape) index)))
      :stroke-gap     (second (cta/stroke-dash (item-at (:strokes shape) index)))
@@ -510,6 +513,7 @@
 (def appearance-properties
   [:fill-color :fill-opacity :fill-gradient
    :stroke-color :stroke-opacity :stroke-width
+   :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
    :stroke-dash :stroke-gap :stroke-dash-offset
    :shadow-offset-x :shadow-offset-y :shadow-blur
    :shadow-spread :shadow-color :shadow-opacity

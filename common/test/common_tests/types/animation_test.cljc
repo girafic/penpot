@@ -7750,3 +7750,62 @@
       (let [reworded (assoc-in objects [sid :content :children 0 :children 0 :children 0 :text] "Huge")]
         (t/is (empty? (get-in (cta/record-unanimated (mk-timeline) objects reworded [sid] 500)
                               [:tracks sid :keyframes])))))))
+
+(defn- sided-rect
+  "A rectangle with a stroke 2 px wide all round, its four sides set (as
+  the Design tab sets them once they are edited one by one)."
+  []
+  (cts/setup-shape
+   {:type :rect :x 0 :y 0 :width 100 :height 60
+    :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-alignment :inner
+               :stroke-style :solid :stroke-width 2
+               :stroke-width-top 2 :stroke-width-right 2 :stroke-width-bottom 2 :stroke-width-left 2}]}))
+
+(defn- played-stroke
+  [tl shape time]
+  (let [tree (ctaf/timeline->modif-tree tl {(:id shape) shape} time)]
+    (first (:strokes (ctm/apply-structure-modifiers shape (get-in tree [(:id shape) :modifiers]))))))
+
+(t/deftest the-sides-of-a-stroke-play-one-by-one
+  (let [shape (sided-rect)
+        sid   (:id shape)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 0 :property :stroke-width-top :index 0 :value 2 :easing :linear})
+                  (cta/add-keyframe sid {:time 1000 :property :stroke-width-top :index 0 :value 10}))
+        half  (played-stroke tl shape 500)]
+    (t/testing "the top side plays, the others stay"
+      (t/is (= [6.0 2.0 2.0 2.0] (mapv #(double (get half %)) cta/stroke-side-properties))))
+    (t/testing "the width of the stroke follows its top side, as the Design tab keeps it"
+      (t/is (mth/close? 6 (:stroke-width half))))
+    (t/testing "only the sides of rectangles and boards"
+      (t/is (cta/fits-keyframe? shape {:property :stroke-width-left :index 0}))
+      (t/is (not (cta/fits-keyframe? shape {:property :stroke-width-left :index 1})))
+      (t/is (not (cta/fits-keyframe? (assoc shape :type :circle) {:property :stroke-width-left :index 0}))))))
+
+(t/deftest the-width-of-a-stroke-with-sides-takes-the-sides-along
+  (let [shape (sided-rect)
+        sid   (:id shape)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 0 :property :stroke-width :index 0 :value 2 :easing :linear})
+                  (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 0 :value 8})
+                  (cta/add-keyframe sid {:time 0 :property :stroke-width-right :index 0 :value 4}))]
+    (t/testing "every side without keyframes of its own"
+      (t/is (= [8.0 4.0 8.0 8.0] (mapv #(double (get (played-stroke tl shape 1000) %)) cta/stroke-side-properties))))
+    (t/testing "a stroke without sides plays its width alone"
+      (let [plain (update shape :strokes (fn [ss] (mapv #(apply dissoc % cta/stroke-side-properties) ss)))
+            width (-> (mk-timeline)
+                      (cta/add-keyframe sid {:time 0 :property :stroke-width :index 0 :value 2 :easing :linear})
+                      (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 0 :value 8}))
+            out   (played-stroke width plain 1000)]
+        (t/is (mth/close? 8 (:stroke-width out)))
+        (t/is (not (cta/sided-stroke? out)))))))
+
+(t/deftest an-edit-of-a-side-records-the-side
+  (let [shape   (sided-rect)
+        sid     (:id shape)
+        objects {sid shape}
+        after   (update-in objects [sid :strokes 0] assoc :stroke-width-top 6 :stroke-width 6)
+        kfs     (get-in (cta/record-unanimated (mk-timeline) objects after [sid] 500) [:tracks sid :keyframes])]
+    (t/is (= #{:stroke-width-top} (into #{} (map :property) kfs))
+          "not the width of the stroke, which would take the other sides along")
+    (t/is (= [[0 2] [500 6]] (mapv (juxt :time :value) (sort-by :time kfs))))))

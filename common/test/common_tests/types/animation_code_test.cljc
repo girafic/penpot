@@ -604,3 +604,11 @@
     (t/is (empty? (select-keys (acss/frame-values (assoc text :type :rect) {:font-size 30} {:x 0 :y 0})
                                [:font-size])))
     (t/is (= "fontSize" (get ctac/property-names :font-size)))))
+
+(t/deftest the-sides-of-a-stroke-play-as-border-widths
+  (let [rect  {:type :rect :selrect {:x 0 :y 0 :width 100 :height 60}
+               :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
+                          :stroke-width-top 2 :stroke-width-right 2 :stroke-width-bottom 2 :stroke-width-left 2}]}
+        frame (acss/frame-values rect {:stroke-width-left {0 7}} {:x 0 :y 0})]
+    (t/is (= [2 2 2 7] (:border-width frame)))
+    (t/is (= "strokeWidthLeft" (get ctac/property-names :stroke-width-left)))))

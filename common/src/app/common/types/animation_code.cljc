@@ -53,6 +53,10 @@
    :stroke-color "strokeColor"
    :stroke-opacity "strokeOpacity"
    :stroke-width "strokeWidth"
+   :stroke-width-top "strokeWidthTop"
+   :stroke-width-right "strokeWidthRight"
+   :stroke-width-bottom "strokeWidthBottom"
+   :stroke-width-left "strokeWidthLeft"
    :stroke-dash "strokeDash"
    :stroke-gap "strokeGap"
    :stroke-dash-offset "strokeDashOffset"
@@ -96,6 +100,7 @@
    :opacity :r1 :r2 :r3 :r4
    :fill-color :fill-opacity :fill-gradient
    :stroke-color :stroke-opacity :stroke-width
+   :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
    :stroke-dash :stroke-gap :stroke-dash-offset
    :shadow-offset-x :shadow-offset-y :shadow-blur
    :shadow-spread :shadow-color :shadow-opacity
@@ -399,7 +404,8 @@
    ["backgroundColor" #{:fill-color :fill-opacity} :background-color]
    ["backgroundImage" #{:fill-gradient} :gradient]
    ["borderColor" #{:stroke-color :stroke-opacity} :border-color]
-   ["borderWidth" #{:stroke-width} :border-width]
+   ["borderWidth" #{:stroke-width :stroke-width-top :stroke-width-right
+                    :stroke-width-bottom :stroke-width-left} :border-width]
    ["boxShadow" #{:shadow-offset-x :shadow-offset-y :shadow-blur
                   :shadow-spread :shadow-color :shadow-opacity} :box-shadow]
    ["filter" #{:blur :scene} :filter]
@@ -450,6 +456,10 @@
     ;; motion.dev blends two of as many stops, number by number
     "backgroundImage" (str "\"" (if (some? v) (acss/css-gradient-image v) "none") "\"")
     "backdropFilter" (str "\"blur(" (react-number v) "px)\"")
+    ;; the widths of the sides of a stroke, top first
+    "borderWidth" (if (sequential? v)
+                    (str "\"" (str/join " " (map #(str (react-number %) "px") v)) "\"")
+                    (react-number v))
     (react-number v)))
 
 (def ^:private linear-ease "\"linear\"")

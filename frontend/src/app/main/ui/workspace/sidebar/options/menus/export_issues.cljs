@@ -39,6 +39,7 @@
    :svg/three-d     i/rotation
    :svg/dash        i/stroke-size
    :svg/gradient    i/fill-content
+   :stroke-sides    i/stroke-size
    :text-style      i/text})
 
 (defn issue-texts

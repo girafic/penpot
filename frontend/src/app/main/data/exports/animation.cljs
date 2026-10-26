@@ -656,6 +656,9 @@
     dash of its vectors, so the trim plays and the dashes stay out;
   - `:svg/gradient`, gradients an SVG keeps as they rest (see
     `asvg/svg-gradient-static?`);
+  - `:stroke-sides`, the widths of the sides of a stroke as they play
+    (see `cta/stroke-side-properties`): an SVG and Lottie draw a stroke as
+    wide all round, the width of its top side;
   - `:text-style`, the type style of a text (see
     `cta/text-style-properties`), which no markup format plays: its
     texts are drawn, or outlined, as they rest;
@@ -777,6 +780,8 @@
                              (when-let [shape (get objects id)]
                                (asvg/svg-gradient-static? shape track)))
                            (:tracks resolved)))]
+           [:stroke-sides markup-formats
+            (boolean (some animated cta/stroke-side-properties))]
            [:text-style markup-formats
             (boolean (some animated cta/text-style-properties))]]]
       (reduce (fn [issues [kind formats on?]]

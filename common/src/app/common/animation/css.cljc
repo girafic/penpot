@@ -168,7 +168,8 @@
   then, for the properties `values` holds, `:opacity`, `:border-radius`
   (the four corners in px), `:background-color` and `:border-color` (CSS
   colours of the first solid fill and stroke), `:gradient` (the first
-  gradient fill, see `css-gradient`), `:border-width` (px) (of a
+  gradient fill, see `css-gradient`), `:border-width` (px; of a stroke
+  with sides, the width of each side, top first) (of a
   text, `:color`, `:text-stroke-color` and `:text-stroke-width`: it paints
   its glyphs in the fills of its spans, see `cta/paint-fills`),
   `:box-shadow` (the CSS of its visible shadows), `:blur` and
@@ -263,8 +264,13 @@
       (and stroke (cta/has? values :stroke-color :stroke-opacity))
       (assoc (if text? :text-stroke-color :border-color) (css-color (:stroke-color stroke) (or (:stroke-opacity stroke) 1)))
 
-      (and stroke (contains? values :stroke-width))
+      (and stroke (contains? values :stroke-width) (not (cta/sided-stroke? stroke)))
       (assoc (if text? :text-stroke-width :border-width) (or (:stroke-width stroke) 0))
+
+      ;; a stroke with sides: each as wide as it plays, top first
+      (and stroke (not text?) (cta/sided-stroke? stroke)
+           (apply cta/has? values :stroke-width cta/stroke-side-properties))
+      (assoc :border-width (mapv #(cta/stroke-side-width stroke %) cta/stroke-side-properties))
 
       (cta/has? values :shadow-offset-x :shadow-offset-y :shadow-blur
                 :shadow-spread :shadow-color :shadow-opacity)
@@ -395,7 +401,11 @@
       (conj (str "border-color: " border-color ";"))
 
       (contains? frame :border-width)
-      (conj (str "border-width: " (fmt border-width) "px;"))
+      (conj (str "border-width: "
+                 (if (sequential? border-width)
+                   (str/join " " (map #(str (fmt %) "px") border-width))
+                   (str (fmt border-width) "px"))
+                 ";"))
 
       (contains? frame :color)
       (conj (str "color: " color ";"))

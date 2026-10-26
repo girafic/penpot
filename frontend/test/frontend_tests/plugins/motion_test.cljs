@@ -1701,3 +1701,14 @@
         (t/is (mth/close? 21 (.valueAt timeline text "fontSize" 500)) "the size plays")
         (t/is (thrown? js/Error (.addKeyframe timeline text #js {:property "lineHeight" :time 0 :value "tall"}))
               "a number")))))
+
+(t/deftest the-sides-of-a-stroke-take-keyframes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js timeline         (.addTimeline board)]
+        (.addKeyframe timeline rect #js {:property "strokeWidthTop" :index 0 :time 0 :value 1 :easing "linear"})
+        (.addKeyframe timeline rect #js {:property "strokeWidthTop" :index 0 :time 1000 :value 9})
+        (t/is (= #{:stroke-width-top} (into #{} (map :property) (:keyframes (stored-track store context board rect)))))
+        (t/is (mth/close? 5 (.valueAt timeline rect "strokeWidthTop" 500 0)) "the top side plays")))))

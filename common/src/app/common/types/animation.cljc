@@ -67,6 +67,9 @@
     ;; `lerp-gradient`)
     :fill-gradient
     :stroke-color :stroke-opacity :stroke-width
+    ;; the width of each side of a stroke of a rectangle or a board (see
+    ;; `stroke-side-properties`)
+    :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
     ;; the dash pattern of a dashed stroke: its dash, its gap and where it
     ;; starts along the stroke (see `dashed-stroke?`)
     :stroke-dash :stroke-gap :stroke-dash-offset
@@ -139,6 +142,7 @@
          (zipmap camera-properties (repeat :camera))
          (zipmap [:fill-color :fill-opacity :fill-gradient] (repeat :fill))
          (zipmap [:stroke-color :stroke-opacity :stroke-width
+                  :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
                   :stroke-dash :stroke-gap :stroke-dash-offset]
                  (repeat :stroke))
          (zipmap [:shadow-offset-x :shadow-offset-y :shadow-blur
@@ -179,6 +183,7 @@
 (def indexed-properties
   #{:fill-color :fill-opacity :fill-gradient
     :stroke-color :stroke-opacity :stroke-width
+    :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
     :stroke-dash :stroke-gap :stroke-dash-offset
     :shadow-offset-x :shadow-offset-y :shadow-blur
     :shadow-spread :shadow-color :shadow-opacity})
@@ -3299,6 +3304,44 @@
   [stroke]
   (= :dashed (:stroke-style stroke)))
 
+(def stroke-side-properties
+  "The widths of the sides of a stroke, px, top first: rectangles and
+  boards draw them (see `sided-shape?`), with the WASM renderer."
+  [:stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left])
+
+(defn sided-shape?
+  "Whether `shape` draws the sides of its strokes as wide as each says: a
+  rectangle or a board."
+  [shape]
+  (contains? #{:rect :frame} (:type shape)))
+
+(defn sided-stroke?
+  "Whether `stroke` has a width of its own for its sides (the Design tab
+  sets all four, see `app.common.types.stroke/materialize-stroke-side-widths`)."
+  [stroke]
+  (boolean (some #(some? (get stroke %)) stroke-side-properties)))
+
+(defn stroke-side-width
+  "The width of the side `property` of `stroke`: its own, or the stroke's."
+  [stroke property]
+  (or (get stroke property) (:stroke-width stroke) 0))
+
+(defn- sided
+  "`stroke` with the widths of its sides that play (`played`, `{side
+  width}`) and, when its width plays (`width`, else nil), each other side
+  that wide: all four set and `:stroke-width` the top one, as the Design
+  tab keeps them, so render-wasm draws the sides, or, all alike, the one
+  width."
+  [stroke played width]
+  (let [sides (into {}
+                    (map (fn [side]
+                           [side (cond
+                                   (contains? played side) (get played side)
+                                   (some? width)           width
+                                   :else                   (stroke-side-width stroke side))]))
+                    stroke-side-properties)]
+    (merge stroke sides {:stroke-width (:stroke-width-top sides)})))
+
 (defn stroke-dash
   "The dash and gap of the dashed `stroke`, px: its own, or the width
   plus 10 that a stroke without them draws."
@@ -3311,7 +3354,8 @@
   "The fill, stroke, shadow and blur slots of `shape` that can take
   keyframes: a flat fill its colour and opacity, a gradient one its
   gradient (`:fill-gradient`), images none; the dash pattern of a dashed
-  stroke takes them in any paint."
+  stroke takes them in any paint, and the widths of the sides of a stroke
+  with sides (see `sided-stroke?`) of a rectangle or a board."
   [shape]
   (let [fills   (as-vec (:fills shape))
         strokes (as-vec (:strokes shape))
@@ -3334,6 +3378,9 @@
          (let [properties (cond-> []
                             (solid-color-stroke? stroke)
                             (into [:stroke-color :stroke-opacity :stroke-width])
+
+                            (and (sided-shape? shape) (sided-stroke? stroke))
+                            (into stroke-side-properties)
 
                             (dashed-stroke? stroke)
                             (into [:stroke-dash :stroke-gap :stroke-dash-offset]))]
@@ -3469,20 +3516,41 @@
        gradient-fill?)))
 
 (defn apply-strokes
+  "`strokes` as `values` (see `values-at`) play them: their colour and
+  opacity (flat ones), width and dash pattern (dashed ones), and the widths
+  of their sides (see `sided`): a side plays its own keyframes, a stroke
+  with sides takes the width that plays on every other side."
   [strokes values]
-  (-> strokes
-      (patch-indexed
-       (cond-> {}
-         (contains? values :stroke-color) (assoc :stroke-color (:stroke-color values))
-         (contains? values :stroke-opacity) (assoc :stroke-opacity (:stroke-opacity values)))
-       solid-color-stroke?)
-      (patch-indexed
-       (cond-> {}
-         (contains? values :stroke-width) (assoc :stroke-width (:stroke-width values)))
-       nil)
-      (patch-indexed
-       (select-keys values [:stroke-dash :stroke-gap :stroke-dash-offset])
-       dashed-stroke?)))
+  (let [strokes (-> strokes
+                    (patch-indexed
+                     (cond-> {}
+                       (contains? values :stroke-color) (assoc :stroke-color (:stroke-color values))
+                       (contains? values :stroke-opacity) (assoc :stroke-opacity (:stroke-opacity values)))
+                     solid-color-stroke?)
+                    (patch-indexed
+                     (cond-> {}
+                       (contains? values :stroke-width) (assoc :stroke-width (:stroke-width values)))
+                     nil)
+                    (patch-indexed
+                     (select-keys values [:stroke-dash :stroke-gap :stroke-dash-offset])
+                     dashed-stroke?))
+        sides   (select-keys values stroke-side-properties)
+        widths  (:stroke-width values)]
+    (if (and (empty? sides) (empty? widths))
+      strokes
+      (into []
+            (map-indexed
+             (fn [index stroke]
+               (let [played (into {}
+                                  (keep (fn [[side by-index]]
+                                          (when (contains? by-index index)
+                                            [side (get by-index index)])))
+                                  sides)
+                     width  (get widths index)]
+                 (if (or (seq played) (and (some? width) (sided-stroke? stroke)))
+                   (sided stroke played width)
+                   stroke))))
+            (as-vec strokes)))))
 
 (defn- apply-shadow-color
   [shadow index colors opacities]
@@ -3664,6 +3732,7 @@
       (ctm/change-property :fills (apply-fills (paint-fills shape) values))
 
       (has? values :stroke-color :stroke-opacity :stroke-width
+            :stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left
             :stroke-dash :stroke-gap :stroke-dash-offset)
       (ctm/change-property :strokes (apply-strokes (:strokes shape) values))
 
@@ -4837,6 +4906,9 @@
     :stroke-width
     (some? (get (as-vec (:strokes shape)) index))
 
+    (:stroke-width-top :stroke-width-right :stroke-width-bottom :stroke-width-left)
+    (and (sided-shape? shape) (some? (get (as-vec (:strokes shape)) index)))
+
     (:stroke-dash :stroke-gap :stroke-dash-offset)
     (dashed-stroke? (get (as-vec (:strokes shape)) index))
 
@@ -5175,12 +5247,21 @@
        (as-vec (:fills shape)))
       (reduce-kv
        (fn [m index stroke]
-         (let [[dash gap] (stroke-dash stroke)]
+         (let [[dash gap] (stroke-dash stroke)
+               sides?     (and (sided-shape? shape) (sided-stroke? stroke))]
            (cond-> m
              (solid-color-stroke? stroke)
              (-> (put :stroke-color index (:stroke-color stroke))
-                 (put :stroke-opacity index (or (:stroke-opacity stroke) 1))
-                 (put :stroke-width index (or (:stroke-width stroke) 0)))
+                 (put :stroke-opacity index (or (:stroke-opacity stroke) 1)))
+
+             ;; a stroke with sides keeps its width as wide as its top side:
+             ;; an edit records its sides, not that width, which would take
+             ;; the other sides along as it plays (see `apply-strokes`)
+             (and (solid-color-stroke? stroke) (not sides?))
+             (put :stroke-width index (or (:stroke-width stroke) 0))
+
+             sides?
+             (as-> m (reduce #(put %1 %2 index (stroke-side-width stroke %2)) m stroke-side-properties))
 
              (dashed-stroke? stroke)
              (-> (put :stroke-dash index dash)

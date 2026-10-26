@@ -6270,6 +6270,11 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  *   a change from linear to radial holds until the keyframe. Only fills
  *   that are gradients take it (`fillColor` and `fillOpacity` only flat
  *   ones).
+ * - `strokeWidthTop`, `strokeWidthRight`, `strokeWidthBottom`,
+ *   `strokeWidthLeft`: the width of one side of a stroke of a rectangle or
+ *   a board (see `Stroke.strokeWidthTop`), in pixels, each side on its own
+ *   (the WASM renderer draws them). A `strokeWidth` keyframe sets every
+ *   side of a stroke with widths per side that has no keyframes of its own.
  * - `strokeDash`, `strokeGap`, `strokeDashOffset`: the dash pattern of a
  *   `dashed` stroke (see `Stroke.strokeDash`), in pixels; other strokes
  *   do not take them.
@@ -6327,6 +6332,10 @@ export type AnimatableProperty =
   | 'strokeColor'
   | 'strokeOpacity'
   | 'strokeWidth'
+  | 'strokeWidthTop'
+  | 'strokeWidthRight'
+  | 'strokeWidthBottom'
+  | 'strokeWidthLeft'
   | 'strokeDash'
   | 'strokeGap'
   | 'strokeDashOffset'
