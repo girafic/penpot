@@ -19,6 +19,7 @@
    [app.common.types.audio-clip :as ctau]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
+   [app.common.types.text :as txt]
    [app.common.uuid :as uuid]
    [app.main.data.exports.animation :as dea]
    [app.main.data.exports.animation-tab :as dat]
@@ -1292,6 +1293,23 @@
           (.then (fn [outcome] (t/is (= :export-cancelled outcome) "cancelled meanwhile")))
           (.catch (fn [cause] (t/is false (str "failed: " cause))))
           (.finally (finish done))))))
+
+(t/deftest an-export-loads-the-weights-a-style-plays
+  ;; the weights of the keyframe entries of a style on a text, which the
+  ;; exports play
+  (let [{:keys [objects bid tid]} (text-board)
+        bold    (cta/make-animation {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next)
+                                     :name "Bold" :start 0
+                                     :entries [{:type :keys :property :font-weight :start 0 :duration 1000
+                                                :keyframes [{:time 0 :value 400 :easing :linear} {:time 1000 :value 700}]}]})
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-animation tid bold))
+        page    {:id (uuid/next) :objects objects :timelines {bid tl}}
+        texts   (dea/played-texts page {} [bid])
+        weights (into #{} (map #(:font-weight (first (txt/node-seq txt/is-text-node? (:content %))))) texts)]
+    (t/is (every? #(= tid (:id %)) texts))
+    (t/is (contains? weights "700") "the weight the style ends in")
+    (t/is (< 1 (count weights)) "and those on the way")))
 
 (t/deftest an-export-in-place-exports-the-file-as-the-wait-leaves-it
   ;; What is edited while it waits for the faces of its texts goes along,

@@ -510,20 +510,20 @@
   them (`{}` for none then), as for one whose board's light plays. Of the
   layers in the planes of their boards, none."
   [timeline objects]
-  (let [;; the boards with a light or depth cues at rest, or depth cues
-        ;; that play from none
-        cued (fn [board]
-               (and (cta/depth-cued? board)
-                    (some #(contains? (set cta/depth-cue-properties) (:property %))
-                          (dm/get-in timeline [:tracks (:id board) :keyframes]))))
-        lit  (into #{}
-                   (comp (filter #(and (= :frame (:type %)) (or (some? (gtl/scene %)) (cued %))))
-                         (map :id))
-                   (vals objects))]
+  (let [played (cta/resolve-animations timeline objects)
+        ;; the boards with a light or depth cues at rest, or depth cues
+        ;; that play from none (keyframes of styles too)
+        cued   (fn [board]
+                 (and (cta/depth-cued? board)
+                      (some #(contains? (set cta/depth-cue-properties) (:property %))
+                            (dm/get-in played [:tracks (:id board) :keyframes]))))
+        lit    (into #{}
+                     (comp (filter #(and (= :frame (:type %)) (or (some? (gtl/scene %)) (cued %))))
+                           (map :id))
+                     (vals objects))]
     (if (empty? lit)
       {}
-      (let [played (cta/resolve-animations timeline objects)
-            ;; the page as it plays at a time, which every layer that
+      (let [;; the page as it plays at a time, which every layer that
             ;; shows anew reads
             poses  (volatile! {})
             pose   (fn [t]

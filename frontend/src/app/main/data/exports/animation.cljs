@@ -2312,8 +2312,9 @@
 
 (defn played-texts
   "The texts of the boards `board-ids` of `page` in each weight their
-  animations play (see `cta/apply-text-style`), every hundred between
-  their keyframes too, which an export lays them out in."
+  animations play (see `cta/apply-text-style`), as they play (see
+  `cta/resolve-animations`: the keyframes of styles too), every hundred
+  between their keyframes too, which an export lays them out in."
   [page files board-ids]
   (let [objects (:objects page)]
     (into []
@@ -2328,7 +2329,7 @@
                                    hi (mth/ceil (reduce max weights))]
                                (map #(assoc text :content (cta/apply-text-style text {:font-weight %}))
                                     (distinct (concat weights (range lo (inc hi) 100))))))))
-                       (:tracks tl)))))
+                       (:tracks (cta/resolve-animations tl objects))))))
           board-ids)))
 
 (defn restore-canvas!

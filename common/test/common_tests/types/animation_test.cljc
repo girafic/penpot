@@ -599,6 +599,25 @@
     (t/testing "CSS cues the card frame by frame"
       (t/is (fn? (get (acss/scene-layers tl objects) cid)) "its board's cues play"))))
 
+(t/deftest depth-cues-a-style-plays-cue-their-layers-in-css
+  ;; cues at rest without an effect, which a style turns up
+  (let [board (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+                  (assoc :depth-focus 0))
+        bid   (:id board)
+        card  (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 100})
+                  (assoc :parent-id bid :frame-id bid :rotate-y 60))
+        cid   (:id card)
+        objects {bid (assoc board :shapes [cid]) cid card}
+        style (ctas/make-animation-style
+               {:name "Fade far"
+                :entries [{:type :keys :property :depth-fade :start 0 :duration 1000
+                           :keyframes [{:time 0 :value 0 :easing :linear} {:time 1000 :value 0.8}]}]})
+        tl    (-> (mk-timeline)
+                  (assoc :board-id bid)
+                  (cta/add-animation bid (ctas/make-use style (uuid/next) 0)))]
+    (t/is (fn? (get (acss/scene-layers tl objects) cid)) "its cues play from its style")
+    (t/is (= {} (acss/scene-layers (mk-timeline) objects)) "and without them, nothing")))
+
 (t/deftest a-turning-light-turns-the-shadows-it-casts
   (let [board  (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
                    (assoc :light {:angle 315 :height 45 :ambient 0.3 :shadows true}))
