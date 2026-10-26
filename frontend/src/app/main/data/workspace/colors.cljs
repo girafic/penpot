@@ -336,6 +336,7 @@
    :stroke-width
    :stroke-dash
    :stroke-gap
+   :stroke-dash-offset
    :stroke-width-top
    :stroke-width-right
    :stroke-width-bottom

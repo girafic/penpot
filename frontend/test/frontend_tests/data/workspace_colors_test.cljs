@@ -82,3 +82,14 @@
                                    :current-color {:color "#ff0000" :opacity 1}}}
         event (dwc/update-colorpicker-color {} true)]
     (t/is (some? (ptk/watch event valid-state nil)))))
+
+(t/deftest a-new-stroke-colour-keeps-the-dash-pattern
+  (let [shape   {:strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
+                            :stroke-style :dashed :stroke-alignment :center
+                            :stroke-dash 6 :stroke-gap 4 :stroke-dash-offset 5}]}
+        colored (dwc/update-shape-stroke-color shape 0 {:color "#ff0000" :opacity 1})
+        linked  (dwc/update-shape-stroke-color shape 0 {:color "#00ff00" :opacity 1
+                                                        :ref-id uuid/zero :ref-file uuid/zero})]
+    (t/is (= "#ff0000" (get-in colored [:strokes 0 :stroke-color])))
+    (t/is (= [6 4 5] ((juxt :stroke-dash :stroke-gap :stroke-dash-offset) (get-in colored [:strokes 0]))))
+    (t/is (= 5 (get-in linked [:strokes 0 :stroke-dash-offset])) "a library colour too")))
