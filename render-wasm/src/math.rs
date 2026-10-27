@@ -53,11 +53,18 @@ pub fn identitish(m: &Matrix) -> bool {
         && is_close_to(m.skew_y(), 0.0)
 }
 
+/// How far from 1 the scale and from 0 the skew of a matrix that only
+/// moves may be: its rounding, no more. A matrix that scales about a point
+/// far from the origin moves the origin to make up for the scale, so taking
+/// a scale of 1.0004 for none would move a shape at y 40000 by 16 px.
+const MOVE_ONLY_THRESHOLD: f32 = 1e-6;
+
 pub fn is_move_only_matrix(m: &Matrix) -> bool {
-    is_close_to(m.scale_x(), 1.0)
-        && is_close_to(m.scale_y(), 1.0)
-        && is_close_to(m.skew_x(), 0.0)
-        && is_close_to(m.skew_y(), 0.0)
+    let close = |current: f32, value: f32| (current - value).abs() <= MOVE_ONLY_THRESHOLD;
+    close(m.scale_x(), 1.0)
+        && close(m.scale_y(), 1.0)
+        && close(m.skew_x(), 0.0)
+        && close(m.skew_y(), 0.0)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -618,5 +625,19 @@ mod tests {
         assert!((m.scale_y() - 0.81).abs() <= 0.1);
         assert!((m.translate_x() - 0.0).abs() <= 0.1);
         assert!((m.translate_y() - 0.0).abs() <= 0.1);
+    }
+
+    #[test]
+    fn a_tiny_scale_is_no_move() {
+        // scaled by 1.0004 about x 6850: the translation only makes up for
+        // the scale, so taken as a move it would shift the shape by 2.7 px
+        let (px, s) = (6850.0, 1.0004);
+        let scale = Matrix::new_all(s, 0., px * (1. - s), 0., s, 0., 0., 0., 1.);
+        assert!(!is_move_only_matrix(&scale));
+
+        assert!(is_move_only_matrix(&Matrix::translate((12.5, -3.0))));
+        // the rounding of a matrix that moves only
+        let noisy = Matrix::new_all(1.0 + f32::EPSILON, 0., 12.5, 0., 1., -3.0, 0., 0., 1.);
+        assert!(is_move_only_matrix(&noisy));
     }
 }

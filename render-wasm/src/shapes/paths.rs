@@ -378,6 +378,25 @@ mod tests {
     }
 
     #[test]
+    fn a_tiny_scale_far_from_the_origin_keeps_its_pivot() {
+        // a heart beating about its middle at y 40228: scaled by 1.0004, its
+        // middle stays, though the matrix moves the origin by 16 px
+        let (px, py, s) = (2467.0, 40228.0, 1.0004);
+        let mtx = Matrix::new_all(s, 0., px * (1. - s), 0., s, py * (1. - s), 0., 0., 1.);
+        let rect = skia::Rect::from_xywh(px - 70., py - 70., 140., 140.);
+        let mut path = Path::from_skia_path_accurate(skia::Path::rect(rect, None));
+        path.transform(&mtx);
+
+        let center = path.to_skia_path(None).bounds().center();
+        assert!(
+            (center.x - px).abs() < 0.05 && (center.y - py).abs() < 0.05,
+            "the middle stays at {px}, {py}, not {}, {}",
+            center.x,
+            center.y
+        );
+    }
+
+    #[test]
     fn converts_conics_to_accurate_circles() {
         // Regression: one quad per conic left circles about 6% off the real
         // radius at the arc midpoints, which showed up as squircle stroke caps.
