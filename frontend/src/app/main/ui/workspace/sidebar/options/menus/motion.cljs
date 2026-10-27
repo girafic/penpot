@@ -2003,13 +2003,12 @@
           (when (some? ridden)
             [:*
              [:> animation-row* {:label (tr "workspace.animation.path-progress")}
-              [:div {:class (stl/css :follow-leader)}
+              [:> keyed-field* {:properties [:path-progress]}
                [:> numeric-input* {:text-icon "%"
                                    :property (tr "workspace.animation.path-progress")
                                    :step 1
                                    :value (mth/precision (* 100 (or progress 0)) 2)
-                                   :on-change on-progress}]
-               [:> keyframe-diamond* {:properties [:path-progress]}]]]
+                                   :on-change on-progress}]]]
              [:div {:class (stl/css :link-range)
                     :title (tr "workspace.animation.path-follow-orient.hint")}
               [:> checkbox* {:id (dm/str "path-orient-" shape-id)

@@ -609,7 +609,7 @@
                                      :value stroke-gap}]]
         [:> keyed-field* {:properties [:stroke-dash-offset] :index index}
          [:> numeric-input-wrapper* {:on-change on-dash-offset-change
-                                     :text-icon "OFFS"
+                                     :text-icon "OFFSET"
                                      :on-focus on-focus
                                      :on-blur on-blur
                                      :attr :stroke-dash-offset
