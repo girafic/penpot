@@ -78,7 +78,7 @@
    :text-faces-pending #(if (wasm.api/initialized?) (text-faces-pending %) #{})
    ;; the faces of texts as their animations show them, which none has yet
    :load-text-faces #(when (wasm.api/initialized?)
-                       (vec (wasm.fonts/store-fonts (mapcat (comp wasm.fonts/get-content-fonts :content) %))))
+                       (wasm.fonts/fetch-fonts! (mapcat (comp wasm.fonts/get-content-fonts :content) %)))
    :relayout-text wasm.fonts/force-update-text-layout})
 
 (defn- property-ops

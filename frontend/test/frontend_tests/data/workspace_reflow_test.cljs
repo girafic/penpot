@@ -340,25 +340,57 @@
           bold     {:font-id "gfont-shared-bold"
                     :weight 700
                     :style 0
-                    :emoji? false}]
+                    :emoji? false}
+          sent     (atom 0)]
       (mock/with-mocks
-        {http/send! (fn [_] (rx/throw (js/Error. "shared fetch failed")))}
+        {http/send! (fn [_] (swap! sent inc) (rx/throw (js/Error. "shared fetch failed")))}
         (fn [done']
           (let [request (#'wasm.fonts/fetch-font regular font-url false false)
-                duplicate (#'wasm.fonts/fetch-font bold font-url false false)]
-            (t/is (some? request) "the first face owns the shared fetch")
-            (t/is (nil? duplicate) "the second face reuses the shared fetch")
-            (->> ((:callback request))
+                duplicate (#'wasm.fonts/fetch-font bold font-url false false)
+                fetch (some-> request :callback (apply []))]
+            (t/is (some? request) "the first face gets a request")
+            (t/is (nil? (#'wasm.fonts/fetch-font bold font-url false false))
+                  "a face asked for while the request is out shares it")
+            (->> (rx/merge fetch ((:callback duplicate)))
                  (rx/subs!
                   (fn [_])
                   (fn [_]
                     (t/is false "the shared fetch failure escaped its fallback")
                     (done'))
                   (fn []
+                    (t/is (= 1 @sent) "the url was fetched once")
                     (t/is (wasm.fonts/font-ready? regular)
                           "the first face settled through fallback")
                     (t/is (wasm.fonts/font-ready? bold)
                           "the deduplicated face settled through fallback")
+                    (done'))))))
+        done))))
+
+(t/deftest dropped-wasm-font-request-leaves-its-url-free
+  (t/async done
+    (let [font-url "https://example.test/dropped-font.ttf"
+          face     {:font-id "gfont-dropped"
+                    :weight 800
+                    :style 0
+                    :emoji? false}
+          sent     (atom 0)]
+      (mock/with-mocks
+        {http/send! (fn [_] (swap! sent inc) (rx/throw (js/Error. "offline")))}
+        (fn [done']
+          ;; a caller that drops the request it gets, as a text measured
+          ;; for its size does: the url must not wait for it for ever
+          (t/is (some? (#'wasm.fonts/fetch-font face font-url false false)))
+          (let [again (#'wasm.fonts/fetch-font face font-url false false)]
+            (t/is (some? again) "a request nobody sent leaves the url free")
+            (->> ((:callback again))
+                 (rx/subs!
+                  (fn [_])
+                  (fn [_]
+                    (t/is false "the fetch failure escaped its fallback")
+                    (done'))
+                  (fn []
+                    (t/is (= 1 @sent) "the second request fetched it")
+                    (t/is (wasm.fonts/font-ready? face) "the face settled")
                     (done'))))))
         done))))
 
@@ -455,3 +487,14 @@
           (.then (fn []
                    (stop-pipeline! store)
                    (done)))))))
+
+(t/deftest fetch-fonts-sends-each-request-once
+  (let [sent (atom [])]
+    (with-redefs [wasm.fonts/store-fonts
+                  (fn [_]
+                    [{:key "a" :callback #(do (swap! sent conj :a) (rx/empty))}
+                     {:key "a" :callback #(do (swap! sent conj :a) (rx/empty))}
+                     {:key "b" :callback #(do (swap! sent conj :b) (rx/empty))}])]
+      (wasm.fonts/fetch-fonts! [:some-font]))
+    (t/is (= [:a :b] (sort @sent))
+          "every url is fetched, each once")))

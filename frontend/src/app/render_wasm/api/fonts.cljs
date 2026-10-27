@@ -211,6 +211,11 @@
       (report-font-storage-failed! font-data)
       false)))
 
+;; The font urls whose request is on its way: only a callback that runs
+;; sends one, and a caller may drop the callback it got (a text measured
+;; for its size does), so a url waiting in `fetching` alone is not sent.
+(def ^:private in-flight (atom #{}))
+
 (defn- fetch-font
   [font-data font-url emoji? fallback?]
   (cond
@@ -221,7 +226,7 @@
       (tm/schedule #(report-font-storage-failed! font-data))
       nil)
 
-    (contains? @fetching font-url)
+    (contains? @in-flight font-url)
     (do
       (register-font-fetch! font-url font-data emoji? fallback?)
       nil)
@@ -232,21 +237,28 @@
       {:key font-url
        :callback
        (fn []
-         (try
-           (->> (http/send! {:method :get
-                             :uri font-url
-                             :response-type :buffer})
-                (rx/map
-                 (fn [{:keys [body]}]
-                   (let [requests (take-font-fetches! font-url)]
-                     (mapv (partial store-font-fetch! body) requests))))
-                (rx/catch
-                 (fn [cause]
-                   (fail-font-fetches! font-url cause)
-                   (rx/empty))))
-           (catch :default cause
-             (fail-font-fetches! font-url cause)
-             (rx/empty))))})))
+         (if (contains? @in-flight font-url)
+           ;; Another callback sent the request: it stores this face too.
+           (rx/empty)
+           (do
+             (swap! in-flight conj font-url)
+             (try
+               (->> (http/send! {:method :get
+                                 :uri font-url
+                                 :response-type :buffer})
+                    (rx/map
+                     (fn [{:keys [body]}]
+                       (let [requests (take-font-fetches! font-url)]
+                         (mapv (partial store-font-fetch! body) requests))))
+                    (rx/catch
+                     (fn [cause]
+                       (fail-font-fetches! font-url cause)
+                       (rx/empty)))
+                    (rx/finalize #(swap! in-flight disj font-url)))
+               (catch :default cause
+                 (swap! in-flight disj font-url)
+                 (fail-font-fetches! font-url cause)
+                 (rx/empty))))))})))
 
 (defn- google-font-ttf-url
   [font-id font-variant-id font-weight font-style]
@@ -474,3 +486,11 @@
 (defn store-fonts
   [fonts]
   (keep (fn [font] (store-font font)) fonts))
+
+(defn fetch-fonts!
+  "Store the faces of `fonts` in WASM, fetching the ones it has not got:
+  `store-fonts` only hands back the requests, for its caller to send."
+  [fonts]
+  (->> (rx/from (vals (d/index-by :key :callback (store-fonts fonts))))
+       (rx/merge-map (fn [callback] (if (fn? callback) (callback) (rx/empty))))
+       (rx/subs! (constantly nil))))
