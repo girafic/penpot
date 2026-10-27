@@ -3236,10 +3236,11 @@
 (defn appearance-slots
   "The fill, stroke, shadow and blur slots of `shape` that can take
   keyframes: a flat fill its colour and opacity, a gradient one its
-  gradient (`:fill-gradient`), images none, and so a stroke (a gradient
-  one `:stroke-gradient`); the dash pattern of a dashed stroke takes them
-  in any paint, and the widths of the sides of a stroke
-  with sides (see `ctap/sided-stroke?`) of a rectangle or a board."
+  gradient (`:fill-gradient`) and opacity, an image its opacity, and so
+  a stroke (a gradient one `:stroke-gradient`) with its width; the dash
+  pattern of a dashed stroke takes them in any paint, and the widths of
+  the sides of a stroke with sides (see `ctap/sided-stroke?`) of a
+  rectangle or a board."
   [shape]
   (let [fills   (as-vec (:fills shape))
         strokes (as-vec (:strokes shape))
@@ -3255,7 +3256,11 @@
 
            (gradient-fill? fill)
            {:group :fill :index index
-            :properties [:fill-gradient]}))
+            :properties [:fill-gradient :fill-opacity]}
+
+           (some? (:fill-image fill))
+           {:group :fill :index index
+            :properties [:fill-opacity]}))
        fills)
       (keep-indexed
        (fn [index stroke]
@@ -3264,7 +3269,10 @@
                             (into [:stroke-color :stroke-opacity :stroke-width])
 
                             (gradient-stroke? stroke)
-                            (into [:stroke-gradient :stroke-width])
+                            (into [:stroke-gradient :stroke-opacity :stroke-width])
+
+                            (some? (:stroke-image stroke))
+                            (into [:stroke-opacity :stroke-width])
 
                             (and (ctap/sided-shape? shape) (ctap/sided-stroke? stroke))
                             (into ctap/stroke-side-properties)
@@ -3325,9 +3333,13 @@
   (-> fills
       (patch-indexed
        (cond-> {}
-         (contains? values :fill-color) (assoc :fill-color (:fill-color values))
-         (contains? values :fill-opacity) (assoc :fill-opacity (:fill-opacity values)))
+         (contains? values :fill-color) (assoc :fill-color (:fill-color values)))
        solid-color-fill?)
+      ;; the opacity of any paint: a colour, a gradient or an image
+      (patch-indexed
+       (cond-> {}
+         (contains? values :fill-opacity) (assoc :fill-opacity (:fill-opacity values)))
+       nil)
       (patch-indexed
        (cond-> {}
          (contains? values :fill-gradient) (assoc :fill-color-gradient (:fill-gradient values)))
@@ -3343,9 +3355,12 @@
   (let [strokes (-> strokes
                     (patch-indexed
                      (cond-> {}
-                       (contains? values :stroke-color) (assoc :stroke-color (:stroke-color values))
-                       (contains? values :stroke-opacity) (assoc :stroke-opacity (:stroke-opacity values)))
+                       (contains? values :stroke-color) (assoc :stroke-color (:stroke-color values)))
                      solid-color-stroke?)
+                    (patch-indexed
+                     (cond-> {}
+                       (contains? values :stroke-opacity) (assoc :stroke-opacity (:stroke-opacity values)))
+                     nil)
                     (patch-indexed
                      (cond-> {}
                        (contains? values :stroke-gradient) (assoc :stroke-color-gradient (:stroke-gradient values)))
@@ -4735,8 +4750,12 @@
   Position, size, rotation, scale and opacity fit any shape."
   [shape {:keys [property index]}]
   (case property
-    (:fill-color :fill-opacity)
+    :fill-color
     (boolean (solid-color-fill? (get (as-vec (paint-fills shape)) index)))
+
+    ;; the opacity of any paint
+    :fill-opacity
+    (some? (get (as-vec (paint-fills shape)) index))
 
     :fill-gradient
     (gradient-fill? (get (as-vec (paint-fills shape)) index))
@@ -4744,8 +4763,11 @@
     :stroke-gradient
     (gradient-stroke? (get (as-vec (:strokes shape)) index))
 
-    (:stroke-color :stroke-opacity)
+    :stroke-color
     (boolean (solid-color-stroke? (get (as-vec (:strokes shape)) index)))
+
+    :stroke-opacity
+    (some? (get (as-vec (:strokes shape)) index))
 
     :stroke-width
     (some? (get (as-vec (:strokes shape)) index))
@@ -5091,7 +5113,12 @@
                (put :fill-opacity index (or (:fill-opacity fill) 1)))
 
            (gradient-fill? fill)
-           (put m :fill-gradient index (:fill-color-gradient fill))
+           (-> m
+               (put :fill-gradient index (:fill-color-gradient fill))
+               (put :fill-opacity index (or (:fill-opacity fill) 1)))
+
+           (some? (:fill-image fill))
+           (put m :fill-opacity index (or (:fill-opacity fill) 1))
 
            :else m))
        $
@@ -5099,11 +5126,16 @@
       (reduce-kv
        (fn [m index stroke]
          (let [[dash gap] (ctap/stroke-dash stroke)
-               sides?     (and (ctap/sided-shape? shape) (ctap/sided-stroke? stroke))]
+               sides?     (and (ctap/sided-shape? shape) (ctap/sided-stroke? stroke))
+               ;; a colour, a gradient or an image
+               painted?   (or (solid-color-stroke? stroke) (gradient-stroke? stroke)
+                              (some? (:stroke-image stroke)))]
            (cond-> m
              (solid-color-stroke? stroke)
-             (-> (put :stroke-color index (:stroke-color stroke))
-                 (put :stroke-opacity index (or (:stroke-opacity stroke) 1)))
+             (put :stroke-color index (:stroke-color stroke))
+
+             painted?
+             (put :stroke-opacity index (or (:stroke-opacity stroke) 1))
 
              (gradient-stroke? stroke)
              (put :stroke-gradient index (:stroke-color-gradient stroke))
@@ -5111,7 +5143,7 @@
              ;; the width of a stroke with sides too, which the Design tab
              ;; sets with all of them (auto-keyframe records one or the
              ;; others, see `auto-stroke-slot?`)
-             (or (solid-color-stroke? stroke) (gradient-stroke? stroke))
+             painted?
              (put :stroke-width index (or (:stroke-width stroke) 0))
 
              sides?

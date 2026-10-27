@@ -123,6 +123,14 @@
         {:type :linear :angle angle
          :stops (mapv #(vector (color %) (share (:offset %))) stops)}))))
 
+(defn- faded-gradient
+  "`gradient` as its fill of `opacity` draws it, each stop that much
+  fainter, as CSS has no opacity of a background image of its own."
+  [gradient opacity]
+  (cond-> gradient
+    (and (some? opacity) (< opacity 1))
+    (update :stops (fn [stops] (mapv #(assoc % :opacity (* (or (:opacity %) 1) opacity)) stops)))))
+
 (defn css-gradient-image
   "The CSS `background-image` of a gradient (see `css-gradient`)."
   [{:keys [type angle rx ry cx cy stops]}]
@@ -241,9 +249,13 @@
         shadows (cta/apply-shadows (:shadow shape) values)
         fill    (d/seek cta/solid-color-fill? fills)
         stroke  (d/seek cta/solid-color-stroke? strokes)
-        ;; a text paints its glyphs, which CSS paints in a colour
-        grad    (when (and (not text?) (contains? values :fill-gradient))
-                  (d/seek cta/gradient-fill? fills))]
+        ;; a text paints its glyphs, which CSS paints in a colour; its
+        ;; gradient or its opacity playing
+        gi      (d/index-of-pred fills cta/gradient-fill?)
+        grad    (when (and (not text?) (some? gi)
+                           (or (contains? values :fill-gradient)
+                               (contains? (:fill-opacity values) gi)))
+                  (get fills gi))]
     (cond-> {}
       (some #(contains? values %) css-transform-properties)
       (assoc :translate-x (if (contains? values :x) (- (+ (:x origin) (:x values)) base-x) 0)
@@ -263,7 +275,8 @@
       (assoc (if text? :color :background-color) (css-color (:fill-color fill) (or (:fill-opacity fill) 1)))
 
       (some? grad)
-      (assoc :gradient (css-gradient (:fill-color-gradient grad) (:width selrect) (:height selrect)))
+      (assoc :gradient (css-gradient (faded-gradient (:fill-color-gradient grad) (:fill-opacity grad))
+                                     (:width selrect) (:height selrect)))
 
       (and stroke (cta/has? values :stroke-color :stroke-opacity))
       (assoc (if text? :text-stroke-color :border-color) (css-color (:stroke-color stroke) (or (:stroke-opacity stroke) 1)))
@@ -726,9 +739,11 @@
         index (d/index-of-pred fills cta/gradient-fill?)]
     (when (and (some? index)
                (not= :text (:type shape))
-               (some #(and (= :fill-gradient (:property %)) (= index (:index %))) (:keyframes track)))
+               (some #(and (contains? #{:fill-gradient :fill-opacity} (:property %)) (= index (:index %)))
+                     (:keyframes track)))
       (let [played (get-in ((shape-values timeline (:id shape)) 0) [:fill-gradient index])
-            rest   (:fill-color-gradient (get fills index))
+            fill   (get fills index)
+            rest   (faded-gradient (:fill-color-gradient fill) (:fill-opacity fill))
             rest   (cond-> rest
                      (some? played) (assoc :stops (ctap/pad-stops rest played)))
             {:keys [type stops] :as css} (css-gradient rest (dm/get-in shape [:selrect :width])

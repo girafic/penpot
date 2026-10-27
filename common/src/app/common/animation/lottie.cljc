@@ -337,11 +337,11 @@
 
 (defn- lottie-gradient-fill
   "A Lottie gradient fill of `gradient` over `box` playing the keyframes
-  `kfs` (see `lottie-gradient`)."
-  [gradient kfs opacity rule box]
+  `kfs` (see `lottie-gradient`), its `opacity` the keyframes `opacity-kfs`."
+  [gradient kfs opacity opacity-kfs rule box]
   (merge {:ty "gf" :nm "gradient" :r rule}
          (lottie-gradient gradient kfs box)
-         {:o {:a 0 :k (* 100.0 (or opacity 1))}}))
+         {:o (lottie-prop-1d opacity-kfs (fn [v] (* 100.0 v)) (* 100.0 (or opacity 1)))}))
 
 (defn- lottie-stroke-items
   "The Lottie strokes of `shape`, top-most first, each with the keyframes
@@ -412,7 +412,7 @@
 
               (cta/gradient-fill? fill)
               (lottie-gradient-fill (:fill-color-gradient fill) (slot-kfs by-prop :fill-gradient index)
-                                    (:fill-opacity fill) rule box))))
+                                    (:fill-opacity fill) (slot-kfs by-prop :fill-opacity index) rule box))))
          (remove nil?)
          (vec))))
 

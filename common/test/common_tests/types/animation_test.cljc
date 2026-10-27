@@ -7892,6 +7892,54 @@
       (t/is (ctap/stroke-sides-even? (get-in shape [:strokes 0])))
       (t/is (not (ctap/stroke-sides-even? (assoc (get-in shape [:strokes 0]) :stroke-width-left 5)))))))
 
+(t/deftest the-opacity-of-a-gradient-or-an-image-plays
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        bid     (:id board)
+        grad    (linear-gradient [{:color "#ff0000" :opacity 1 :offset 0}
+                                  {:color "#0000ff" :opacity 0.5 :offset 1}])
+        shape   (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20
+                                  :fills [{:fill-color-gradient grad :fill-opacity 1}
+                                          {:fill-image {:id (uuid/next) :width 10 :height 10 :mtype "image/png"}
+                                           :fill-opacity 1}]
+                                  :strokes [{:stroke-color-gradient grad :stroke-opacity 1 :stroke-width 2
+                                             :stroke-style :solid :stroke-alignment :center}]})
+        sid     (:id shape)
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :fill-opacity :index 0 :value 1 :easing :linear})
+                    (cta/add-keyframe sid {:time 1000 :property :fill-opacity :index 0 :value 0}))
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        at      (fn [tl t] (ctm/apply-structure-modifiers
+                            shape (get-in (ctaf/timeline->modif-tree tl {sid shape} t) [sid :modifiers])))]
+    (t/testing "the opacity of the whole paint, of a gradient, an image or a gradient stroke"
+      (t/is (mth/close? 0.5 (get-in (at tl 500) [:fills 0 :fill-opacity])))
+      (t/is (= grad (get-in (at tl 500) [:fills 0 :fill-color-gradient])) "the gradient as it is")
+      (let [tl (-> tl
+                   (cta/add-keyframe sid {:time 0 :property :fill-opacity :index 1 :value 1 :easing :linear})
+                   (cta/add-keyframe sid {:time 1000 :property :fill-opacity :index 1 :value 0.2})
+                   (cta/add-keyframe sid {:time 0 :property :stroke-opacity :index 0 :value 1 :easing :linear})
+                   (cta/add-keyframe sid {:time 1000 :property :stroke-opacity :index 0 :value 0}))]
+        (t/is (mth/close? 0.6 (get-in (at tl 500) [:fills 1 :fill-opacity])))
+        (t/is (mth/close? 0.5 (get-in (at tl 500) [:strokes 0 :stroke-opacity])))))
+    (t/testing "an opacity keyframe fits any paint, a colour one a flat one only"
+      (t/is (cta/fits-keyframe? shape {:property :fill-opacity :index 0}))
+      (t/is (cta/fits-keyframe? shape {:property :fill-opacity :index 1}))
+      (t/is (not (cta/fits-keyframe? shape {:property :fill-color :index 0})))
+      (t/is (cta/fits-keyframe? shape {:property :stroke-opacity :index 0}))
+      (t/is (= [[:fill-gradient :fill-opacity] [:fill-opacity]]
+               (mapv :properties (filter #(= :fill (:group %)) (cta/appearance-slots shape))))))
+    (t/testing "an edit of it at the playhead records it"
+      (let [after (assoc-in {sid shape} [sid :fills 0 :fill-opacity] 0.4)
+            kfs   (get-in (cta/record-unanimated (mk-timeline) {sid shape} after [sid] 500) [:tracks sid :keyframes])]
+        (t/is (= #{[:fill-opacity 0]} (into #{} (map (juxt :property :index)) kfs)))))
+    (t/testing "CSS fades the stops of the gradient, Lottie plays the opacity of the gradient fill"
+      (let [css  (acss/frame-values (get objects sid) {:fill-opacity {0 0.5}} {:x 0 :y 0})
+            ;; an image fill draws as a picture in Lottie: the gradient alone
+            L    (alottie/timeline->lottie tl (update-in objects [sid :fills] #(vec (take 1 %))))
+            gf   (d/seek #(= "gf" (:ty %)) (get-in (first (:layers L)) [:shapes 0 :it]))]
+        (t/is (str/includes? (str (:gradient css)) "rgba(255, 0, 0, 0.5)"))
+        (t/is (= 1 (get-in gf [:o :a])) "its opacity plays")))))
+
 (t/deftest the-keyframes-a-layer-has
   (let [text  (cts/setup-shape {:type :text :x 0 :y 0 :width 100 :height 40
                                 :content {:type "root"
@@ -7976,12 +8024,12 @@
         (t/is (mth/close? 0.5 (:end-x grad) 0.001))
         (t/is (hex-close? "#800080" (get-in grad [:stops 0 :color])))
         (t/is (mth/close? 0.1 (get-in grad [:stops 0 :offset]) 0.001))))
-    (t/testing "a gradient keyframe fits a gradient stroke only, which takes its width too"
+    (t/testing "a gradient keyframe fits a gradient stroke only, which takes its opacity and width too"
       (t/is (cta/fits-keyframe? shape {:property :stroke-gradient :index 1}))
       (t/is (not (cta/fits-keyframe? shape {:property :stroke-gradient :index 0})))
       (t/is (cta/keyframe-value-fits? {:property :stroke-gradient :value to}))
       (t/is (= :stroke (cta/property-area :stroke-gradient)))
-      (t/is (= [:stroke-gradient :stroke-width]
+      (t/is (= [:stroke-gradient :stroke-opacity :stroke-width]
                (:properties (d/seek #(and (= :stroke (:group %)) (= 1 (:index %)))
                                     (cta/appearance-slots shape))))))
     (t/testing "an edit at the playhead records the gradient, and the width"

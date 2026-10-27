@@ -426,7 +426,7 @@
    ["opacity" #{:opacity :scene} :opacity]
    ["borderRadius" #{:r1 :r2 :r3 :r4} :border-radius]
    ["backgroundColor" #{:fill-color :fill-opacity} :background-color]
-   ["backgroundImage" #{:fill-gradient} :gradient]
+   ["backgroundImage" #{:fill-gradient :fill-opacity} :gradient]
    ["borderColor" #{:stroke-color :stroke-opacity} :border-color]
    ["borderWidth" #{:stroke-width :stroke-width-top :stroke-width-right
                     :stroke-width-bottom :stroke-width-left} :border-width]

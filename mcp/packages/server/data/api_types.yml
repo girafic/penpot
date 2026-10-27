@@ -30184,7 +30184,9 @@ AnimatableProperty:
       px of blur they get each 100 px off it (0 to 100). Only boards with
       depth cues take them.
     * `scaleX`, `scaleY`: a factor, 1 is the layer's own size.
-    * `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
+    * `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1;
+      `fillOpacity` and `strokeOpacity` of any fill or stroke, a color, a
+      gradient or an image.
     * `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
       `#ff6600`.
     * `fillGradient`: a `Gradient`, the whole gradient of a gradient fill:
@@ -30192,11 +30194,10 @@ AnimatableProperty:
       from one keyframe to the next. Gradients of fewer stops get stops
       that draw as they do, so each stop goes to the nearest of the next;
       a change from linear to radial holds until the keyframe. Only fills
-      that are gradients take it (`fillColor` and `fillOpacity` only flat
-      ones).
+      that are gradients take it (`fillColor` only flat ones).
     * `strokeGradient`: a `Gradient`, the whole gradient of a gradient
       stroke, which blends as `fillGradient` does. Only strokes that are
-      gradients take it (`strokeColor` and `strokeOpacity` only flat ones).
+      gradients take it (`strokeColor` only flat ones).
     * `strokeWidthTop`, `strokeWidthRight`, `strokeWidthBottom`,
       `strokeWidthLeft`: the width of one side of a stroke of a rectangle or
       a board (see `Stroke.strokeWidthTop`), in pixels, each side on its own

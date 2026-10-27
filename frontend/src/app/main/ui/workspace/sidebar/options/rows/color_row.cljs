@@ -390,16 +390,18 @@
           [nil nil])
 
         ;; in motion mode, the keyframes of the paint of the row, each in
-        ;; its field: a flat colour its colour and its opacity, a gradient
-        ;; its gradient (its opacity takes none)
+        ;; its field: a flat colour its colour, a gradient its gradient, an
+        ;; image none, and the opacity of any
         solid?
         (and (some? (:color color)) (nil? (:gradient color)) (nil? (:image color)))
 
         [kf-color kf-opacity]
         (case origin
-          :fill         (cond (some? (:gradient color)) [:fill-gradient nil]
+          :fill         (cond (some? (:gradient color)) [:fill-gradient :fill-opacity]
+                              (some? (:image color))    [nil :fill-opacity]
                               solid?                    [:fill-color :fill-opacity])
-          :stroke-color (cond (some? (:gradient color)) [:stroke-gradient nil]
+          :stroke-color (cond (some? (:gradient color)) [:stroke-gradient :stroke-opacity]
+                              (some? (:image color))    [nil :stroke-opacity]
                               solid?                    [:stroke-color :stroke-opacity])
           :shadow       [:shadow-color :shadow-opacity]
           nil)
@@ -462,6 +464,7 @@
                                 :on-blur on-blur'
                                 :on-opacity-change on-opacity-change
                                 :color-property kf-color
+                                :opacity-property kf-opacity
                                 :keyframe-index index}
         [:div {:class (stl/css :color-name)}
          (uc/gradient-type->string (dm/get-in color [:gradient :type]))]]
@@ -475,7 +478,9 @@
                                 :select-on-focus select-on-focus
                                 :on-focus on-focus'
                                 :on-blur on-blur'
-                                :on-opacity-change on-opacity-change}
+                                :on-opacity-change on-opacity-change
+                                :opacity-property kf-opacity
+                                :keyframe-index index}
         [:div {:class (stl/css :color-name)}
          (tr "media.image")]]
 
