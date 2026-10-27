@@ -309,11 +309,32 @@ impl Fill {
     }
 }
 
+/// `shader` with its alpha scaled by `opacity` (0 to 255): the opacity of
+/// the whole fill, which a shader of its gradient or image does not hold.
+fn with_opacity(shader: Option<skia::Shader>, opacity: u8) -> Option<skia::Shader> {
+    if opacity == 255 {
+        return shader;
+    }
+    let alpha_color = skia::Color4f::new(1.0, 1.0, 1.0, opacity as f32 / 255.0);
+    let alpha_shader = skia::shaders::color(alpha_color.to_color());
+    shader.map(|shader| {
+        skia::shaders::blend(
+            skia::Blender::mode(skia::BlendMode::DstIn),
+            shader,
+            alpha_shader,
+        )
+    })
+}
+
 pub fn get_fill_shader(fill: &Fill, bounding_box: &Rect) -> Option<skia::Shader> {
     match fill {
         Fill::Solid(SolidColor(color)) => Some(skia::shaders::color(*color)),
-        Fill::LinearGradient(gradient) => gradient.to_linear_shader(bounding_box),
-        Fill::RadialGradient(gradient) => gradient.to_radial_shader(bounding_box),
+        Fill::LinearGradient(gradient) => {
+            with_opacity(gradient.to_linear_shader(bounding_box), gradient.opacity)
+        }
+        Fill::RadialGradient(gradient) => {
+            with_opacity(gradient.to_radial_shader(bounding_box), gradient.opacity)
+        }
         Fill::Image(image_fill) => {
             let mut image_shader = None;
             let image = get_image(&image_fill.id);
@@ -337,18 +358,10 @@ pub fn get_fill_shader(fill: &Fill, bounding_box: &Rect) -> Option<skia::Shader>
                 matrix.pre_translate((pos_x, pos_y));
                 matrix.pre_scale((scale, scale), None);
 
-                let opacity = image_fill.opacity();
-                let alpha_color = skia::Color4f::new(1.0, 1.0, 1.0, opacity as f32 / 255.0);
-                let alpha_shader = skia::shaders::color(alpha_color.to_color());
-
-                image_shader = image.to_shader(tile_modes, sampling_options, &matrix);
-                if let Some(shader) = image_shader {
-                    image_shader = Some(skia::shaders::blend(
-                        skia::Blender::mode(skia::BlendMode::DstIn),
-                        shader,
-                        alpha_shader,
-                    ));
-                }
+                image_shader = with_opacity(
+                    image.to_shader(tile_modes, sampling_options, &matrix),
+                    image_fill.opacity(),
+                );
             }
             image_shader
         }
@@ -427,6 +440,27 @@ mod tests {
         surface.canvas().draw_rect(rect, &paint);
         let image = surface.image_snapshot();
         image.peek_pixels().expect("pixels").get_color((x, y)).r()
+    }
+
+    #[test]
+    fn merged_fills_keep_the_opacity_of_a_gradient() {
+        let gradient = Gradient::new(
+            (0.0, 0.0),
+            (1.0, 0.0),
+            128,
+            1.0,
+            &[(skia::Color::RED, 0.0), (skia::Color::RED, 1.0)],
+        );
+        let rect = Rect::from_xywh(0.0, 0.0, 10.0, 10.0);
+        let mut surface = skia::surfaces::raster_n32_premul((10, 10)).expect("surface");
+        let paint = merge_fills(&[Fill::LinearGradient(gradient)], rect);
+        surface.canvas().draw_rect(rect, &paint);
+        let image = surface.image_snapshot();
+        let alpha = image.peek_pixels().expect("pixels").get_color((5, 5)).a() as i32;
+        assert!(
+            (alpha - 128).abs() <= 2,
+            "half as opaque as the gradient: {alpha}"
+        );
     }
 
     #[test]
