@@ -459,6 +459,13 @@
                        entry))))
         react-values))
 
+(def ^:private trim-react-values
+  "The values of motion.dev the trim of a stroke plays on the element that
+  paints it, as the CSS does (see `app.common.animation.svg/trim-declarations`):
+  its dash and where it starts, on an outline of length 1 (`pathLength`)."
+  [["strokeDasharray" #{:trim-start :trim-end :trim-offset} :trim-dasharray]
+   ["strokeDashoffset" #{:trim-start :trim-end :trim-offset} :trim-dashoffset]])
+
 (def ^:private neutral-values
   "The motion.dev values of a layer that move it nowhere: a value that
   stays at it all along plays nothing, and is left out."
@@ -494,6 +501,8 @@
   [value v]
   (case value
     "borderRadius" (str "\"" (str/join " " (map #(str (react-number %) "px") v)) "\"")
+    ;; a dash and its gap, on an outline of length 1
+    "strokeDasharray" (str "\"" (str/join " " (map react-number v)) "\"")
     ("backgroundColor" "borderColor" "boxShadow" "color" "WebkitTextStrokeColor" "perspectiveOrigin") (str "\"" v "\"")
     "filter"         (str "\"" v "\"")
     ;; motion.dev blends two of as many stops, number by number
@@ -558,18 +567,34 @@
             [[(first times)] []]
             (partition 2 1 times))))
 
+(defn- trim-frame
+  "The dash of a trimmed stroke as the trim `values` give it, on an
+  outline of length 1 or on a piece of it that starts at `from` of it:
+  `{:trim-dasharray [dash gap] :trim-dashoffset offset}` (see
+  `trim-react-values`)."
+  [values from]
+  (let [{:keys [trim-start trim-end trim-offset]} (merge cta/trim-properties (select-keys values (keys cta/trim-properties)))
+        length (mth/clamp (- trim-end trim-start) 0 1)]
+    {:trim-dasharray [length (- 1 length)]
+     :trim-dashoffset (- from (+ trim-start trim-offset))}))
+
 (defn- frame-at
   "The frame values (see `acss/frame-values`) of `layer` at `time` of the
   played `timeline`, in the light and the depth cues of its board (its
-  `:scene`, see `acss/scene-layers`), with its CSS `:filter`."
-  [timeline objects {:keys [id shape origin scene]} time]
+  `:scene`, see `acss/scene-layers`), with its CSS `:filter` and, when it
+  trims its stroke, its dash (see `trim-frame`; `:trim-from` of `layer`
+  where the piece of the stroke starts)."
+  [timeline objects {:keys [id shape origin scene trim-from]} time]
   (let [values (cond-> (get (cta/values-at timeline time) id {})
                  (map? scene) (assoc :scene scene)
                  (fn? scene)  (assoc :scene (scene time)))
         frame  (acss/frame-values shape values (cta/position-origin timeline objects id) origin)]
     (cond-> frame
       (or (contains? frame :blur) (contains? frame :brightness))
-      (assoc :filter (acss/filter-css frame)))))
+      (assoc :filter (acss/filter-css frame))
+
+      (some #(contains? values %) (keys cta/trim-properties))
+      (merge (trim-frame values (or trim-from 0))))))
 
 (defn- repeat-of
   "The repeat options of a clock: none playing once, forever in a loop,
@@ -599,8 +624,9 @@
 (defn- layer-animation
   "The motion.dev values of `layer` (see `code-layers`): for each value,
   `{:name :initial :animate :transition}` as JS, from its played clock
-  `played` (springs kept) and `sampled` (springs sampled)."
-  [layer objects played sampled]
+  `played` (springs kept) and `sampled` (springs sampled). `specs` are the
+  values it looks at (`react-values` by default, see `trim-react-values`)."
+  [layer objects played sampled & {:keys [specs]}]
   (let [clock    (:clock layer)
         duration (max 1 (:duration clock))
         repeats  (repeat-of clock)
@@ -628,7 +654,9 @@
                                                                scene-kfs
                                                                (vec (sort-by :time (filter #(= p (:property %)) kfs))))]))
                                              properties)))
-                       spring      (when (= 1 (count properties))
+                       ;; a dash is a string, which motion.dev samples
+                       spring      (when (and (= 1 (count properties))
+                                              (not (contains? #{:trim-dasharray :trim-dashoffset} frame-key)))
                                      (native-spring (val (first (by-property played))) clock))]
                    (if (some? spring)
                      (let [{:keys [from to delay] :as spring} spring
@@ -668,7 +696,7 @@
                                                        (str "ease: [" (str/join ", " eases) "]")]
                                                       repeats))
                                            " }")})))))))
-           (if (= :text (:type (:shape layer))) text-react-values react-values)))))
+           (or specs (if (= :text (:type (:shape layer))) text-react-values react-values))))))
 
 (defn- merge-scale
   "`values` with `scaleX` and `scaleY` as one `scale` when they play
@@ -763,7 +791,9 @@
 (defn- react-units
   "The `motion.span` of each unit of the text of `layer`, which the code
   plays one by one (see `cta/unit-timelines`), with the text between them
-  as it is, a `br` between its paragraphs: `{:template? :code}`."
+  as it is, a `br` between its paragraphs: `{:template? :code :attrs}`,
+  `:attrs` the props of the unit `k` as a function of it and the indent
+  (for the units the HTML of the text wraps, see `motion-react`)."
   [{:keys [shape units]} objects]
   (let [{units-tl :timeline :keys [ids bases]} units
         played  (-> units-tl cta/expand-paths cta/cut-timeline)
@@ -777,6 +807,12 @@
                            :class (str "penpot-unit penpot-unit-" k)}))
                       (range)
                       ids)
+        attrs   (fn [k indent]
+                  (when-let [{:keys [values tilt?]} (get spans k)]
+                    (str indent "style={{ display: \"inline-block\" }}\n"
+                         (when tilt?
+                           (str indent (unit-tilt-template seen) "\n"))
+                         (react-props values indent))))
         texts   (tu/paragraph-texts (:content shape))
         ;; the pieces of each paragraph: its units, the text between them
         pieces  (for [[p text] (map-indexed vector texts)]
@@ -791,49 +827,70 @@
         piece   (fn [item]
                   (if (string? item)
                     (str "        " (react-text item) "\n")
-                    (let [[k text] item
-                          {:keys [values class tilt?]} (nth spans k)]
+                    (let [[k text] item]
                       (str "        <motion.span\n"
-                           "          className=\"" class "\"\n"
-                           "          style={{ display: \"inline-block\" }}\n"
-                           (when tilt?
-                             (str "          " (unit-tilt-template seen) "\n"))
-                           (react-props values "          ")
+                           "          className=\"" (:class (nth spans k)) "\"\n"
+                           (attrs k "          ")
                            "        >" (react-text text) "</motion.span>\n"))))]
     {:template? (some :tilt? spans)
+     :attrs attrs
      :code  (str/join "        <br />\n" (map #(str/join "" (map piece %)) pieces))}))
 
 (defn- react-layer
-  "The `motion.div` of `layer`, holding the `motion.span` of each unit of
-  a text the code plays by units (see `react-units`)."
+  "The animation of `layer` as React: `:attrs`, the props of its element
+  (its pivot, its transform template and its values) as a function of the
+  indent, nil when nothing plays on it; `:units`, those of the units of a
+  text the code plays by units (see `react-units`); `:trim`, of a layer
+  that trims its stroke, the props of an element painting it (its dash,
+  see `trim-react-values`) as a function of where its piece of the
+  outline starts and the indent; and `:code`, the `motion.div` of the
+  layer, holding the `motion.span` of each unit, when anything plays on
+  it."
   [layer objects played sampled class-name]
-  (let [values (merge-scale (layer-animation layer objects played sampled))
-        names  (into #{} (map :name) values)
-        origin (:origin layer)
-        units  (when (:units layer) (react-units layer objects))
-        tilt?  (or (contains? names "rotateX") (contains? names "rotateY") (contains? names "z"))
-        template? (or tilt? (and (contains? names "rotate") (contains? names "scaleX")))]
-    {:template? (or template? (:template? units))
-     :code
-     (str "      {/* " (or (get-in layer [:shape :name]) "Layer") " */}\n"
-          "      <motion.div\n"
-          "        className=\"" (class-name (:shape layer)) "\"\n"
-          "        style={{ originX: " (react-number (:x origin)) ", originY: " (react-number (:y origin)) " }}\n"
-          (when template?
-            (str "        "
-                 (if tilt?
-                   (tilt-template (:lift (frame-at played objects layer 0)))
-                   transform-template)
-                 "\n"))
-          (react-props values "        ")
-          (if (some? units)
-            (str "      >\n" (:code units) "      </motion.div>")
-            "      />"))}))
+  (let [values   (merge-scale (layer-animation layer objects played sampled))
+        names    (into #{} (map :name) values)
+        origin   (:origin layer)
+        units    (when (:units layer) (react-units layer objects))
+        tilt?    (or (contains? names "rotateX") (contains? names "rotateY") (contains? names "z"))
+        template? (or tilt? (and (contains? names "rotate") (contains? names "scaleX")))
+        props    (fn [indent]
+                   (str indent "style={{ originX: " (react-number (:x origin)) ", originY: " (react-number (:y origin)) " }}\n"
+                        (when template?
+                          (str indent
+                               (if tilt?
+                                 (tilt-template (:lift (frame-at played objects layer 0)))
+                                 transform-template)
+                               "\n"))
+                        (react-props values indent)))
+        trimmed? (and (not= :text (get-in layer [:shape :type]))
+                      (some #(contains? cta/trim-properties (:property %))
+                            (:keyframes (get-in played [:tracks (:id layer)]))))]
+    {:id (:id layer)
+     :template? (or template? (:template? units))
+     :attrs (when (seq values) props)
+     :units units
+     :trim (when trimmed?
+             (fn [from indent]
+               (let [values (layer-animation (assoc layer :trim-from from) objects played sampled
+                                             :specs trim-react-values)]
+                 (when (seq values)
+                   (react-props values indent)))))
+     :code (when (or (seq values) (some? units))
+             (str "      {/* " (or (get-in layer [:shape :name]) "Layer") " */}\n"
+                  "      <motion.div\n"
+                  "        className=\"" (class-name (:shape layer)) "\"\n"
+                  (props "        ")
+                  (if (some? units)
+                    (str "      >\n" (:code units) "      </motion.div>")
+                    "      />")))}))
 
 (defn- react-board
   "The React component `component` of the board of `code`: its animated
-  layers (those of `ids` only when given)."
-  [{:keys [board-id timeline] :as code} component objects ids class-name]
+  layers (those of `ids` only when given). With `markup`, a function of
+  `code` and the animation of its layers as `react-layer` gives it (by
+  id), the JSX of the board (see `motion-react`); else the `motion.div` of
+  each animated layer, one after another."
+  [{:keys [board-id timeline] :as code} component objects ids class-name markup]
   (let [board   (get objects board-id)
         played  (memoize (fn [clock]
                            (-> (cta/resolve-animations clock objects) cta/expand-loops cta/expand-paths cta/cut-timeline)))
@@ -849,9 +906,14 @@
                                 {:id id :shape (get objects id) :clock timeline
                                  :origin cta/default-transform-origin :scene scene})))
                       scenes)
-        divs    (mapv (fn [layer]
-                        (let [p (played (:clock layer))]
-                          (react-layer layer objects p (cta/expand-springs p) class-name)))
+        divs    (into []
+                      (comp (map (fn [layer]
+                                   (let [p (played (:clock layer))]
+                                     (react-layer layer objects p (cta/expand-springs p) class-name))))
+                            ;; without the markup, no element paints a stroke to trim
+                            (filter #(if (some? markup)
+                                       (or (:attrs %) (:units %) (:trim %))
+                                       (:code %))))
                       layers)
         markers (sort-by :time (:markers timeline))]
     (when (seq divs)
@@ -861,11 +923,16 @@
             (name (cta/playback-mode timeline)) "."
             (when (seq markers)
               (str " Markers: " (str/join ", " (map #(str (:name %) " " (:time %) " ms") markers)) "."))
+            (when (some? markup)
+              " Its layers take the CSS of the code of the Inspect.")
             " */\n"
             "export function " component "() {\n"
             "  return (\n"
             "    <MotionConfig reducedMotion=\"user\">\n"
-            (str/join "\n" (map :code divs)) "\n"
+            (if (some? markup)
+              (markup code (into {} (map (juxt :id identity)) divs))
+              (str/join "\n" (keep :code divs)))
+            "\n"
             "    </MotionConfig>\n"
             "  );\n"
             "}")})))
@@ -879,14 +946,17 @@
   clock of the layer (a copy's, its main's) repeating it. A value that is
   one spring segment on a clock playing once is a spring of motion.dev,
   rescaled to settle where Penpot's does; other springs, motion paths and
-  segments the properties behind a value ease apart are sampled. Nil when
-  nothing animates."
-  [codes objects & {:keys [ids class-name]}]
+  segments the properties behind a value ease apart are sampled. With
+  `markup`, a function of the code of a board and the animation of its
+  layers (see `react-layer`, by id), the component holds the JSX it gives:
+  the board with all its layers, the animated ones as `motion` elements.
+  Nil when nothing animates."
+  [codes objects & {:keys [ids class-name markup]}]
   (let [codes      (if (map? codes) [codes] codes)
         class-name (or class-name #(acss/shape-css-class (:id %)))
         names      (component-names (map #(get objects (:board-id %)) codes))
         boards     (into [] (keep identity)
-                         (map #(react-board %1 %2 objects ids class-name) codes names))]
+                         (map #(react-board %1 %2 objects ids class-name markup) codes names))]
     (when (seq boards)
       (str "import { MotionConfig, motion } from \"motion/react\";\n"
            "\n"

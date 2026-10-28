@@ -2285,7 +2285,8 @@
           (let [page (u/locate-page file-id page-id)]
             (or (some-> (cgm/code-timelines page (:files @st/state) board-id)
                         (vector)
-                        (cgm/codes-react (:objects page) nil))
+                        (cgm/codes-react (:objects page) nil
+                                         :guides (cgm/guide-ids page (:files @st/state) [board-id])))
                 ""))))
 
       :remove

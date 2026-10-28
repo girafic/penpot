@@ -23,6 +23,7 @@
    [app.main.ui.inspect.motion-timeline :as mtl]
    [app.util.code-gen :as cg]
    [app.util.code-gen.common :as cgc]
+   [app.util.code-gen.markup-jsx :as jsx]
    [app.util.code-gen.motion :as cgm]
    [app.util.motion-labels :as labels]
    [cljs.test :as t :include-macros true]
@@ -168,7 +169,7 @@
   (let [{:keys [page files board copy-rect]} (scene nil)
         react (cgm/animation-react page files #{board (cthi/id :copy) copy-rect})
         class (cgc/shape->selector (get-in page [:objects copy-rect]))]
-    (t/is (str/includes? react (str "className=\"" class "\"")))
+    (t/is (str/includes? react (str "className=\"shape rect " class "\"")))
     (t/is (str/includes? react "repeat: Infinity") "on the clock of its main")
     (t/is (nil? (cgm/animation-react page files #{(cthi/id :own)})))))
 
@@ -223,7 +224,7 @@
     (t/is (str/includes? css (str (cgm/code-selector text) " .penpot-unit-2 {")) "its CSS plays each")
     (t/is (str/includes? css "display: inline-block;"))))
 
-;; TRIMS
+;; THE MARKUP OF THE REACT CODE AND TRIMS
 
 (defn- trim-scene
   "Board :card holding a rect :bg at rest, a rect :box fading in and a
@@ -254,6 +255,31 @@
      :files {(:id file) file}
      :board board
      :ids (into #{board} (get-in page [:objects board :shapes]))}))
+
+(t/deftest the-markup-parses-elements-texts-and-comments
+  (t/is (= [{:tag "div" :attrs [["class" "a b"]]
+             :children [{:tag "img" :attrs [["src" "x.png"]] :children []}
+                        {:comment " c "}
+                        {:tag "span" :attrs [] :children [{:text "a & b"}]}]}]
+           (jsx/parse "<div class=\"a b\"><img src=\"x.png\"></img><!-- c --><span>a &amp; b</span></div>"))
+        "an `</img>` closes nothing; the references read as their characters"))
+
+(t/deftest the-react-of-a-board-holds-its-markup
+  (let [{:keys [page files ids]} (trim-scene)
+        objects (:objects page)
+        class   #(cgc/shape->selector (get objects (cthi/id %)))
+        react   (cgm/animation-react page files ids)]
+    (t/is (str/includes? react (str "<div className=\"frame " (class :card) "\">")) "the board holds its layers")
+    (t/is (str/includes? react (str "<div className=\"shape rect " (class :bg) "\" />")) "a layer at rest is there too")
+    (t/is (str/includes? react (str "<motion.div\n")) "an animated one is a motion element")
+    (t/is (str/includes? react (str "className=\"shape rect " (class :box) "\"")))
+    (t/is (str/includes? react "<motion.path\n") "the stroke it trims")
+    (t/is (str/includes? react "pathLength=\"1\""))
+    (t/is (str/includes? react "strokeDasharray: [\"0 1\""))
+    (t/is (str/includes? react "xmlnsXlink=") "the attributes of SVG as JSX names them")
+    (t/is (str/includes? react "strokeWidth: \"4\"") "its style an object")
+    (t/is (not (str/includes? react " class=")) "no attribute of HTML that JSX names otherwise")
+    (t/is (not (str/includes? react "import { steps }")) "a hold needs no import")))
 
 (t/deftest the-css-of-the-inspect-trims-the-stroke-its-html-draws
   (let [{:keys [page files board ids]} (trim-scene)

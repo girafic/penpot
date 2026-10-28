@@ -678,7 +678,8 @@
                                                           #(assoc % :fills [{:fill-color-gradient red-to-blue
                                                                              :fill-opacity 1}])
                                                           content))))
-        react (painted-react (dissoc text :id))]
+        ;; nil when it plays nothing React shows
+        react (str (painted-react (dissoc text :id)))]
     (t/is (not (cstr/includes? react "color: \"\"")))
     (t/is (not (cstr/includes? react "color: [\"\"")))))
 
@@ -688,7 +689,7 @@
     (t/is (cstr/includes? css "--penpot-gradient-color-0: rgba(255, 0, 0, 0.5);")
           "the resting stops are faded by the opacity of the fill")))
 
-;; TRIMS
+;; TRIMS AND VALUES THAT PLAY NOTHING
 
 (defn- trimmed
   "`[objects code]` of :a trimming its stroke, its end 0 to 1 in 800 ms."
@@ -696,6 +697,28 @@
   (board-scene #(-> %
                     (cta/add-keyframe (thi/id :a) {:time 0 :property :trim-end :value 0 :easing :linear})
                     (cta/add-keyframe (thi/id :a) {:time 800 :property :trim-end :value 1}))))
+
+(t/deftest react-leaves-out-a-value-that-moves-nothing
+  (let [react (react-of #(-> %
+                             (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})
+                             (cta/add-keyframe (thi/id :a) {:time 400 :property :x :value 20})
+                             (cta/add-keyframe (thi/id :a) {:time 0 :property :y :value 20})
+                             (cta/add-keyframe (thi/id :a) {:time 400 :property :y :value 60})))]
+    (t/is (cstr/includes? react "animate={{ y: [0, 40, 40] }}"))
+    (t/is (not (cstr/includes? react "x: ")) "x stays where it rests all along")))
+
+(t/deftest react-trims-the-element-that-paints-the-stroke
+  (let [[objects code] (trimmed)
+        layers         (atom nil)
+        react          (ctac/motion-react code objects :class-name #(:name %)
+                                          :markup (fn [_ els] (reset! layers els) "      <div />"))
+        layer          (get @layers (thi/id :a))]
+    (t/is (cstr/includes? react "<div />") "the markup holds the board")
+    (t/is (nil? (:attrs layer)) "nothing plays on the layer's own box")
+    (t/is (cstr/includes? ((:trim layer) 0 "  ") "strokeDasharray: [\"0 1\", \"1 0\", \"1 0\"]"))
+    (t/is (cstr/includes? ((:trim layer) 0.25 "  ") "strokeDashoffset: [0.25, 0.25, 0.25]")
+          "a piece of the outline that starts a quarter along")
+    (t/is (nil? (ctac/motion-react code objects)) "without the markup, no element to trim")))
 
 (t/deftest css-plays-a-trim-on-the-elements-of-the-stroke
   (let [[objects code] (trimmed)
@@ -709,12 +732,3 @@
           "a layer that only trims plays nothing on its box")
     (t/is (cstr/includes? (acss/timeline->css (:timeline code) objects) "@keyframes penpot-anim-")
           "without trims, as before")))
-
-(t/deftest react-leaves-out-a-value-that-moves-nothing
-  (let [react (react-of #(-> %
-                             (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})
-                             (cta/add-keyframe (thi/id :a) {:time 400 :property :x :value 20})
-                             (cta/add-keyframe (thi/id :a) {:time 0 :property :y :value 20})
-                             (cta/add-keyframe (thi/id :a) {:time 400 :property :y :value 60})))]
-    (t/is (cstr/includes? react "animate={{ y: [0, 40, 40] }}"))
-    (t/is (not (cstr/includes? react "x: ")) "x stays where it rests all along")))

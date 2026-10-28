@@ -22,6 +22,7 @@
    [app.common.types.animation-code :as ctac]
    [app.common.types.shape-tree :as ctst]
    [app.util.code-gen.common :as cgc]
+   [app.util.code-gen.markup-jsx :as jsx]
    [app.util.code-gen.style-css-values :as sv]
    [cuerdas.core :as str]))
 
@@ -225,17 +226,21 @@
 
 (defn codes-react
   "React code for motion.dev animating the layers of the boards of `codes`
-  (see `ctac/motion-react`), those of `ids` only when given, with the
-  classes the HTML of the Inspect gives them; nil when nothing of them
-  animates."
-  [codes objects ids]
-  (ctac/motion-react codes objects
-                     :ids ids
-                     :class-name cgc/shape->selector))
+  (see `ctac/motion-react`), those of `ids` only when given: a component
+  by board, holding the board as the HTML of the Inspect writes it (see
+  `jsx/board-jsx`), so its CSS lays it out, without the helper layers
+  `guides` (see `guide-ids`); nil when nothing of them animates."
+  [codes objects ids & {:keys [guides]}]
+  (let [marked (marked-objects codes objects guides)]
+    (ctac/motion-react codes objects
+                       :ids ids
+                       :class-name cgc/shape->selector
+                       :markup (fn [code layers] (jsx/board-jsx marked code layers)))))
 
 (defn animation-react
   "React code for motion.dev animating the shapes of `ids` of `page` (see
   `codes-react`); nil when nothing of them animates. `files` holds the
   files of the components, by id."
   [page files ids]
-  (codes-react (code-of-boards page files ids) (:objects page) ids))
+  (codes-react (code-of-boards page files ids) (:objects page) ids
+               :guides (guide-ids page files ids)))

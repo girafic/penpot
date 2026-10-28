@@ -19199,15 +19199,18 @@ Timeline:
 
         The animation as React code for motion.dev (`motion/react`), as the
         Motion tab of Inspect gives it with the board selected: a component
-        for the board, and a `motion.div` for each animated layer, with the
-        class the code of Inspect gives it, its pivot and each value with its
-        keyframes, times and easings, on the clock of the layer (the animated
-        component copies play on the clock of their main). A spring of a
-        value that plays once is a spring of motion.dev; other springs, motion
-        paths and repeating properties are sampled into keyframes. A split
-        animation by characters or words gives the text a `motion.span` for
-        each, with its text and its keyframes (see `toCSS` for the rest);
-        audio is left out. An empty string when nothing animates.
+        holding the board as the code of Inspect writes its HTML (see
+        `Penpot.generateMarkup`), as JSX, so the CSS of Inspect (see
+        `Penpot.generateStyle`) lays it out. Each animated layer is a
+        `motion` element with its pivot and each value with its keyframes,
+        times and easings, on the clock of the layer (the animated component
+        copies play on the clock of their main). A spring of a value that
+        plays once is a spring of motion.dev; other springs, motion paths and
+        repeating properties are sampled into keyframes. A split animation by
+        characters or words plays each one as a `motion.span` (see `toCSS` for
+        the rest), and the trim of a stroke as a `motion.path` (or other
+        element) painting it, its dash on an outline of length 1. Audio is
+        left out. An empty string when nothing animates.
 
         Returns string
       remove: |-
