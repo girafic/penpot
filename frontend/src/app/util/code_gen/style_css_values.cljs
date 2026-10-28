@@ -337,25 +337,30 @@
     (every? some? [r1 r2 r3 r4])
     [r1 r2 r3 r4]))
 
+(defn- get-corner-radius
+  "The radius of the corner `r` of `shape`: half of its box on an ellipse,
+  which the code draws as a box, so it shows round; else the corner's,
+  when it rounds."
+  [shape r]
+  (cond
+    (cfh/circle-shape? shape) "50%"
+    (and r (not= r 0))        [r]))
+
 (defn- get-border-start-start-radius
-  [{:keys [_ r1 _ _ _] :as shape}]
-  (when (and r1 (not= r1 0))
-    [r1]))
+  [shape]
+  (get-corner-radius shape (:r1 shape)))
 
 (defn- get-border-start-end-radius
-  [{:keys [_ _ r2 _ _] :as shape}]
-  (when (and r2 (not= r2 0))
-    [r2]))
+  [shape]
+  (get-corner-radius shape (:r2 shape)))
 
 (defn- get-border-end-start-radius
-  [{:keys [_ _ _ r3 _] :as shape}]
-  (when (and r3 (not= r3 0))
-    [r3]))
+  [shape]
+  (get-corner-radius shape (:r3 shape)))
 
 (defn- get-border-end-end-radius
-  [{:keys [_ _ _ _ r4] :as shape}]
-  (when (and r4 (not= r4 0))
-    [r4]))
+  [shape]
+  (get-corner-radius shape (:r4 shape)))
 
 (defn- get-border-style
   [stroke]

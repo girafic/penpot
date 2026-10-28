@@ -299,6 +299,23 @@
       (is (nil? (css/get-css-value (assoc-in objs [gid :opacity] 0.5) (assoc group :opacity 0.5) :transform-style))
           "an opacity would flatten it"))))
 
+;; --- Corners ---------------------------------------------------------------
+
+(deftest an-ellipse-shows-round
+  (let [pid     (uuid/next)
+        ellipse (child (uuid/next) pid :frame-id pid :type :circle)
+        rect    (child (uuid/next) pid :frame-id pid :r1 8 :r2 0 :r3 8 :r4 0)
+        objs    (objects (frame pid) ellipse rect)]
+    (is (= ["50%" "50%" "50%" "50%"]
+           (map #(css/get-css-value objs ellipse %)
+                [:border-start-start-radius :border-start-end-radius
+                 :border-end-start-radius :border-end-end-radius])))
+    (testing "a box keeps the corners it rounds"
+      (is (= ["8px" nil "8px" nil]
+             (map #(css/get-css-value objs rect %)
+                  [:border-start-start-radius :border-start-end-radius
+                   :border-end-start-radius :border-end-end-radius]))))))
+
 ;; --- Blur ------------------------------------------------------------------
 
 (deftest a-hidden-blur-blurs-nothing
