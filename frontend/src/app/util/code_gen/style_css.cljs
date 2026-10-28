@@ -172,8 +172,11 @@ body {
      [:top "50%"]]))
 
 (defn shape->svg-props
+  "The CSS of the `svg` the code writes for `shape`: in place, as the SVG
+  is drawn with the margin of its strokes and shadows around its box
+  (see `app.main.render/object-svg`), the same bounds here."
   [shape objects]
-  (let [bounds (gsb/get-object-bounds objects shape)]
+  (let [bounds (gsb/get-object-bounds objects shape {:ignore-margin? false})]
     [[:position "absolute"]
      [:top 0]
      [:left 0]

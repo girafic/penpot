@@ -316,6 +316,21 @@
                   [:border-start-start-radius :border-start-end-radius
                    :border-end-start-radius :border-end-end-radius]))))))
 
+;; --- SVG of a layer with a stroke ------------------------------------------
+
+(deftest the-svg-of-a-stroked-layer-sits-in-place
+  (let [pid    (uuid/next)
+        rect   (child (uuid/next) pid :frame-id pid
+                      :strokes [{:stroke-style :solid :stroke-alignment :center :stroke-width 4
+                                 :stroke-color "#000000" :stroke-opacity 1}])
+        objs   (objects (frame pid) rect)
+        markup (html/generate-markup objs [rect])
+        [vx vy] (map js/parseFloat (rest (re-find #"viewBox=\"([-\d.]+) ([-\d.]+)" markup)))
+        css    (css/get-shape-css-selector objs rect)
+        [tx ty] (map js/parseFloat (rest (re-find #"> svg \{[^}]*translate\(([-\d.]+)px,\s*([-\d.]+)px\)" css)))]
+    (is (neg? vx) "its SVG takes the margin of its stroke")
+    (is (= [vx vy] [tx ty]) "moved back by that margin, so the stroke lies where it is drawn")))
+
 ;; --- Blur ------------------------------------------------------------------
 
 (deftest a-hidden-blur-blurs-nothing
