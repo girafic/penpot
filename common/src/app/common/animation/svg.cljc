@@ -286,21 +286,30 @@
         ;; drawn by an element of its own (see `trim-piece-class`); the
         ;; rule of the whole stays for one drawn whole
         pieces    (trim-pieces-of shape track)
+        ;; the renderer paints the fills in a pattern of the shape, each
+        ;; with its opacity there, when one is not a flat colour or there
+        ;; are several (as `url-fill?` of `app.main.ui.shapes.attrs`)
+        pattern?  (or (> (count fills) 1)
+                      (some :fill-color-gradient fills)
+                      (some :fill-image fills))
         fill-targets
         (for [index (kf-index svg-fill-properties)
-              :when (or text? (< index (count fills)))]
+              :when (or text? (< index (count fills)))
+              :let  [image? (and (not text?) (some? (:fill-image (get fills index))))]]
           [[(cond
               ;; its `text`, or the outlines of its units (see
               ;; `timeline->svg`)
-              (or text? (<= (count fills) 1)) (str "[id=\"fills-" sid "\"] > :not(defs)")
-              :else               (str "[id=\"shape-" sid "\"] > defs > pattern > g > :nth-child("
-                                       (- (count fills) index) ")"))]
+              (or text? (not pattern?)) (str "[id=\"fills-" sid "\"] > :not(defs)")
+              :else                     (str "[id=\"shape-" sid "\"] > defs > pattern > g > :nth-child("
+                                             (- (count fills) index) ")"))]
            (fn [values]
              (let [color   (indexed-value (:fill-color values) index)
                    opacity (indexed-value (:fill-opacity values) index)]
                (cond-> []
                  (some? color)   (conj (str "fill: " color ";"))
-                 (some? opacity) (conj (str "fill-opacity: " (acss/fmt opacity) ";")))))
+                 ;; an `image` takes no fill opacity
+                 (some? opacity) (conj (str (if image? "opacity: " "fill-opacity: ")
+                                            (acss/fmt opacity) ";")))))
            svg-fill-properties])
         ;; a text draws its strokes along its glyphs, each line or run in a
         ;; group of its own: its trim stays as it rests, as a `text` takes

@@ -400,12 +400,11 @@
              (kf cid :r1 nil 12 24) (kf cid :r2 nil 12 24) (kf cid :r3 nil 12 24) (kf cid :r4 nil 12 24)
              (kf cid :width nil 160 200))}))
 
-(t/deftest the-css-of-an-svg-finds-what-the-svg-renderer-draws
-  ;; The CSS that plays the fills, strokes, trim, corners and sizes of an
-  ;; SVG of vectors picks their elements by how Penpot's SVG renderer
-  ;; draws them: every selector it writes finds one in the SVG it makes.
-  (let [{:keys [bid objects tl]} (contract-board)
-        resolved (cta/resolve-animations tl objects)
+(defn- vector-svg
+  "The SVG of vectors of the board `bid` of `objects` playing `tl`: its
+  document, its style and the selectors the style animates."
+  [bid objects tl]
+  (let [resolved (cta/resolve-animations tl objects)
         layers   (aexp/export-layer-ids objects resolved)
         drawable (svgv/without-layers objects (set layers))
         images   (into {}
@@ -413,8 +412,18 @@
                        (cons bid layers))
         svg      (asvg/timeline->svg tl objects images {})
         document (.. (JSDOM. svg #js {:contentType "image/svg+xml"}) -window -document)
-        style    (.-textContent (.querySelector document "style"))
-        selectors (map second (re-seq #"(?m)^([^@\s{}][^{}\n]*) \{\n  animation: penpot-svg-" style))]
+        style    (.-textContent (.querySelector document "style"))]
+    {:document  document
+     :layers    layers
+     :style     style
+     :selectors (map second (re-seq #"(?m)^([^@\s{}][^{}\n]*) \{\n  animation: penpot-svg-" style))}))
+
+(t/deftest the-css-of-an-svg-finds-what-the-svg-renderer-draws
+  ;; The CSS that plays the fills, strokes, trim, corners and sizes of an
+  ;; SVG of vectors picks their elements by how Penpot's SVG renderer
+  ;; draws them: every selector it writes finds one in the SVG it makes.
+  (let [{:keys [bid objects tl]} (contract-board)
+        {:keys [document layers selectors]} (vector-svg bid objects tl)]
     (doseq [[part what] [["> defs > pattern > g > :nth-child(" "the fills in a pattern"]
                          ["[id=\"fills-" "a fill"]
                          [".inner-stroke-shape > :not(defs)" "an inner stroke"]
@@ -433,6 +442,46 @@
                                                      ".strokes[id$=\"-" (first layers) "\"] rect"))]
         (t/is (pos? (.-length painted)))
         (t/is (every? #(= "1" (.getAttribute % "pathLength")) (array-seq painted)))))))
+
+(t/deftest the-opacity-of-a-gradient-or-an-image-fill-plays-in-its-pattern
+  ;; The renderer paints a gradient or an image fill in a pattern of the
+  ;; shape, its opacity on the element there: the opacity plays on that
+  ;; element, as `opacity` on an image, which takes no fill opacity.
+  (let [board    (cts/setup-shape {:type :frame :x 0 :y 0 :width 300 :height 200
+                                   :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        gradient {:type :linear :start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5 :width 1
+                  :stops [{:color "#ff0000" :opacity 1 :offset 0} {:color "#0000ff" :opacity 1 :offset 1}]}
+        grect    (cts/setup-shape {:type :rect :x 20 :y 20 :width 100 :height 60
+                                   :fills [{:fill-color-gradient gradient :fill-opacity 0.5}]})
+        irect    (cts/setup-shape {:type :rect :x 150 :y 20 :width 100 :height 60
+                                   :fills [{:fill-color "#00ff00" :fill-opacity 1}
+                                           {:fill-image {:id (uuid/next) :width 10 :height 10 :mtype "image/png"}
+                                            :fill-opacity 1}]})
+        [bid gid iid] (map :id [board grect irect])
+        objects  {bid (assoc board :shapes [gid iid])
+                  gid (assoc grect :parent-id bid :frame-id bid)
+                  iid (assoc irect :parent-id bid :frame-id bid)}
+        kf       (fn [tl id index from to]
+                   (-> tl
+                       (cta/add-keyframe id {:time 0 :property :fill-opacity :index index :value from})
+                       (cta/add-keyframe id {:time 1000 :property :fill-opacity :index index :value to})))
+        tl       (-> (cta/make-timeline {:board-id bid :duration 1000})
+                     (kf gid 0 0.5 1)
+                     (kf iid 1 1 0.2))
+        {:keys [document style selectors]} (vector-svg bid objects tl)
+        in-pattern (fn [id] (str "[id=\"shape-" id "\"] > defs > pattern > g > :nth-child(1)"))]
+    (t/testing "a single gradient fill"
+      (t/is (some #{(in-pattern gid)} selectors) "its opacity plays in the pattern")
+      (t/is (pos? (.-length (.querySelectorAll document (in-pattern gid)))))
+      (t/is (not-any? #(str/includes? % (str "fills-" gid)) selectors)
+            "not on the shape, which paints with the pattern"))
+    (t/testing "an image fill among two"
+      (t/is (some #{(in-pattern iid)} selectors))
+      (t/is (= "image" (some-> (.querySelector document (in-pattern iid)) .-localName))
+            "the element of the image fill")
+      (t/is (re-find #"(?<!fill-)opacity: 0\.2" style) "an image plays opacity"))
+    (doseq [selector selectors]
+      (t/is (pos? (.-length (.querySelectorAll document selector))) selector))))
 
 (t/deftest a-shape-resized-on-its-elements-paints-over-its-box
   ;; As the SVG renderer draws it: its fills (a gradient, more than one)
