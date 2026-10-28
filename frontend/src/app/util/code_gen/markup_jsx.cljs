@@ -182,9 +182,13 @@
       (contains? node :comment)
       [(str indent "{/* " (str/trim (str/replace (:comment node) "*/" "* /")) " */}")]
 
+      ;; the line breaks and indents `generate-html` puts between elements
+      ;; go; any other text stays: a space between two units of a text, the
+      ;; no-break space of an empty line
       (contains? node :text)
-      (when-not (str/blank? (:text node))
-        [(str indent "{" (js/JSON.stringify (:text node)) "}")])
+      (let [text (:text node)]
+        (when-not (and (str/blank? text) (str/includes? text "\n"))
+          [(str indent "{" (js/JSON.stringify text) "}")]))
 
       :else
       (let [{:keys [tag attrs]} node

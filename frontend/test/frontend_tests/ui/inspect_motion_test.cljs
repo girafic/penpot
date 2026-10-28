@@ -224,6 +224,31 @@
     (t/is (str/includes? css (str (cgm/code-selector text) " .penpot-unit-2 {")) "its CSS plays each")
     (t/is (str/includes? css "display: inline-block;"))))
 
+(defn- text-scene
+  "Board :board holding a text :title of `text` its animation `anim` plays
+  (a preset of `cta/add-animation`): `{:page :ids}`."
+  [text anim]
+  (let [file  (-> (cthf/sample-file :file1)
+                  (ctho/add-frame :board :x 0 :y 0 :width 400 :height 300)
+                  (ctho/add-text :title text :text-params {:parent-label :board}))
+        board (cthi/id :board)
+        tl    (cta/add-animation (cta/make-timeline {:board-id board :duration 1000}) (cthi/id :title) anim)
+        file  (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                           (pcb/with-page (cthf/current-page file))
+                                           (pcb/set-timeline board tl)))]
+    {:page (cthf/current-page file)
+     :files {(:id file) file}
+     :ids #{board (cthi/id :title)}}))
+
+(t/deftest the-react-of-a-text-keeps-its-spaces
+  (let [{:keys [page files ids]} (text-scene "Hi you there" {:type :fade :split :word :spread 1 :start 0 :duration 600})
+        react (cgm/animation-react page files ids)]
+    (t/is (re-find #"\{\"Hi\"\}\s*</motion.span>\s*\{\" \"\}\s*<motion.span" react)
+          "the space between two words it plays one by one"))
+  (let [{:keys [page files ids]} (text-scene "Hi\n\nthere" {:type :fade :start 0 :duration 600})
+        react (cgm/animation-react page files ids)]
+    (t/is (str/includes? react "{\"\u00a0\"}") "the no-break space of an empty line")))
+
 ;; THE MARKUP OF THE REACT CODE AND TRIMS
 
 (defn- trim-scene
