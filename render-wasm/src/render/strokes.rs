@@ -1052,6 +1052,25 @@ fn strokes_share_geometry(strokes: &[&Stroke]) -> bool {
     })
 }
 
+/// The paint of strokes drawn as one (see `render_merged`): `paint`, the
+/// representative stroke's, painting with `merged` (see `merge_fills`).
+/// A merged shader holds the opacity of every stroke, so the paint's own
+/// alpha, the representative's opacity, would apply it a second time; a
+/// single flat colour comes without a shader and keeps its alpha.
+fn merged_paint(mut paint: skia::Paint, merged: &skia::Paint) -> skia::Paint {
+    match merged.shader() {
+        Some(shader) => {
+            paint.set_shader(shader);
+            paint.set_alpha(255);
+        }
+        None => {
+            paint.set_shader(None);
+            paint.set_color(merged.color());
+        }
+    }
+    paint
+}
+
 fn render_merged(
     render_state: &mut RenderState,
     shape: &Shape,
@@ -1147,8 +1166,10 @@ fn render_merged(
 
     match &shape.shape_type {
         shape_type @ (Type::Rect(_) | Type::Frame(_)) => {
-            let mut paint = representative.to_paint(&selrect, svg_attrs, antialias);
-            paint.set_shader(merged.shader());
+            let paint = merged_paint(
+                representative.to_paint(&selrect, svg_attrs, antialias),
+                &merged,
+            );
             draw_stroke_on_rect(
                 canvas,
                 representative,
@@ -1163,8 +1184,10 @@ fn render_merged(
             );
         }
         Type::Circle => {
-            let mut paint = representative.to_paint(&selrect, svg_attrs, antialias);
-            paint.set_shader(merged.shader());
+            let paint = merged_paint(
+                representative.to_paint(&selrect, svg_attrs, antialias),
+                &merged,
+            );
             draw_stroke_on_circle(
                 canvas,
                 representative,
@@ -1181,9 +1204,10 @@ fn render_merged(
             if let Some(path) = shape_type.path() {
                 let is_open = path.is_open();
                 let lod_stroke = representative.path_lod_at_scale(is_open, scale);
-                let mut paint =
-                    lod_stroke.to_stroked_paint(is_open, &selrect, svg_attrs, antialias);
-                paint.set_shader(merged.shader());
+                let paint = merged_paint(
+                    lod_stroke.to_stroked_paint(is_open, &selrect, svg_attrs, antialias),
+                    &merged,
+                );
                 draw_stroke_on_path(
                     canvas,
                     &lod_stroke,
@@ -1549,5 +1573,58 @@ mod per_side_tests {
         assert!(!pattern.contains((50.0, 8.0)), "top gap was filled");
         // 175 stretches to 3 dashes of 35: the first gap is 35..70.
         assert!(!pattern.contains((227.0, 50.0)), "right gap was filled");
+    }
+}
+
+#[cfg(test)]
+mod merged_tests {
+    use super::*;
+    use crate::shapes::Gradient;
+
+    /// The alpha that `fills` merged (the first on top) draw with, the
+    /// last one's paint being the representative's, as `render_merged`.
+    fn merged_alpha(fills: &[Fill]) -> i32 {
+        let rect = Rect::from_xywh(0.0, 0.0, 10.0, 10.0);
+        let representative = fills.last().expect("fills").to_paint(&rect, false);
+        let paint = merged_paint(representative, &merge_fills(fills, rect));
+        let mut surface = skia::surfaces::raster_n32_premul((10, 10)).expect("surface");
+        surface.canvas().draw_rect(rect, &paint);
+        let image = surface.image_snapshot();
+        image.peek_pixels().expect("pixels").get_color((5, 5)).a() as i32
+    }
+
+    #[test]
+    fn merged_strokes_take_the_opacity_of_a_gradient_once() {
+        let half = Gradient::new(
+            (0.0, 0.0),
+            (1.0, 0.0),
+            128,
+            1.0,
+            &[(skia::Color::RED, 0.0), (skia::Color::RED, 1.0)],
+        );
+        let fills = [
+            Fill::Solid(crate::shapes::SolidColor(skia::Color::TRANSPARENT)),
+            Fill::LinearGradient(half),
+        ];
+        let alpha = merged_alpha(&fills);
+        assert!(
+            (alpha - 128).abs() <= 2,
+            "half as opaque, not a quarter: {alpha}"
+        );
+    }
+
+    #[test]
+    fn merged_strokes_take_the_alpha_of_a_flat_colour_once() {
+        let fills = [
+            Fill::Solid(crate::shapes::SolidColor(skia::Color::TRANSPARENT)),
+            Fill::Solid(crate::shapes::SolidColor(skia::Color::from_argb(
+                128, 255, 0, 0,
+            ))),
+        ];
+        let alpha = merged_alpha(&fills);
+        assert!(
+            (alpha - 128).abs() <= 2,
+            "half as opaque, not a quarter: {alpha}"
+        );
     }
 }
