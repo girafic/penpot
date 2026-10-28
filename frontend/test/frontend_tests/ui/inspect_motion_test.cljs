@@ -153,6 +153,26 @@
     (t/is (str/includes? (css-of move) "rotate(0deg) matrix(")
           "a move keeps its turn")))
 
+(t/deftest a-turned-layer-keeps-its-turn-in-the-react-code
+  (let [turn    (fn [page id]
+                  (update-in page [:objects id] assoc
+                             :transform (gmt/rotate-matrix 30)
+                             :transform-inverse (gmt/inverse (gmt/rotate-matrix 30))))
+        own-tl  (fn [property]
+                  (fn [timeline _]
+                    (-> timeline
+                        (cta/add-keyframe (cthi/id :own) {:time 0 :property property :value 0})
+                        (cta/add-keyframe (cthi/id :own) {:time 500 :property property :value 1}))))
+        react   (fn [property]
+                  (let [{:keys [page files board]} (scene (own-tl property))
+                        own (cthi/id :own)]
+                    (cgm/animation-react (turn page own) files #{board own})))
+        moves   (react :x)]
+    (t/is (re-find #"transformTemplate=[^`]*`[^`]*rotate\(\$\{withUnit\(rotate, \"deg\"\)\}\) matrix\(" moves)
+          "a move keeps its turn, after the turn it plays")
+    (t/is (not (str/includes? (react :opacity) "transformTemplate"))
+          "a fade leaves its turn to the CSS of the layer")))
+
 (t/deftest the-json-of-a-board-plays-its-copies
   (let [{:keys [page files board copy-rect]} (scene nil)
         ids  #{board (cthi/id :copy) copy-rect}

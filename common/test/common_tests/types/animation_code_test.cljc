@@ -732,3 +732,31 @@
           "a layer that only trims plays nothing on its box")
     (t/is (cstr/includes? (acss/timeline->css (:timeline code) objects) "@keyframes penpot-anim-")
           "without trims, as before")))
+
+;; THE TRANSFORM A LAYER RESTS AT
+
+(t/deftest react-keeps-the-transform-a-layer-rests-at
+  (let [turned "matrix(0.966, 0.259, -0.259, 0.966, 0, 0)"
+        react  (fn [f]
+                 (let [[objects code] (board-scene f)]
+                   (ctac/motion-react code objects :class-name #(:name %) :rest-transform (constantly turned))))
+        moves  (react #(-> %
+                           (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})
+                           (cta/add-keyframe (thi/id :a) {:time 400 :property :x :value 60})))
+        fades  (react #(-> %
+                           (cta/add-keyframe (thi/id :a) {:time 0 :property :opacity :value 0})
+                           (cta/add-keyframe (thi/id :a) {:time 400 :property :opacity :value 1})))
+        tilts  (react #(-> %
+                           (cta/add-keyframe (thi/id :a) {:time 0 :property :rotate-y :value 0})
+                           (cta/add-keyframe (thi/id :a) {:time 400 :property :rotate-y :value 180})))]
+    (t/is (cstr/includes? moves (str "rotate(${withUnit(rotate, \"deg\")}) " turned " scale(${scaleX}, ${scaleY})"))
+          "after its turn, before its scale, as its CSS keeps it")
+    (t/is (not (cstr/includes? fades "transformTemplate"))
+          "a layer that plays none of its transform keeps the one of its CSS")
+    (t/is (cstr/includes? tilts (str "rotate(${withUnit(rotate, \"deg\")}) " turned " "))
+          "a tilted layer keeps it after its turn too")
+    (t/is (not (cstr/includes? (react-of #(-> %
+                                              (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})
+                                              (cta/add-keyframe (thi/id :a) {:time 400 :property :x :value 60})))
+                               "transformTemplate"))
+          "without one, a move needs no template")))

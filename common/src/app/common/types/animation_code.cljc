@@ -731,24 +731,36 @@
            [[] {}]
            boards)))
 
-(def ^:private transform-template
+(def ^:private transform-names
+  "The motion.dev values that play in the `transform` of a layer."
+  #{"x" "y" "z" "rotate" "rotateX" "rotateY" "scale" "scaleX" "scaleY"})
+
+(defn- transform-template
   "Penpot turns a layer, then scales it; motion.dev the other way round.
   motion.dev gives the template the values it has, a turn with its unit
   (`\"90deg\"`), so the units go only to plain numbers (see `with-unit`).
-  A `scale` (`scaleX` and `scaleY` alike, see `merge-scale`) sets both."
+  A `scale` (`scaleX` and `scaleY` alike, see `merge-scale`) sets both.
+  `rest`, if any, is the transform the CSS of the layer gives it at rest
+  (see `motion-react`), kept after its turn as that CSS keeps it (see
+  `acss/timeline->css`)."
+  [rest]
   (str "transformTemplate={({ x = 0, y = 0, rotate = 0, scale = 1, scaleX = scale, scaleY = scale }) =>\n"
        "          `translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
-       "rotate(${withUnit(rotate, \"deg\")}) scale(${scaleX}, ${scaleY})`}"))
+       "rotate(${withUnit(rotate, \"deg\")}) "
+       (when-not (str/blank? rest) (str rest " "))
+       "scale(${scaleX}, ${scaleY})`}"))
 
 (defn- tilt-template
   "`transform-template` of a layer that tilts (see `app.common.geom.tilt`):
-  the tilt in its own axes, after its turn, before its scale, lifted to
-  its pivot by `lift` (`[dx dy dz]`, see `acss/frame-values`)."
-  [lift]
+  the tilt in its own axes, after its turn and the transform it rests at
+  (`rest`, as `transform-template`), before its scale, lifted to its
+  pivot by `lift` (`[dx dy dz]`, see `acss/frame-values`)."
+  [lift rest]
   (str "transformTemplate={({ x = 0, y = 0, z = 0, rotate = 0, rotateX = 0, rotateY = 0, scale = 1, scaleX = scale, scaleY = scale }) =>\n"
        "          `translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
        "translateZ(${withUnit(z, \"px\")}) "
        "rotate(${withUnit(rotate, \"deg\")}) "
+       (when-not (str/blank? rest) (str rest " "))
        (when-let [[dx dy dz] lift]
          (str "translate3d(" (react-number dx) "px, " (react-number dy) "px, " (react-number dz) "px) "))
        "rotateX(${withUnit(rotateX, \"deg\")}) rotateY(${withUnit(rotateY, \"deg\")}) "
@@ -845,21 +857,27 @@
   see `trim-react-values`) as a function of where its piece of the
   outline starts and the indent; and `:code`, the `motion.div` of the
   layer, holding the `motion.span` of each unit, when anything plays on
-  it."
-  [layer objects played sampled class-name]
+  it. `rest-transform`, if any, gives the transform the CSS of the layer
+  gives it at rest, which its template keeps: motion.dev writes the
+  `transform` of a layer that plays any of it."
+  [layer objects played sampled class-name rest-transform]
   (let [values   (merge-scale (layer-animation layer objects played sampled))
         names    (into #{} (map :name) values)
         origin   (:origin layer)
         units    (when (:units layer) (react-units layer objects))
+        rest     (when (and (some? rest-transform) (some transform-names names))
+                   (rest-transform (:shape layer)))
         tilt?    (or (contains? names "rotateX") (contains? names "rotateY") (contains? names "z"))
-        template? (or tilt? (and (contains? names "rotate") (contains? names "scaleX")))
+        template? (or tilt?
+                      (and (contains? names "rotate") (contains? names "scaleX"))
+                      (not (str/blank? rest)))
         props    (fn [indent]
                    (str indent "style={{ originX: " (react-number (:x origin)) ", originY: " (react-number (:y origin)) " }}\n"
                         (when template?
                           (str indent
                                (if tilt?
-                                 (tilt-template (:lift (frame-at played objects layer 0)))
-                                 transform-template)
+                                 (tilt-template (:lift (frame-at played objects layer 0)) rest)
+                                 (transform-template rest))
                                "\n"))
                         (react-props values indent)))
         trimmed? (and (not= :text (get-in layer [:shape :type]))
@@ -890,7 +908,7 @@
   `code` and the animation of its layers as `react-layer` gives it (by
   id), the JSX of the board (see `motion-react`); else the `motion.div` of
   each animated layer, one after another."
-  [{:keys [board-id timeline] :as code} component objects ids class-name markup]
+  [{:keys [board-id timeline] :as code} component objects ids class-name markup rest-transform]
   (let [board   (get objects board-id)
         played  (memoize (fn [clock]
                            (-> (cta/resolve-animations clock objects) cta/expand-loops cta/expand-paths cta/cut-timeline)))
@@ -909,7 +927,7 @@
         divs    (into []
                       (comp (map (fn [layer]
                                    (let [p (played (:clock layer))]
-                                     (react-layer layer objects p (cta/expand-springs p) class-name))))
+                                     (react-layer layer objects p (cta/expand-springs p) class-name rest-transform))))
                             ;; without the markup, no element paints a stroke to trim
                             (filter #(if (some? markup)
                                        (or (:attrs %) (:units %) (:trim %))
@@ -950,13 +968,15 @@
   `markup`, a function of the code of a board and the animation of its
   layers (see `react-layer`, by id), the component holds the JSX it gives:
   the board with all its layers, the animated ones as `motion` elements.
-  Nil when nothing animates."
-  [codes objects & {:keys [ids class-name markup]}]
+  `rest-transform`, a function of a shape, gives the transform the CSS of
+  a layer gives it at rest, which a layer playing its transform keeps
+  (see `transform-template`). Nil when nothing animates."
+  [codes objects & {:keys [ids class-name markup rest-transform]}]
   (let [codes      (if (map? codes) [codes] codes)
         class-name (or class-name #(acss/shape-css-class (:id %)))
         names      (component-names (map #(get objects (:board-id %)) codes))
         boards     (into [] (keep identity)
-                         (map #(react-board %1 %2 objects ids class-name markup) codes names))]
+                         (map #(react-board %1 %2 objects ids class-name markup rest-transform) codes names))]
     (when (seq boards)
       (str "import { MotionConfig, motion } from \"motion/react\";\n"
            "\n"

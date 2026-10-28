@@ -172,6 +172,13 @@
    :origin (constantly "50% 50%")
    :display "inline-block"})
 
+(defn- rest-transform
+  "The transform the CSS of the Inspect gives `shape` of `objects` at
+  rest, flat: its tilt is the animation's own (see `acss/frame-values`).
+  The animation keeps it (see `acss/timeline->css`, `ctac/motion-react`)."
+  [objects shape]
+  (sv/get-value :transform (dissoc shape :rotate-x :rotate-y :translate-z) objects {}))
+
 (defn codes-css
   "CSS animating the layers of the boards of `codes` (see
   `cltl/code-timelines`), those of `ids` only when given, with the
@@ -182,9 +189,7 @@
   [codes objects ids]
   (let [options {:ids ids
                  :selector code-selector
-                 ;; flat: the animation writes the tilt itself (see
-                 ;; `acss/frame-values`)
-                 :transform #(sv/get-value :transform (dissoc % :rotate-x :rotate-y :translate-z) objects {})
+                 :transform (partial rest-transform objects)
                  :units (assoc unit-options :texts #(code-units? (get objects %)))
                  ;; on the strokes its SVG draws (see `code-trims`)
                  :trims (fn [shape _] (trim-paint shape (code-selector shape)))}]
@@ -235,6 +240,7 @@
     (ctac/motion-react codes objects
                        :ids ids
                        :class-name cgc/shape->selector
+                       :rest-transform (partial rest-transform objects)
                        :markup (fn [code layers] (jsx/board-jsx marked code layers)))))
 
 (defn animation-react
