@@ -3296,7 +3296,9 @@
 
 (defn- patch-indexed
   "Replace fields of each item in `items` from the `{index value}` maps
-  in `by-field`. `solid?` skips items that cannot take a colour."
+  in `by-field`. `solid?` skips the items it is false for (a colour
+  patches flat paints only); nil patches every item (an opacity takes
+  any paint)."
   [items by-field solid?]
   (if (empty? by-field)
     items
@@ -3346,11 +3348,11 @@
        gradient-fill?)))
 
 (defn apply-strokes
-  "`strokes` as `values` (see `values-at`) play them: their colour and
-  opacity (flat ones), gradient (gradient ones), width and dash pattern
-  (dashed ones), and the widths
-  of their sides (see `ctap/sided`): a side plays its own keyframes, a stroke
-  with sides takes the width that plays on every other side."
+  "`strokes` as `values` (see `values-at`) play them: their colour (flat
+  ones), opacity (any paint), gradient (gradient ones), width and dash
+  pattern (dashed ones), and the widths of their sides (see
+  `ctap/sided`): a side plays its own keyframes, a stroke with sides
+  takes the width that plays on every other side."
   [strokes values]
   (let [strokes (-> strokes
                     (patch-indexed
