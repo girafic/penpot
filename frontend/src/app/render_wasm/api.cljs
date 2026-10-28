@@ -2345,7 +2345,9 @@
                       (fn [] (resolve nil))))))
     (p/resolved nil)))
 
-(defn- replay-font-resources!
+(defn replay-font-resources!
+  "Store the faces of `fonts` in WASM and send the requests of the ones
+  it has not got, one per font file (see `run-resource-callbacks!`)."
   [fonts]
   (let [pending (into [] (f/store-fonts fonts))]
     (run-resource-callbacks! pending)))

@@ -18,6 +18,7 @@
    [app.main.data.workspace.wasm-text :as dwwt]
    [app.main.fonts :as fonts]
    [app.plugins.reflow :as pwrf]
+   [app.render-wasm.api :as wasm.api]
    [app.render-wasm.api.fonts :as wasm.fonts]
    [app.util.globals :as globals]
    [app.util.http :as http]
@@ -488,13 +489,32 @@
                    (stop-pipeline! store)
                    (done)))))))
 
-(t/deftest fetch-fonts-sends-each-request-once
+(t/deftest replayed-font-resources-send-each-request-once
   (let [sent (atom [])]
     (with-redefs [wasm.fonts/store-fonts
                   (fn [_]
                     [{:key "a" :callback #(do (swap! sent conj :a) (rx/empty))}
                      {:key "a" :callback #(do (swap! sent conj :a) (rx/empty))}
                      {:key "b" :callback #(do (swap! sent conj :b) (rx/empty))}])]
-      (wasm.fonts/fetch-fonts! [:some-font]))
+      (wasm.api/replay-font-resources! [:some-font]))
     (t/is (= [:a :b] (sort @sent))
           "every url is fetched, each once")))
+
+(t/deftest a-font-request-for-faces-already-stored-sends-nothing
+  (t/async done
+    (let [font-url "https://example.test/stored-font.ttf"
+          face     {:font-id "gfont-stored"
+                    :weight 400
+                    :style 0
+                    :emoji? false}
+          sent     (atom 0)]
+      (mock/with-mocks
+        {http/send! (fn [_] (swap! sent inc) (rx/empty))}
+        (fn [done']
+          (let [request (#'wasm.fonts/fetch-font face font-url false false)]
+            ;; another request stored the face and took it off the url
+            (#'wasm.fonts/take-font-fetches! font-url)
+            ((:callback request))
+            (t/is (zero? @sent) "nothing waits for the file: it is not fetched again")
+            (done')))
+        done))))

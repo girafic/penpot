@@ -139,6 +139,10 @@
            (rx/filter empty?)
            (rx/take 1)
            (rx/take-until (text-work-stopper stream))
+           ;; Asynchronous, out of the push of `font-stored-stream`: a font
+           ;; file stays in flight until its request finalizes, after that
+           ;; push, so a face asked for within it would wait for a request
+           ;; nobody sends (see `wasm.fonts/fetch-font`).
            (rx/observe-on :async)
            (rx/mapcat (constantly resize-stream))
            (wrf/with-pending :font ids)))))

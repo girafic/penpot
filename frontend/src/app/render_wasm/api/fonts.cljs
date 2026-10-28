@@ -237,8 +237,10 @@
       {:key font-url
        :callback
        (fn []
-         (if (contains? @in-flight font-url)
-           ;; Another callback sent the request: it stores this face too.
+         (if (or (contains? @in-flight font-url)
+                 (empty? (get @fetching font-url)))
+           ;; Another callback sent the request, which stores this face
+           ;; too, or already stored every face that waited for it.
            (rx/empty)
            (do
              (swap! in-flight conj font-url)
@@ -486,11 +488,3 @@
 (defn store-fonts
   [fonts]
   (keep (fn [font] (store-font font)) fonts))
-
-(defn fetch-fonts!
-  "Store the faces of `fonts` in WASM, fetching the ones it has not got:
-  `store-fonts` only hands back the requests, for its caller to send."
-  [fonts]
-  (->> (rx/from (vals (d/index-by :key :callback (store-fonts fonts))))
-       (rx/merge-map (fn [callback] (if (fn? callback) (callback) (rx/empty))))
-       (rx/subs! (constantly nil))))
