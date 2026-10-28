@@ -5,6 +5,7 @@
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
 @use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_sizes.scss" as *;
 
 .motion-tab {
   display: flex;
@@ -54,7 +55,7 @@
 
 // three formats: wide enough for each name
 .code-lang-options {
-  max-width: deprecated.$s-160;
+  max-width: $sz-160;
 }
 
 .action-btns {

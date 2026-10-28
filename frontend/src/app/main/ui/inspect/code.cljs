@@ -201,7 +201,7 @@
          (mf/deps markup-type shapes images-data objects code-units code-trims)
          (fn []
            (if (or (seq code-units) (seq code-trims))
-             (let [mark #(-> % (cgm/with-code-units code-units) (cgm/with-code-trims code-trims))]
+             (let [mark #(cgm/mark-shape % code-units code-trims)]
                (cg/generate-formatted-markup-code (d/update-vals objects mark) markup-type (mapv mark shapes)))
              (cg/generate-formatted-markup-code objects markup-type shapes))))
 

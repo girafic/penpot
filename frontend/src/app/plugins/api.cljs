@@ -525,7 +525,7 @@
                               ;; strokes it trims
                               units (cgm/code-units codes objects)
                               trims (cgm/code-trims codes objects)
-                              mark  #(-> % (cgm/with-code-units units) (cgm/with-code-trims trims))]
+                              mark  #(cgm/mark-shape % units trims)]
                           (conj acc (cg/generate-formatted-markup-code (d/update-vals objects mark)
                                                                        type
                                                                        (mapv mark resolved-shapes)))))

@@ -19205,7 +19205,8 @@ Timeline:
         `Penpot.generateStyle`) lays it out. Each animated layer is a
         `motion` element with its pivot and each value with its keyframes,
         times and easings, on the clock of the layer (the animated component
-        copies play on the clock of their main). A spring of a value that
+        copies play on the clock of their main); one that moves keeps the
+        transform the CSS of Inspect gives it at rest. A spring of a value that
         plays once is a spring of motion.dev; other springs, motion paths and
         repeating properties are sampled into keyframes. A split animation by
         characters or words plays each one as a `motion.span` (see `toCSS` for

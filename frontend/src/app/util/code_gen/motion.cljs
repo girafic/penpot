@@ -71,6 +71,11 @@
                 (mapcat #(cltl/guide-ids page files %)))
           ids)))
 
+(defn- objects-without-guides
+  "`objects` without the helper layers `guides` (see `guide-ids`)."
+  [objects guides]
+  (:objects (reduce #(ctst/delete-shape %1 %2 true) {:objects objects} guides)))
+
 (defn without-guides
   "`[objects shapes]`: `objects` and the selected `shapes` of them (with
   the children of each) without the helper layers of the boards those
@@ -81,7 +86,7 @@
   (let [guides (guide-ids page files (map :id shapes))]
     (if (empty? guides)
       [objects shapes]
-      [(:objects (reduce #(ctst/delete-shape %1 %2 true) {:objects objects} guides))
+      [(objects-without-guides objects guides)
        (into []
              (comp (remove #(contains? guides (:id %)))
                    (map #(d/update-when % :shapes (partial filterv (complement guides)))))
@@ -133,6 +138,16 @@
   (cond-> shape
     (contains? trims (:id shape)) (assoc :code-trim true)))
 
+(defn mark-shape
+  "`shape` marked with what the code of the Inspect plays on its HTML: the
+  units of a text it plays by units (`units`, see `code-units` and
+  `with-code-units`), the trim of its strokes (`trims`, see `code-trims`
+  and `with-code-trims`)."
+  [shape units trims]
+  (-> shape
+      (with-code-units units)
+      (with-code-trims trims)))
+
 (defn marked-objects
   "`objects` as the code of the Inspect writes their HTML for the
   animation of the boards of `codes`: the texts it plays by units with
@@ -142,10 +157,9 @@
   [codes objects guides]
   (let [units   (code-units codes objects)
         trims   (code-trims codes objects)
-        objects (if (seq guides)
-                  (:objects (reduce #(ctst/delete-shape %1 %2 true) {:objects objects} guides))
-                  objects)]
-    (d/update-vals objects #(-> % (with-code-units units) (with-code-trims trims)))))
+        objects (cond-> objects
+                  (seq guides) (objects-without-guides guides))]
+    (d/update-vals objects #(mark-shape % units trims))))
 
 (defn- trim-targets
   "The elements the trim of the strokes of `shape` plays on in the code of
