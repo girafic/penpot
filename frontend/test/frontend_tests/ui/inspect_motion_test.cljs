@@ -309,6 +309,20 @@
            (jsx/parse "<div class=\"a b\"><img src=\"x.png\"></img><!-- c --><span>a &amp; b</span></div>"))
         "an `</img>` closes nothing; the references read as their characters"))
 
+(t/deftest the-jsx-names-attributes-as-react-does
+  (let [jsx (jsx/markup-jsx (str "<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\" data-x=\"1\">"
+                                 "<use xlink:href=\"#a\" stroke-width=\"2\" hidden "
+                                 "style=\"--a: b; -webkit-print-color-adjust: exact\" "
+                                 "title=\"say &quot;hi&quot; {x}\"></use></svg>")
+                            {} 0)]
+    (t/is (str/includes? jsx "xmlnsXlink=\"http://www.w3.org/1999/xlink\""))
+    (t/is (str/includes? jsx "data-x=\"1\"") "a data attribute as it is")
+    (t/is (str/includes? jsx "xlinkHref=\"#a\""))
+    (t/is (str/includes? jsx "strokeWidth=\"2\""))
+    (t/is (re-find #" hidden[ />]" jsx) "one without a value, its name alone")
+    (t/is (str/includes? jsx "style={{ \"--a\": \"b\", WebkitPrintColorAdjust: \"exact\" }}"))
+    (t/is (str/includes? jsx "title={\"say \\\"hi\\\" {x}\"}") "a value with quotes or braces as a JS string")))
+
 (t/deftest the-react-of-a-board-holds-its-markup
   (let [{:keys [page files ids]} (trim-scene)
         objects (:objects page)

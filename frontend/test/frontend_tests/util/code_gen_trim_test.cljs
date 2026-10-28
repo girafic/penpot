@@ -114,3 +114,48 @@
   (let [scene (scene {:strokes [(stroke :center)]} [[:rect {:name "Rect" :strokes [(stroke :center)]}]] [:card])]
     (t/is (= ["0"] (markers (markup-of scene :card)))
           "not the stroke of the layer its SVG draws in it")))
+
+;; THE REACT CODE
+
+(defn- react-of
+  [{:keys [page files ids]}]
+  (cgm/animation-react page files ids))
+
+(defn- motion-elements
+  "The `motion` elements of the React code `react`, each as it writes it."
+  [react]
+  (vec (re-seq #"<motion\.[a-z]+\n[\s\S]*?\n\s*/?>" react)))
+
+(t/deftest the-react-code-trims-the-marked-elements
+  (let [scene    (scene {} [[:inner {:name "Inner" :strokes [(stroke :inner) (stroke :center)]}]
+                            [:outer {:name "Outer" :strokes [(stroke :outer)]}]]
+                        [:inner :outer])
+        elements (motion-elements (react-of scene))]
+    (t/is (= 3 (count elements)) "one for each stroke, no other")
+    (t/is (every? #(str/includes? % "strokeDasharray: [\"0 1\"") elements) "each draws itself")
+    (t/is (some #(str/includes? % "mask=") elements) "of the outer stroke, the one with its mask")))
+
+(t/deftest the-react-code-trims-each-piece-from-where-it-begins
+  (let [two   (path/from-plain [{:command :move-to :params {:x 20 :y 20}}
+                                {:command :line-to :params {:x 120 :y 20}}
+                                {:command :move-to :params {:x 20 :y 60}}
+                                {:command :line-to :params {:x 120 :y 60}}])
+        scene (scene {} [[:lines {:type :path :name "Lines" :content two :strokes [(stroke :center)]}]] [:lines])
+        [a b] (motion-elements (react-of scene))]
+    (t/is (str/includes? a "initial={{ strokeDasharray: \"0 1\", strokeDashoffset: 0 }}"))
+    (t/is (str/includes? b "initial={{ strokeDasharray: \"0 1\", strokeDashoffset: 0.5 }}"))))
+
+(t/deftest a-dashed-stroke-leaves-its-dash-to-the-trim
+  (let [scene  (scene {} [[:route {:name "Route" :strokes [(stroke :center :stroke-style :dashed
+                                                                   :stroke-dash 10 :stroke-gap 5)]}]]
+                      [:route])
+        markup (markup-of scene :route)
+        [path] (motion-elements (react-of scene))]
+    (t/is (str/includes? markup "stroke-dasharray") "its HTML keeps its dash")
+    (t/is (not (re-find #"style=\{\{[^\n]*strokeDasharray" path)) "the trim plays in place of it")
+    (t/is (str/includes? path "initial={{ strokeDasharray: \"0 1\""))))
+
+(t/deftest a-board-trims-its-own-strokes-only-in-the-react-code
+  (let [scene (scene {:strokes [(stroke :center)]} [[:rect {:name "Rect" :strokes [(stroke :center)]}]] [:card])]
+    (t/is (= 1 (count (motion-elements (react-of scene))))
+          "not the stroke of the layer its SVG draws in it")))

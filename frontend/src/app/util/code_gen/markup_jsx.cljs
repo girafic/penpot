@@ -11,8 +11,8 @@
   the animated layers, the units of the texts the code plays by units and
   the strokes it trims as `motion` elements."
   (:require
-   [app.common.animation.export :as aexp]
    [app.common.data :as d]
+   [app.main.data.exports.svg-vectors :as svgv]
    [app.util.code-gen.common :as cgc]
    [app.util.code-gen.markup-html :as html]
    [cuerdas.core :as str]))
@@ -25,7 +25,7 @@
   #{"img" "br" "hr" "input" "meta" "link" "source" "wbr"})
 
 (def ^:private entities
-  {"amp" "&" "lt" "<" "gt" ">" "quot" "\"" "apos" "'" "nbsp" " "})
+  {"amp" "&" "lt" "<" "gt" ">" "quot" "\"" "apos" "'" "nbsp" "\u00a0"})
 
 (defn- decode
   "`s` with the character references of the markup as their characters."
@@ -38,11 +38,16 @@
                    :else                       (get entities ref whole)))))
 
 (defn- parse-tag
+  "The tag `token` of the markup: `{:closing :tag :self-closing :attrs}`,
+  `:closing` true for a closing tag, `:self-closing` for one that holds
+  nothing (written so, or a void element of HTML), `:attrs` its
+  attributes in order, `[name value]` each (nil for one without a
+  value). Nil for no tag."
   [token]
   (when-let [[_ closing tag attrs self] (re-find #"^<(/)?([A-Za-z][\w:.-]*)([\s\S]*?)(/)?>$" token)]
-    {:closing? (some? closing)
+    {:closing (some? closing)
      :tag tag
-     :self? (or (some? self) (contains? void-tags (str/lower tag)))
+     :self-closing (or (some? self) (contains? void-tags (str/lower tag)))
      :attrs (into []
                   (map (fn [[_ k v]] [k (some-> v decode)]))
                   (re-seq #"([^\s=/]+)(?:=\"([^\"]*)\")?" attrs))}))
@@ -72,19 +77,19 @@
           (recur (rest tokens) (append stack {:comment (subs token 4 (- (count token) 3))}))
 
           (str/starts-with? token "<")
-          (let [{:keys [closing? tag self? attrs]} (parse-tag token)]
+          (let [{:keys [closing tag self-closing attrs]} (parse-tag token)]
             (cond
               (nil? tag)
               (recur (rest tokens) stack)
 
               ;; up to the element it closes; one never opened (as an
               ;; `</img>`) closes nothing
-              closing?
+              closing
               (if-let [at (d/index-of-pred (vec (reverse (rest stack))) #(= tag (:tag %)))]
                 (recur (rest tokens) (fold stack (inc at)))
                 (recur (rest tokens) stack))
 
-              self?
+              self-closing
               (recur (rest tokens) (append stack {:tag tag :attrs attrs :children []}))
 
               :else
@@ -107,12 +112,15 @@
    "xml:lang" "xmlLang"})
 
 (defn- jsx-name
+  "The JSX name of the attribute `attr` of HTML or SVG: its name of React
+  (see `attr-names`), a data or ARIA attribute as it is, one with a dash
+  or a colon in camelCase."
   [attr]
   (cond
-    (contains? attr-names attr)                                     (get attr-names attr)
+    (contains? attr-names attr)                                          (get attr-names attr)
     (or (str/starts-with? attr "data-") (str/starts-with? attr "aria-")) attr
-    (re-find #"[-:]" attr)                                          (str/camel (str/replace attr ":" "-"))
-    :else                                                           attr))
+    (re-find #"[-:]" attr)                                               (str/camel (str/replace attr ":" "-"))
+    :else                                                                attr))
 
 (defn- css-key
   "The key of the CSS property `property` in a style object of React."
@@ -134,39 +142,46 @@
     (str "{{ " (str/join ", " (map (fn [[k v]] (str (css-key k) ": " (js/JSON.stringify v))) decls)) " }}")))
 
 (defn- jsx-attr
+  "The JSX of the attribute `[attr value]`: its name alone without a
+  value, its style an object, a value with a quote, a backslash or a
+  brace as a JS string."
   [[attr value]]
   (let [n (jsx-name attr)]
     (cond
-      (nil? value)               n
-      (= "style" attr)           (str n "=" (style-object value))
+      (nil? value)                (str n)
+      (= "style" attr)            (str n "=" (style-object value))
       (re-find #"[\"\\{}]" value) (str n "={" (js/JSON.stringify value) "}")
-      :else                      (str n "=\"" value "\""))))
+      :else                       (str n "=\"" value "\""))))
 
 (defn- classes
+  "The classes of the element of the attributes `attrs`, a set."
   [attrs]
-  (some-> (some (fn [[k v]] (when (= "class" k) v)) attrs)
-          (str/split #"\s+")
-          (set)))
+  (or (some-> (some (fn [[k v]] (when (= "class" k) v)) attrs)
+              (str/split #"\s+")
+              (set))
+      #{}))
 
 (declare render-node)
 
 (defn- render-children
+  "The lines of `children`, `depth` steps of two spaces in, in `ctx` (see
+  `render-node`)."
   [children ctx depth]
   (into [] (mapcat #(render-node % ctx depth)) children))
 
 (defn- render-element
-  "The lines of the element `node`: a `motion` element with `props` (a
-  function of the indent, see `ctac/react-layer`) when it plays any."
-  [{:keys [tag attrs children]} ctx depth props]
+  "The lines of the element `node`: a `motion` element with the props
+  `lines` (indented one step in from it) when it plays any."
+  [{:keys [tag attrs children]} ctx depth lines]
   (let [indent  (str/repeat "  " depth)
         inner   (str indent "  ")
-        tag     (if (some? props) (str "motion." tag) tag)
+        tag     (if (some? lines) (str "motion." tag) tag)
         attrs   (map jsx-attr attrs)
         content (render-children children ctx (inc depth))]
-    (if (some? props)
+    (if (some? lines)
       (-> [(str indent "<" tag)]
           (into (map #(str inner %)) attrs)
-          (conj (str/rtrim (props inner)))
+          (conj (str/rtrim lines))
           (into (if (seq content)
                   (-> [(str indent ">")] (into content) (conj (str indent "</" tag ">")))
                   [(str indent "/>")])))
@@ -175,7 +190,59 @@
           (-> [(str open ">")] (into content) (conj (str indent "</" tag ">")))
           [(str open " />")])))))
 
+(defn- unit-props
+  "The props of the unit the element of the classes `cls` is, in the text
+  `text` (an animated layer the code plays by units, see
+  `ctac/react-layer`), as a function of the indent; nil for another
+  element."
+  [text cls]
+  (when (some? text)
+    (some (fn [c]
+            (when-let [[_ k] (re-matches #"penpot-unit-(\d+)" c)]
+              (let [k (js/parseInt k 10)]
+                #((get-in text [:units :attrs]) k %))))
+          cls)))
+
+(defn- trim-props
+  "The props of the element of the attributes `attrs` when it paints a
+  stroke of `layer` (an animated layer that trims its strokes, see
+  `ctac/react-layer`): its trim from where its piece of the outline
+  starts, as its marker says (see `svgv/trim-attr`), as a function of
+  the indent; nil for another element."
+  [layer attrs]
+  (when (some? layer)
+    (when-let [from (some (fn [[k v]] (when (= svgv/trim-attr k) v)) attrs)]
+      (let [from (js/parseFloat from)]
+        #((:trim layer) from %)))))
+
+(defn- without-rest-dash
+  "`attrs` of an element whose trim motion.dev plays, without the dash of
+  its stroke at rest in its style, which would hide the one it plays as
+  attributes."
+  [attrs]
+  (mapv (fn [[k v :as attr]]
+          (if (and (= "style" k) (some? v))
+            [k (->> (str/split v #";")
+                    (remove #(re-find #"^\s*stroke-dash(?:array|offset)\s*:" %))
+                    (str/join ";"))]
+            attr))
+        attrs))
+
+(defn- child-ctx
+  "`ctx` for the elements in the one of the animated layer `layer`, if
+  any: the text whose units they are, the layer whose strokes they
+  paint."
+  [ctx layer]
+  (cond-> ctx
+    (some? layer)
+    (assoc :text (when (:units layer) layer)
+           :trimmed (when (:trim layer) layer))))
+
 (defn- render-node
+  "The lines of `node`, `depth` steps of two spaces in. `ctx` holds
+  `:layers`, the animation of the animated layers by the class of their
+  element (see `board-jsx`), `:text`, the text whose units the node is
+  in, and `:trimmed`, the layer whose strokes it is in."
   [node ctx depth]
   (let [indent (str/repeat "  " depth)]
     (cond
@@ -191,49 +258,35 @@
           [(str indent "{" (js/JSON.stringify text) "}")]))
 
       :else
-      (let [{:keys [tag attrs]} node
-            cls       (or (classes attrs) #{})
-            layer     (some (:layers ctx) cls)
-            ;; the unit `k` of a text the code plays by units
-            unit      (when-let [text (:text-layer ctx)]
-                        (some #(when-let [[_ k] (re-matches #"penpot-unit-(\d+)" %)]
-                                 (let [k (js/parseInt k 10)]
-                                   (fn [indent] ((get-in text [:units :attrs]) k indent))))
-                              cls))
-            ;; an element painting a trimmed stroke, from where its piece
-            ;; of the outline starts
-            trim      (when-let [{:keys [layer pieces]} (:trim ctx)]
-                        (when (and (:paint? ctx) (not= "defs" tag)
-                                   (or (not= :outer (:paint? ctx)) (some #(= "mask" (first %)) attrs)))
-                          (let [k    (some #(when-let [[_ k] (re-matches #"trim-piece-(\d+)" %)] (js/parseInt k 10)) cls)
-                                from (if (and (some? k) (some? pieces)) (first (nth pieces k [0])) 0)]
-                            (fn [indent] ((:trim layer) from indent)))))
-            props     (or (:attrs layer) unit trim)
-            ctx       (cond-> ctx
-                        (some? layer)
-                        (assoc :text-layer (when (:units layer) layer)
-                               :trim (when (:trim layer)
-                                       {:layer layer :pieces (aexp/trim-pieces (:shape layer))}))
+      (let [attrs (:attrs node)
+            cls   (classes attrs)
+            layer (some (:layers ctx) cls)
+            trim  (trim-props (:trimmed ctx) attrs)
+            props (or (:attrs layer) (unit-props (:text ctx) cls) trim)
+            lines (when (some? props) (props (str indent "  ")))
+            node  (cond-> node
+                    (and (some? trim) (some? lines)) (update :attrs without-rest-dash))]
+        (render-element node (child-ctx ctx layer) depth lines)))))
 
-                        :always
-                        (assoc :paint? (cond
-                                         (contains? cls "stroke-shape")       :plain
-                                         (contains? cls "inner-stroke-shape") :plain
-                                         (contains? cls "outer-stroke-shape") :outer
-                                         :else                                nil)))]
-        (render-element node ctx depth (when (and (some? props) (some? (props ""))) props))))))
+(defn markup-jsx
+  "The JSX of `markup` (see `parse`), indented by `depth` steps of two
+  spaces, the elements of the animated layers of `layers` (their
+  animation by the class of their element, see `ctac/react-layer`)
+  `motion` elements, and so the units of the texts it plays by units and
+  the elements that paint the strokes it trims."
+  [markup layers depth]
+  (str/join "\n" (render-children (parse markup) {:layers layers} depth)))
 
 (defn board-jsx
   "The JSX of the board of `code` (see `cltl/code-timelines`) as the HTML
   of the code of the Inspect writes it from `objects` (marked with what
   the code plays, see `app.util.code-gen.motion/marked-objects`), each
   animated layer of `layers` (by id, see `ctac/react-layer`) a `motion`
-  element, indented by `depth` steps of two spaces."
+  element (see `markup-jsx`), indented by `depth` steps of two spaces."
   [objects {:keys [board-id]} layers & {:keys [depth] :or {depth 3}}]
   (let [by-class (into {}
                        (keep (fn [[id layer]]
                                (when-let [shape (get objects id)]
-                                 [(cgc/shape->selector shape) (assoc layer :shape shape)])))
-                       layers)
-        markup   (html/generate-html objects (get objects board-id))]
-    (str/join "\n" (render-children (parse (or markup "")) {:layers by-class} depth))))
+                                 [(cgc/shape->selector shape) layer])))
+                       layers)]
+    (markup-jsx (or (html/generate-html objects (get objects board-id)) "") by-class depth)))
