@@ -619,19 +619,25 @@
                      (let [{:keys [from to delay] :as spring} spring
                            value-at #(get (frame-at played objects layer (:time %)) frame-key)
                            {:keys [stiffness damping mass]} (:spring spring)]
-                       {:name value-name
-                        :initial (react-literal value-name (value-at from))
-                        :animate (react-literal value-name (value-at to))
-                        :transition (str "{ type: \"spring\", stiffness: " (react-number stiffness)
-                                         ", damping: " (react-number damping)
-                                         ", mass: " (react-number mass)
-                                         ", delay: " (react-number (/ delay 1000.0)) " }")})
+                       ;; a value its paint never shows stays out (see below)
+                       (when (or (some? (value-at from)) (some? (value-at to)))
+                         {:name value-name
+                          :initial (react-literal value-name (value-at from))
+                          :animate (react-literal value-name (value-at to))
+                          :transition (str "{ type: \"spring\", stiffness: " (react-number stiffness)
+                                           ", damping: " (react-number damping)
+                                           ", mass: " (react-number mass)
+                                           ", delay: " (react-number (/ delay 1000.0)) " }")}))
                      (let [[times eases] (value-segments (by-property sampled) duration)
-                           values (mapv #(react-literal value-name
-                                                        (get (frame-at sampled objects layer %) frame-key))
-                                        times)]
-                       ;; the light and the depth cues alone leave it as it is
-                       (when-not (and (= [:scene] properties) (apply = values))
+                           raw    (mapv #(get (frame-at sampled objects layer %) frame-key) times)
+                           values (mapv #(react-literal value-name %) raw)]
+                       ;; a value its paint never shows stays out: one
+                       ;; property plays several (the opacity of a fill the
+                       ;; background colour of a flat one, the background
+                       ;; image of a gradient); the light and the depth cues
+                       ;; alone leave it as it is
+                       (when-not (or (not-any? some? raw)
+                                     (and (= [:scene] properties) (apply = values)))
                          {:name value-name
                           :initial (first values)
                           :animate (str "[" (str/join ", " values) "]")

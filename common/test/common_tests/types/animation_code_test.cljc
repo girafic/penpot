@@ -13,11 +13,14 @@
    [app.common.test-helpers.compositions :as tho]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
+   [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
    [app.common.types.animation-code :as ctac]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.path :as path]
+   [app.common.types.shape :as cts]
+   [app.common.types.text :as txt]
    [app.common.uuid :as uuid]
    [clojure.string :as cstr]
    [clojure.test :as t]))
@@ -625,3 +628,63 @@
 (t/deftest the-depth-cues-have-names-of-the-plugin-api
   (t/is (= ["depthFocus" "depthFade" "depthBlur"]
            (mapv #(get ctac/property-names %) cta/depth-cue-properties))))
+
+;; FILL OPACITY
+
+(def ^:private red-to-blue
+  {:type :linear :start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5 :width 1
+   :stops [{:color "#ff0000" :opacity 1 :offset 0} {:color "#0000ff" :opacity 1 :offset 1}]})
+
+(defn- painted
+  "Board :board holding the layer :a, `shape` (a rect or a text), its
+  `fill-opacity` going from 1 to 0.4 in 1200 ms: `[objects code]`."
+  [shape]
+  (let [file  (-> (thf/sample-file :file1)
+                  (tho/add-frame :board :x 0 :y 0 :width 400 :height 300 :name "Card")
+                  (ths/add-sample-shape :a (merge {:parent-label :board :x 20 :y 20 :width 40 :height 40
+                                                   :name "Layer"}
+                                                  shape)))
+        board (thi/id :board)
+        tl    (-> (cta/make-timeline {:board-id board :duration 1200})
+                  (cta/add-keyframe (thi/id :a) {:time 0 :property :fill-opacity :index 0 :value 1})
+                  (cta/add-keyframe (thi/id :a) {:time 1200 :property :fill-opacity :index 0 :value 0.4}))
+        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page (thf/current-page file))
+                                          (pcb/set-timeline board tl)))
+        page  (thf/current-page file)]
+    [(:objects page) (cltl/code-timelines page {(:id file) file} board)]))
+
+(defn- painted-react
+  [shape]
+  (let [[objects code] (painted shape)]
+    (ctac/motion-react code objects :class-name #(:name %))))
+
+(t/deftest the-opacity-of-a-flat-fill-plays-its-colour-and-no-image
+  (let [react (painted-react {:type :rect :fills [{:fill-color "#ff0000" :fill-opacity 1}]})]
+    (t/is (cstr/includes? react "backgroundColor"))
+    (t/is (not (cstr/includes? react "backgroundImage"))
+          "no background image, which would clear one the layer has")))
+
+(t/deftest the-opacity-of-a-gradient-fill-plays-its-image-and-no-colour
+  (let [react (painted-react {:type :rect :fills [{:fill-color-gradient red-to-blue :fill-opacity 1}]})]
+    (t/is (cstr/includes? react "backgroundImage"))
+    (t/is (cstr/includes? react "rgba(255, 0, 0, 0.4)") "its stops fade")
+    (t/is (not (cstr/includes? react "backgroundColor")))))
+
+(t/deftest the-opacity-of-a-gradient-text-plays-no-empty-colour
+  (let [text  (-> (cts/setup-shape {:type :text :x 20 :y 20 :width 80 :height 20})
+                  (update :content txt/change-text "Hi")
+                  (update :content (fn [content]
+                                     (txt/transform-nodes txt/is-text-node?
+                                                          #(assoc % :fills [{:fill-color-gradient red-to-blue
+                                                                             :fill-opacity 1}])
+                                                          content))))
+        react (painted-react (dissoc text :id))]
+    (t/is (not (cstr/includes? react "color: \"\"")))
+    (t/is (not (cstr/includes? react "color: [\"\"")))))
+
+(t/deftest the-css-of-a-gradient-fill-rests-at-its-opacity
+  (let [[objects code] (painted {:type :rect :fills [{:fill-color-gradient red-to-blue :fill-opacity 0.5}]})
+        css (acss/timeline->css (:timeline code) objects)]
+    (t/is (cstr/includes? css "--penpot-gradient-color-0: rgba(255, 0, 0, 0.5);")
+          "the resting stops are faded by the opacity of the fill")))
