@@ -878,7 +878,7 @@
                        (str "  display: " display ";\n"))
                      "  animation: " kf-name " " duration "ms linear " iter ";\n"
                      "  transform-origin: " ((:origin units) text k) ";\n}")])))
-         trim?    #(contains? cta/trim-properties (:property %))
+         trim?    cta/trim-keyframe?
          ;; the elements the trim of a stroke dashes play it on their own
          trim-rules
          (when (some? trims)

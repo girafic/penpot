@@ -120,7 +120,7 @@
                         (when (and (some? shape)
                                    (cgc/svg-markup? shape)
                                    (not (cfh/text-shape? shape))
-                                   (some #(contains? cta/trim-properties (:property %)) (:keyframes track)))
+                                   (some cta/trim-keyframe? (:keyframes track)))
                           id)))))
         codes))
 

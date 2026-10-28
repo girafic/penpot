@@ -321,6 +321,18 @@
     (t/is (not (str/includes? (acss/timeline->css tl {bid (assoc board :orthographic true)}) "perspective"))
           "seen without perspective, none plays")))
 
+(t/deftest the-dash-of-a-trim
+  (t/is (= {:dash 1 :gap 0 :offset 0} (cta/trim-dash {} 0)) "no trim draws it all")
+  (t/is (= {:dash 0.5 :gap 0.5 :offset -0.25}
+           (cta/trim-dash {:trim-start 0.25 :trim-end 0.75} 0)))
+  (t/is (= {:dash 0 :gap 1 :offset -0.6} (cta/trim-dash {:trim-start 0.6 :trim-end 0.4} nil))
+        "an end before the start draws nothing")
+  (let [{:keys [dash gap offset]} (cta/trim-dash {:trim-start -0.2 :trim-end 1.3 :trim-offset 0.1} 0.05)]
+    (t/is (= [1 0] [dash gap]) "at most all of it")
+    (t/is (mth/close? 0.15 offset) "moved by its offset, on a piece that starts at 0.05"))
+  (t/is (true? (cta/trim-keyframe? {:property :trim-offset})))
+  (t/is (false? (cta/trim-keyframe? {:property :opacity}))))
+
 (t/deftest a-group-trims-the-layers-in-it
   ;; a group holding two stroked squares, one round of 100 px and one of
   ;; 300 px (the second on top), its trim end going 0 to 1 in a second

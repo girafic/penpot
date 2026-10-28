@@ -198,10 +198,9 @@
   its share of it, see `trim-piece-class`)."
   [values & [from]]
   (when (some #(contains? values %) svg-trim-properties)
-    (let [{:keys [trim-start trim-end trim-offset]} (merge cta/trim-properties (select-keys values svg-trim-properties))
-          length (mth/clamp (- trim-end trim-start) 0 1)]
-      [(str "stroke-dasharray: " (acss/fmt length) " " (acss/fmt (- 1 length)) ";")
-       (str "stroke-dashoffset: " (acss/fmt (- (or from 0) (+ trim-start trim-offset))) ";")])))
+    (let [{:keys [dash gap offset]} (cta/trim-dash values from)]
+      [(str "stroke-dasharray: " (acss/fmt dash) " " (acss/fmt gap) ";")
+       (str "stroke-dashoffset: " (acss/fmt offset) ";")])))
 
 (defn- svg-stroke-elements
   "The elements of the stroke `index` of `shape` as the SVG renderer

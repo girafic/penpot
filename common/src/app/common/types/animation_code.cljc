@@ -573,10 +573,9 @@
   `{:trim-dasharray [dash gap] :trim-dashoffset offset}` (see
   `trim-react-values`)."
   [values from]
-  (let [{:keys [trim-start trim-end trim-offset]} (merge cta/trim-properties (select-keys values (keys cta/trim-properties)))
-        length (mth/clamp (- trim-end trim-start) 0 1)]
-    {:trim-dasharray [length (- 1 length)]
-     :trim-dashoffset (- from (+ trim-start trim-offset))}))
+  (let [{:keys [dash gap offset]} (cta/trim-dash values from)]
+    {:trim-dasharray [dash gap]
+     :trim-dashoffset offset}))
 
 (defn- frame-at
   "The frame values (see `acss/frame-values`) of `layer` at `time` of the
@@ -881,7 +880,7 @@
                                "\n"))
                         (react-props values indent)))
         trimmed? (and (not= :text (get-in layer [:shape :type]))
-                      (some #(contains? cta/trim-properties (:property %))
+                      (some cta/trim-keyframe?
                             (:keyframes (get-in played [:tracks (:id layer)]))))]
     {:id (:id layer)
      :template? (or template? (:template? units))

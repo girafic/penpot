@@ -111,6 +111,24 @@
   no trim of its own: all of it is drawn."
   {:trim-start 0 :trim-end 1 :trim-offset 0})
 
+(defn trim-keyframe?
+  "Whether `keyframe` plays the trim of a stroke (see `trim-properties`)."
+  [keyframe]
+  (contains? trim-properties (:property keyframe)))
+
+(defn trim-dash
+  "The dash a trim draws a stroke with, as its `values` (by property, see
+  `trim-properties`; a missing one at its default) give it, on an outline
+  of length 1 or on a piece of it that starts at `from` of it: `{:dash
+  :gap :offset}`, the dash as long as the part drawn (0 to 1), the gap
+  the rest, the offset moving it to where the part starts."
+  [values from]
+  (let [{:keys [trim-start trim-end trim-offset]} (merge trim-properties (select-keys values (keys trim-properties)))
+        dash (mth/clamp (- trim-end trim-start) 0 1)]
+    {:dash dash
+     :gap (- 1 dash)
+     :offset (- (or from 0) (+ trim-start trim-offset))}))
+
 (def color-properties
   #{:fill-color :stroke-color :shadow-color})
 
@@ -4302,7 +4320,7 @@
   (let [groups (->> (:tracks timeline)
                     (keep (fn [[id track]]
                             (when (and (= :group (dm/get-in objects [id :type]))
-                                       (some #(contains? trim-properties (:property %)) (:keyframes track)))
+                                       (some trim-keyframe? (:keyframes track)))
                               id)))
                     ;; the outer ones first: an inner one draws its layers
                     (sort-by #(depth objects %)))]
@@ -4311,7 +4329,7 @@
       (reduce
        (fn [timeline group-id]
          (let [track    (get-in timeline [:tracks group-id])
-               trim?    #(contains? trim-properties (:property %))
+               trim?    trim-keyframe?
                rows     (into {} (map (fn [[p kfs]] [p (sort-keyframes kfs)]))
                               (group-by :property (filter trim? (:keyframes track))))
                loops    (into #{} (filter trim-properties) (:loops track #{}))
