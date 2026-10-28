@@ -2636,6 +2636,26 @@ mod tests {
     }
 
     #[test]
+    fn a_tiny_scale_far_from_the_origin_keeps_the_middle_of_the_box() {
+        // a rect beating about its middle at y 40228: scaled by 1.0004, its
+        // middle stays, though the matrix moves the origin by 16 px
+        let mut shape = any_shape();
+        shape.set_selrect(2397.0, 40158.0, 2537.0, 40298.0);
+        let (cx, cy, s) = (2467.0_f32, 40228.0_f32, 1.0004_f32);
+        let scale = Matrix::new_all(s, 0., cx * (1. - s), 0., s, cy * (1. - s), 0., 0., 1.);
+
+        shape.apply_transform(&scale);
+
+        let middle = shape.selrect.center();
+        assert!(
+            (middle.x - cx).abs() < 0.05 && (middle.y - cy).abs() < 0.05,
+            "the middle stays at {cx}, {cy}, not {}, {}",
+            middle.x,
+            middle.y
+        );
+    }
+
+    #[test]
     fn rigid_transform_keeps_the_box_and_scales_it_as_a_whole() {
         // the box first: a text lays itself out as its box is set, and the
         // test only checks the geometry

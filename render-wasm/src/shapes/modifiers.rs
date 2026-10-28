@@ -1135,6 +1135,46 @@ mod tests {
     }
 
     #[test]
+    fn test_a_board_far_out_widened_by_a_pixel_keeps_a_left_child() {
+        let board_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+        let mut state = State::new();
+        state.shapes.initialize(10);
+        {
+            let board = state.shapes.add_shape(board_id);
+            board.set_shape_type(Type::Frame(Frame::default()));
+            board.set_selrect(10000.0, 0.0, 12000.0, 400.0);
+            board.add_child(child_id);
+        }
+        {
+            let child = state.shapes.add_shape(child_id);
+            child.set_parent(board_id);
+            child.set_selrect(10100.0, 100.0, 10200.0, 200.0);
+            child.set_constraint_h(Some(ConstraintH::Left));
+            child.set_constraint_v(Some(ConstraintV::Top));
+        }
+
+        // one pixel wider, its left side staying: a scale of 1.0005 about
+        // x 10000, which moves the origin by 5 px
+        let mut widen = Matrix::scale((2001.0 / 2000.0, 1.0));
+        widen.post_translate(Point::new(10000.0, 0.0));
+        widen.pre_translate(Point::new(-10000.0, 0.0));
+        let entry = TransformEntry::from_input(board_id, widen);
+        let result = propagate_modifiers(&state, &[entry], PixelPrecision::Disabled).unwrap();
+        state
+            .shapes
+            .set_modifiers(result.iter().map(|e| (e.id, e.transform)).collect());
+
+        let child = state.shapes.get(&child_id).unwrap();
+        assert!(
+            (child.selrect.x() - 10100.0).abs() < 0.01,
+            "the child stays where it is: {}",
+            child.selrect.x()
+        );
+        assert!((child.selrect.width() - 100.0).abs() < 0.01);
+    }
+
+    #[test]
     fn test_group_bounds() {
         let parent_id = Uuid::new_v4();
         let shapes = {
