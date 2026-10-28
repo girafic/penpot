@@ -230,13 +230,6 @@
       (let [paint (str group ".stroke-shape > :not(defs)")]
         {:paint paint :outline [paint]}))))
 
-(defn stroke-paint
-  "The selector of the element the stroke `index` of `shape` paints, as
-  the SVG renderer draws its strokes (see `svg-stroke-elements`): the one
-  a trim dashes (see `trim-declarations`)."
-  [shape index]
-  (:paint (svg-stroke-elements shape index)))
-
 (defn- svg-outline-elements
   "The elements that draw the outline of `shape` as the SVG renderer
   draws it: its fill, its strokes (see `svg-stroke-elements`) and, of a

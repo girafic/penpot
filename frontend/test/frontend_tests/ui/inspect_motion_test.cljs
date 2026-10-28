@@ -335,6 +335,7 @@
         css     (cgm/animation-css page files ids)]
     (t/is (= #{ring} (cgm/code-trims codes objects)))
     (t/is (str/includes? markup "pathLength=\"1\"") "its outline of length 1")
-    (t/is (str/includes? css (str ".strokes[id$=\"-" ring "\"]")) "on the element that paints the stroke")
+    (t/is (str/includes? css "[data-penpot-trim=\"0\"] {") "on the element its HTML marks")
+    (t/is (str/includes? markup "data-penpot-trim=\"0\"") "which paints the stroke")
     (t/is (str/includes? css "stroke-dasharray: 0 1;"))
     (t/is (not (str/includes? css (str "penpot-anim-" ring))) "nothing plays on its box")))

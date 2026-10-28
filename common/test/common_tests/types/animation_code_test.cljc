@@ -724,7 +724,7 @@
   (let [[objects code] (trimmed)
         dash  (fn [values] [(str "dash: " (get values :trim-end) ";")])
         css   (acss/timeline->css (:timeline code) objects
-                                  {:trims (fn [shape _] [[(str "." (:name shape) " path") dash]])})]
+                                  {:trims (fn [shape] [[(str "." (:name shape) " path") dash]])})]
     (t/is (cstr/includes? css "@keyframes penpot-trim-"))
     (t/is (cstr/includes? css "0% { dash: 0; animation-timing-function: linear; }"))
     (t/is (cstr/includes? css "Rect1 path {\n  animation: penpot-trim-"))

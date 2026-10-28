@@ -21,6 +21,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.animation-code :as ctac]
    [app.common.types.shape-tree :as ctst]
+   [app.main.data.exports.svg-vectors :as svgv]
    [app.util.code-gen.common :as cgc]
    [app.util.code-gen.markup-jsx :as jsx]
    [app.util.code-gen.style-css-values :as sv]
@@ -146,21 +147,18 @@
                   objects)]
     (d/update-vals objects #(-> % (with-code-units units) (with-code-trims trims)))))
 
-(defn- trim-paint
-  "The selectors of the elements the trim of the strokes of `shape` plays
-  on in the code of the Inspect (see `acss/timeline->css`):
-  the one each of its strokes paints, or each piece of it (see
-  `app.main.data.exports.svg-vectors/trimmed-markup`), with the
-  declarations of its trim from where its piece starts. None of a shape
-  the code draws as a box, whose border no trim dashes, or of a text."
-  [shape selector]
+(defn- trim-targets
+  "The elements the trim of the strokes of `shape` plays on in the code of
+  the Inspect: those its HTML marks `svgv/trim-attr` (see
+  `svgv/trimmed-markup`), a rule for each place a piece of its outline
+  starts (0 also for a stroke left whole), with the declarations of its
+  trim from there. None of a shape the code draws as a box, whose border
+  no trim dashes, or of a text."
+  [shape]
   (when (and (cgc/svg-markup? shape) (not= :text (:type shape)))
-    (let [pieces (aexp/trim-pieces shape)]
-      (for [index (range (count (:strokes shape)))
-            :let  [paint (asvg/stroke-paint shape index)]
-            [k [from _]] (if (some? pieces) (map-indexed vector pieces) [[nil [0]]])]
-        [(str selector " " paint (when (some? k) (str "." (asvg/trim-piece-class k))))
-         #(asvg/trim-declarations % from)]))))
+    (for [from (distinct (cons 0 (map first (aexp/trim-pieces shape))))]
+      [(dm/str (code-selector shape) " [" svgv/trim-attr "=\"" (svgv/trim-from from) "\"]")
+       #(asvg/trim-declarations % from)])))
 
 (def ^:private unit-options
   "How the CSS of the Inspect plays the units of a text (see
@@ -192,7 +190,7 @@
                  :transform (partial rest-transform objects)
                  :units (assoc unit-options :texts #(code-units? (get objects %)))
                  ;; on the strokes its SVG draws (see `code-trims`)
-                 :trims (fn [shape _] (trim-paint shape (code-selector shape)))}]
+                 :trims trim-targets}]
     (some->> (seq codes)
              (mapcat (fn [{:keys [timeline copies]}] (cons timeline (map :timeline copies))))
              (map #(acss/timeline->css % objects options))

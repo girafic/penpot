@@ -19166,11 +19166,12 @@ Timeline:
         `penpot-unit-<n>` the code of Inspect gives it (`penpot-unit-0` the
         first, inside the class of its text); one by lines, or of a text with
         a stroke or a shadow (which the code draws as SVG), plays on the
-        whole text. The trim of a stroke plays on the element that paints it
-        (its `stroke-dasharray` and `stroke-dashoffset`), in the SVG the code
-        of Inspect writes for the layer, whose outline it gives a length of 1
-        (`pathLength`). Audio is left out. An empty string when nothing
-        animates.
+        whole text. The trim of a stroke plays (its `stroke-dasharray` and
+        `stroke-dashoffset`) on the elements that paint it in the SVG the code
+        of Inspect writes for the layer, which `generateMarkup` marks
+        `data-penpot-trim` with where their piece of the outline starts, the
+        outline of length 1 (`pathLength`). Audio is left out. An empty string
+        when nothing animates.
 
         Returns string
       toJSON: |-

@@ -808,9 +808,9 @@
   those that play any (see `svg-group-plays?`), but the width and height
   of the shapes of `:sized`, which play on their elements (see
   `svg-sized?`), each property eased as the canvas eases it (see
-  `eased-stops`). `:trims`, a function of a shape and its track, gives
-  the elements a trim of its strokes dashes, `[selector declarations]`
-  each, `declarations` a function of its values then (see
+  `eased-stops`). `:trims`, a function of a shape, gives the elements a
+  trim of its strokes dashes, `[selector declarations]` each,
+  `declarations` a function of its values then (see
   `app.common.animation.svg/trim-declarations`); they play the trim on
   their own. Without it, as on a box, no trim plays."
   ([timeline objects]
@@ -886,7 +886,7 @@
                  :let  [shape (get objects sid)]
                  :when (and (some? shape) (or (nil? ids) (contains? ids sid))
                             (some trim? (:keyframes track)))
-                 [k [selector declarations]] (map-indexed vector (trims shape track))]
+                 [k [selector declarations]] (map-indexed vector (trims shape))]
              (let [kf-name (str "penpot-trim-" sid "-" k)]
                [selector
                 (str (css-comment (str (or (:name shape) sid) ", trim")) "\n"

@@ -16,6 +16,7 @@
    [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
+   [app.common.math :as mth]
    [app.common.types.path :as path]
    [app.common.types.shape.radius :as ctsr]
    [app.common.types.text :as txt]
@@ -284,18 +285,114 @@
             copied
             @used)))
 
+(def trim-attr
+  "The attribute the code of the Inspect marks each element painting a
+  trimmed stroke with (see `trimmed-markup`): where its piece of the
+  outline starts (see `trim-from`)."
+  "data-penpot-trim")
+
+(defn trim-from
+  "`from`, where a piece of a trimmed outline starts (a share of it), as
+  the value of `trim-attr`: 5 decimals at most, a whole one as an
+  integer."
+  [from]
+  (let [r (mth/precision (or from 0) 5)]
+    (if (== r (mth/round r))
+      (str (long r))
+      (str r))))
+
+(def ^:private tag-re
+  "The opening and closing tags of SVG markup: `[whole closing name
+  attributes]`."
+  "<(/?)([a-zA-Z][\\w:-]*)([^>]*?)/?>")
+
+(defn- group-end
+  "Where the `<g>` that opens at `start` of `markup` ends: past its
+  closing tag, the groups in it counted."
+  [markup start]
+  (let [re (js/RegExp. "<g\\b[^>]*>|</g>" "g")]
+    (set! (.-lastIndex re) start)
+    (loop [depth 0]
+      (if-let [m (.exec re markup)]
+        (let [depth (if (str/starts-with? (aget m 0) "</") (dec depth) (inc depth))]
+          (if (zero? depth)
+            (.-lastIndex re)
+            (recur depth)))
+        (count markup)))))
+
+(defn- stroke-group-kind
+  "Which group of a stroke the opening tag of the attributes `attrs`
+  starts, as the SVG renderer draws strokes: `:center`, `:inner` or
+  `:outer`, or nil."
+  [attrs]
+  (when-let [[_ kind] (re-find #"\sclass=\"(inner-|outer-)?stroke-shape\"" attrs)]
+    (case kind
+      "inner-" :inner
+      "outer-" :outer
+      :center)))
+
+(defn- mark-trim-paints
+  "The strokes group `group` of a trimmed shape with the elements that
+  paint its strokes marked `trim-attr`: in the group of each stroke, the
+  first one after its `<defs>` (of an outer stroke, the one with its
+  mask), or each of its pieces (see `split-trim-pieces`), marked where
+  its piece starts on `pieces`."
+  [group pieces]
+  (let [re   (js/RegExp. tag-re "g")
+        mark (fn [from] (str " " trim-attr "=\"" (trim-from from) "\""))]
+    (loop [out [] at 0 depth 0 stroke nil]
+      (if-let [m (.exec re group)]
+        (let [[whole closing tag attrs] (array-seq m)
+              start   (.-index m)
+              end     (+ start (count whole))
+              self?   (str/ends-with? whole "/>")
+              opening (and (str/blank? closing) (not self?))
+              ;; an element right in the group of a stroke (`{:kind :depth
+              ;; :marked}`, `:depth` the one the group opened at)
+              child?  (and (some? stroke) (= depth (inc (:depth stroke))) (str/blank? closing))
+              piece   (when child? (some->> (re-find #"\sclass=\"[^\"]*\btrim-piece-(\d+)\b" attrs) second js/parseInt))
+              paint?  (and child?
+                           (not= "defs" tag)
+                           (or (some? piece)
+                               (and (not (:marked stroke))
+                                    (or (not= :outer (:kind stroke)) (re-find #"\smask=" attrs)))))
+              out     (cond-> (conj out (subs group at start))
+                        paint?       (conj (str "<" tag (mark (if (some? piece) (first (nth pieces piece [0])) 0)) attrs
+                                                (subs whole (+ 1 (count tag) (count attrs)))))
+                        (not paint?) (conj whole))
+              stroke  (cond
+                        paint? (assoc stroke :marked true)
+                        (and opening (= "g" tag) (stroke-group-kind attrs))
+                        {:kind (stroke-group-kind attrs) :depth depth}
+                        ;; its own closing tag
+                        (and (some? stroke) (not (str/blank? closing)) (= depth (inc (:depth stroke)))) nil
+                        :else stroke)
+              depth   (cond opening (inc depth) (not (str/blank? closing)) (dec depth) :else depth)]
+          (recur out end depth stroke))
+        (str/join (conj out (subs group at)))))))
+
 (defn trimmed-markup
   "The SVG `markup` of `shape`, as the code of the Inspect writes it, with
   its strokes ready for its trim to play on them as on an SVG (see
   `asvg/trim-declarations`): its `<use>`s copies, the stroke of an
   outline of several subpaths in a piece each (see `split-trim-pieces`),
-  the outlines its strokes are drawn along of length 1."
+  the outlines its strokes are drawn along of length 1, and the elements
+  that paint them marked `trim-attr` (see `mark-trim-paints`), in its own
+  strokes only. The layers in a board drawn as SVG are drawn in its SVG,
+  not as layers of their own: their trims stay out."
   [markup shape]
   (let [id     (:id shape)
-        pieces (aexp/trim-pieces shape)]
-    (cond-> (inline-uses markup)
-      (some? pieces) (split-trim-pieces id pieces)
-      :always        (with-path-length id))))
+        pieces (aexp/trim-pieces shape)
+        markup (cond-> (inline-uses markup)
+                 (some? pieces) (split-trim-pieces id pieces)
+                 :always        (with-path-length id))
+        start  (strokes-start markup id)]
+    (if (neg? start)
+      markup
+      (let [end (group-end markup start)]
+        (str (subs markup 0 start)
+             (mark-trim-paints (subs markup start end) pieces)
+             (subs markup end))))))
 
 (mf/defc ^:private layer-svg*
   [{:keys [objects shape]}]
