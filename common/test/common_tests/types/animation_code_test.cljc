@@ -410,7 +410,6 @@
 
 (def ^:private fixture-react
   (str "import { MotionConfig, motion } from \"motion/react\";\n"
-       "import { steps } from \"motion\";\n"
        "\n"
        "/* Card: 1200 ms, loop. */\n"
        "export function CardMotion() {\n"
@@ -424,7 +423,7 @@
        "        animate={{ x: [0, 40, 40], opacity: [0, 1, 1] }}\n"
        "        transition={{\n"
        "          x: { duration: 1.2, times: [0, 0.3333, 1], ease: [[0, 0, 0.58, 1], \"linear\"], repeat: Infinity },\n"
-       "          opacity: { duration: 1.2, times: [0, 0.5, 1], ease: [steps(1, \"end\"), \"linear\"], repeat: Infinity },\n"
+       "          opacity: { duration: 1.2, times: [0, 0.5, 1], ease: [(p) => (p < 1 ? 0 : 1), \"linear\"], repeat: Infinity },\n"
        "        }}\n"
        "      />\n"
        "    </MotionConfig>\n"
@@ -710,3 +709,12 @@
           "a layer that only trims plays nothing on its box")
     (t/is (cstr/includes? (acss/timeline->css (:timeline code) objects) "@keyframes penpot-anim-")
           "without trims, as before")))
+
+(t/deftest react-leaves-out-a-value-that-moves-nothing
+  (let [react (react-of #(-> %
+                             (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})
+                             (cta/add-keyframe (thi/id :a) {:time 400 :property :x :value 20})
+                             (cta/add-keyframe (thi/id :a) {:time 0 :property :y :value 20})
+                             (cta/add-keyframe (thi/id :a) {:time 400 :property :y :value 60})))]
+    (t/is (cstr/includes? react "animate={{ y: [0, 40, 40] }}"))
+    (t/is (not (cstr/includes? react "x: ")) "x stays where it rests all along")))

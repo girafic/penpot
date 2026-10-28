@@ -459,6 +459,18 @@
                        entry))))
         react-values))
 
+(def ^:private neutral-values
+  "The motion.dev values of a layer that move it nowhere: a value that
+  stays at it all along plays nothing, and is left out."
+  {"x" 0 "y" 0 "z" 0 "rotate" 0 "rotateX" 0 "rotateY" 0 "scaleX" 1 "scaleY" 1})
+
+(defn- neutral?
+  "Whether the frame values `raw` of the motion.dev value `value-name` all
+  move the layer nowhere (see `neutral-values`)."
+  [value-name raw]
+  (when-let [n (get neutral-values value-name)]
+    (every? #(and (number? %) (mth/close? % n 1e-6)) raw)))
+
 (def ^:private segment-samples
   "The steps a segment takes when the properties behind a value ease it
   apart (see `value-segments`)."
@@ -497,7 +509,10 @@
     (react-number v)))
 
 (def ^:private linear-ease "\"linear\"")
-(def ^:private hold-ease "steps(1, \"end\")")
+(def ^:private hold-ease
+  "A hold: the value stays, then jumps at the end of the segment, as
+  `steps(1, \"end\")` of motion.dev, written out so it needs no import."
+  "(p) => (p < 1 ? 0 : 1)")
 
 (defn- react-ease
   "The motion.dev easing of the segment `keyframe` starts: a hold, linear,
@@ -619,8 +634,10 @@
                      (let [{:keys [from to delay] :as spring} spring
                            value-at #(get (frame-at played objects layer (:time %)) frame-key)
                            {:keys [stiffness damping mass]} (:spring spring)]
-                       ;; a value its paint never shows stays out (see below)
-                       (when (or (some? (value-at from)) (some? (value-at to)))
+                       ;; a value its paint never shows stays out (see below),
+                       ;; and so does one that moves it nowhere
+                       (when (and (or (some? (value-at from)) (some? (value-at to)))
+                                  (not (neutral? value-name [(value-at from) (value-at to)])))
                          {:name value-name
                           :initial (react-literal value-name (value-at from))
                           :animate (react-literal value-name (value-at to))
@@ -635,13 +652,14 @@
                        ;; property plays several (the opacity of a fill the
                        ;; background colour of a flat one, the background
                        ;; image of a gradient); the light and the depth cues
-                       ;; alone leave it as it is
+                       ;; alone leave it as it is; a value that moves it
+                       ;; nowhere all along plays nothing
                        (when-not (or (not-any? some? raw)
-                                     (and (= [:scene] properties) (apply = values)))
+                                     (and (= [:scene] properties) (apply = values))
+                                     (neutral? value-name raw))
                          {:name value-name
                           :initial (first values)
                           :animate (str "[" (str/join ", " values) "]")
-                          :hold? (some #{hold-ease} eases)
                           :transition (str "{ "
                                            (str/join ", "
                                                      (concat
@@ -745,7 +763,7 @@
 (defn- react-units
   "The `motion.span` of each unit of the text of `layer`, which the code
   plays one by one (see `cta/unit-timelines`), with the text between them
-  as it is, a `br` between its paragraphs: `{:hold? :code}`."
+  as it is, a `br` between its paragraphs: `{:template? :code}`."
   [{:keys [shape units]} objects]
   (let [{units-tl :timeline :keys [ids bases]} units
         played  (-> units-tl cta/expand-paths cta/cut-timeline)
@@ -754,8 +772,7 @@
         spans   (mapv (fn [k id]
                         (let [unit   {:id id :shape (cta/unit-shape units-tl objects id) :clock units-tl}
                               values (merge-scale (layer-animation unit objects played sampled))]
-                          {:hold? (some :hold? values)
-                           :values values
+                          {:values values
                            :tilt? (some #(contains? #{"rotateX" "rotateY"} (:name %)) values)
                            :class (str "penpot-unit penpot-unit-" k)}))
                       (range)
@@ -783,8 +800,7 @@
                              (str "          " (unit-tilt-template seen) "\n"))
                            (react-props values "          ")
                            "        >" (react-text text) "</motion.span>\n"))))]
-    {:hold? (some :hold? spans)
-     :template? (some :tilt? spans)
+    {:template? (some :tilt? spans)
      :code  (str/join "        <br />\n" (map #(str/join "" (map piece %)) pieces))}))
 
 (defn- react-layer
@@ -797,8 +813,7 @@
         units  (when (:units layer) (react-units layer objects))
         tilt?  (or (contains? names "rotateX") (contains? names "rotateY") (contains? names "z"))
         template? (or tilt? (and (contains? names "rotate") (contains? names "scaleX")))]
-    {:hold? (or (some :hold? values) (:hold? units))
-     :template? (or template? (:template? units))
+    {:template? (or template? (:template? units))
      :code
      (str "      {/* " (or (get-in layer [:shape :name]) "Layer") " */}\n"
           "      <motion.div\n"
@@ -840,8 +855,7 @@
                       layers)
         markers (sort-by :time (:markers timeline))]
     (when (seq divs)
-      {:hold? (some :hold? divs)
-       :template? (some :template? divs)
+      {:template? (some :template? divs)
        :code
        (str "/* " (or (:name board) "Board") ": " (:duration timeline) " ms, "
             (name (cta/playback-mode timeline)) "."
@@ -875,8 +889,6 @@
                          (map #(react-board %1 %2 objects ids class-name) codes names))]
     (when (seq boards)
       (str "import { MotionConfig, motion } from \"motion/react\";\n"
-           (when (some :hold? boards)
-             "import { steps } from \"motion\";\n")
            "\n"
            (when (some :template? boards)
              (str with-unit "\n\n"))
