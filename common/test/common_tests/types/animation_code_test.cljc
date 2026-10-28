@@ -103,6 +103,41 @@
 
 ;; JSON
 
+(defn- flat-markup
+  "A markup for `ctac/motion-react` (see its `:markup`) of `objects`: each
+  animated layer of the board, in the order of the layers panel, as a
+  `motion.div` of the class of its name, holding a `motion.span` for each
+  unit it plays by units: the props the React code gives them, without
+  the HTML of the board."
+  [objects]
+  (fn [{:keys [board-id]} layers]
+    (cstr/join "\n"
+               (for [id    (cltl/layer-ids objects board-id)
+                     :when (contains? layers id)
+                     :let  [{:keys [attrs units]} (get layers id)
+                            name (get-in objects [id :name])]]
+                 (str "      {/* " name " */}\n"
+                      "      <motion.div\n"
+                      "        className=\"" name "\"\n"
+                      (when attrs (attrs "        "))
+                      (if-let [unit (:attrs units)]
+                        (str "      >\n"
+                             (cstr/join (for [k     (range)
+                                              :let  [props (unit k "          ")]
+                                              :while (some? props)]
+                                          (str "        <motion.span\n"
+                                               "          className=\"penpot-unit penpot-unit-" k "\"\n"
+                                               props
+                                               "        />\n")))
+                             "      </motion.div>")
+                        "      />"))))))
+
+(defn- react-code
+  "`ctac/motion-react` of `codes` and `objects`, laid out by `flat-markup`
+  unless `opts` give another `:markup`."
+  [codes objects & {:as opts}]
+  (apply ctac/motion-react codes objects (mapcat identity (merge {:markup (flat-markup objects)} opts))))
+
 (defn- board-scene
   "Board :board at 0,0 holding the rects :a (at 20,20) and :b, its
   timeline `f` of an empty one of 1200 ms: `[objects code]`."
@@ -281,7 +316,7 @@
                                                         (pcb/with-page (thf/current-page file))
                                                         (pcb/set-timeline board tl)))
                       page  (thf/current-page file)]
-                  (str (ctac/motion-react (cltl/code-timelines page {} board) (:objects page)))))]
+                  (str (react-code (cltl/code-timelines page {} board) (:objects page)))))]
     (t/is (cstr/includes? (react {}) "perspective: "))
     (t/is (not (cstr/includes? (react {:orthographic true}) "perspective: "))
           "seen without perspective, none plays")))
@@ -306,14 +341,14 @@
         (t/is (not (cstr/includes? out "perspective(")) "an orthographic board: none")))
     (t/testing "React"
       (let [page  (split-text-page flip)
-            react (ctac/motion-react (code page) (:objects page))]
+            react (react-code (code page) (:objects page))]
         (t/is (= 3 (count (re-seq #"transformTemplate=\{\(\{ x = 0, y = 0, rotate = 0, rotateX = 0" react))))
         (t/is (cstr/includes? react "`perspective(1000px) translate(${withUnit(x, \"px\")}"))
         (t/is (cstr/includes? react "const withUnit") "the helper of the template")))
     (t/testing "React, a unit that scales and turns: the template reads the scale"
       (let [page  (split-text-page [flip {:type :scale :split :word :spread 1 :start 0 :duration 600
                                           :amount 0.5}])
-            react (ctac/motion-react (code page) (:objects page))]
+            react (react-code (code page) (:objects page))]
         (t/is (cstr/includes? react "scale: ") "scaleX and scaleY play alike, as one scale")
         (t/is (cstr/includes? react "scale = 1, scaleX = scale, scaleY = scale"))))))
 
@@ -333,12 +368,13 @@
                       (mapv (juxt (fn [k] (get k "time")) (fn [k] (get k "value"))))))
               "the first word, 20 px down, rises in a third of the span")
         (t/is (nil? (property-json layer "y")) "the text itself stays")))
-    (t/testing "the React plays a span by unit, with its text"
-      (let [react (ctac/motion-react code (:objects page))]
+    (t/testing "the React plays a span by unit"
+      (let [react (react-code code (:objects page))]
         (t/is (= 3 (count (re-seq #"<motion.span" react))))
         (t/is (cstr/includes? react "className=\"penpot-unit penpot-unit-2\""))
-        (t/is (cstr/includes? react ">{\"there\"}</motion.span>"))
-        (t/is (cstr/includes? react "{\" \"}") "the space between them as it is")))
+        ;; their text and the text between them come from the HTML of the
+        ;; text (see `app.util.code-gen.markup-jsx`)
+        (t/is (not (cstr/includes? react "penpot-unit-3")) "no more than it has")))
     (t/testing "the CSS, a rule by unit"
       (let [css (acss/timeline->css (:timeline code) (:objects page)
                                     {:units {:kinds #{:word}
@@ -406,12 +442,12 @@
   classes of the layers their names."
   [f]
   (let [[objects code] (board-scene f)]
-    (ctac/motion-react code objects :class-name #(:name %))))
+    (react-code code objects)))
 
 (def ^:private fixture-react
   (str "import { MotionConfig, motion } from \"motion/react\";\n"
        "\n"
-       "/* Card: 1200 ms, loop. */\n"
+       "/* Card: 1200 ms, loop. Its layers take the CSS of the code of the Inspect. */\n"
        "export function CardMotion() {\n"
        "  return (\n"
        "    <MotionConfig reducedMotion=\"user\">\n"
@@ -456,14 +492,13 @@
                                          (cta/add-keyframe (thi/id :a) {:time 0 :property :rotate-y :value 0 :easing :linear})
                                          (cta/add-keyframe (thi/id :a) {:time 1200 :property :rotate-y :value 60})))
         objects (update objects (thi/id :board) assoc :light {:angle 90 :height 30 :ambient 0.2})
-        react   (ctac/motion-react code objects :class-name #(:name %))
+        react   (react-code code objects)
         line    (some #(when (cstr/includes? % "filter: [") %) (cstr/split-lines react))]
     (t/is (some? line) "a filter that changes as it turns")
     (t/is (not (cstr/includes? line "opacity:")) "the depth cues leave its opacity as it is")
     (t/is (cstr/includes? react "\"blur(0px) brightness(1)\"") "looking at the viewer")
     (t/is (cstr/includes? react "\"blur(0px) brightness(1.667)\"") "turned to the light")
-    (t/is (not (cstr/includes? (ctac/motion-react code (update objects (thi/id :board) dissoc :light)
-                                                  :class-name #(:name %))
+    (t/is (not (cstr/includes? (react-code code (update objects (thi/id :board) dissoc :light))
                                "brightness"))
           "no light, none")))
 
@@ -519,7 +554,7 @@
   (let [[file code] (scene)
         objects     (:objects (thf/current-page file))
         copy-rect   (first (get-in objects [(thi/id :copy) :shapes]))
-        react       (ctac/motion-react code objects :ids #{copy-rect})]
+        react       (react-code code objects :ids #{copy-rect})]
     (t/is (cstr/includes? react "x: { duration: 1, times: [0, 1], ease: [\"linear\"], repeat: Infinity }"))))
 
 (t/deftest react-components-have-names-of-their-own
@@ -528,16 +563,16 @@
                                          (cta/add-keyframe (thi/id :a) {:time 400 :property :x :value 60})))
         named (fn [board-name] (assoc-in objects [(thi/id :board) :name] board-name))
         names (fn [react] (map second (re-seq #"export function (\w+)\(" react)))]
-    (t/is (= ["CardMotion"] (names (ctac/motion-react code objects))))
-    (t/is (= ["Board01PenpotMotionMotion"] (names (ctac/motion-react code (named "01 · Penpot Motion"))))
+    (t/is (= ["CardMotion"] (names (react-code code objects))))
+    (t/is (= ["Board01PenpotMotionMotion"] (names (react-code code (named "01 · Penpot Motion"))))
           "an identifier starts with a letter")
-    (t/is (= ["BoardMotion"] (names (ctac/motion-react code (named "· 🎬 ·")))))
-    (t/is (= ["CardMotion" "CardMotion2"] (names (ctac/motion-react [code code] objects)))
+    (t/is (= ["BoardMotion"] (names (react-code code (named "· 🎬 ·")))))
+    (t/is (= ["CardMotion" "CardMotion2"] (names (react-code [code code] objects)))
           "two boards of one name")))
 
 (t/deftest nothing-animates-no-react
   (let [[objects code] (board-scene identity)]
-    (t/is (nil? (ctac/motion-react code objects)))))
+    (t/is (nil? (react-code code objects)))))
 
 (t/deftest a-text-plays-its-colour-in-the-code
   ;; Its glyphs paint in the fills of its spans: `color` in CSS and React,
@@ -555,7 +590,7 @@
                                           (pcb/set-timeline board tl)))
         page  (thf/current-page file)
         code  (cltl/code-timelines page {} board)
-        react (ctac/motion-react code (:objects page))
+        react (react-code code (:objects page))
         css   (acss/timeline->css tl (:objects page))]
     (t/is (cstr/includes? react "color: [\"#ff0000\"") "its colour in React")
     (t/is (not (cstr/includes? react "backgroundColor")))
@@ -580,7 +615,7 @@
                                          (cta/add-keyframe (thi/id :a) {:time 600 :property :fill-gradient :index 0 :value to})))
         objects (assoc-in objects [(thi/id :a) :fills] [{:fill-color-gradient from :fill-opacity 1}])]
     (t/testing "React: motion.dev blends the background image"
-      (let [react (ctac/motion-react code objects :class-name #(:name %))]
+      (let [react (react-code code objects)]
         (t/is (cstr/includes? react "initial={{ backgroundImage: \"linear-gradient(90deg, #ff0000 0%, #0000ff 100%)\" }}"))
         (t/is (cstr/includes? react "\"linear-gradient(180deg, #00ff00 0%, #ff0000 100%)\""))))
     (t/testing "CSS: registered custom properties, which CSS plays"
@@ -656,7 +691,7 @@
 (defn- painted-react
   [shape]
   (let [[objects code] (painted shape)]
-    (ctac/motion-react code objects :class-name #(:name %))))
+    (react-code code objects)))
 
 (t/deftest the-opacity-of-a-flat-fill-plays-its-colour-and-no-image
   (let [react (painted-react {:type :rect :fills [{:fill-color "#ff0000" :fill-opacity 1}]})]
@@ -710,15 +745,14 @@
 (t/deftest react-trims-the-element-that-paints-the-stroke
   (let [[objects code] (trimmed)
         layers         (atom nil)
-        react          (ctac/motion-react code objects :class-name #(:name %)
-                                          :markup (fn [_ els] (reset! layers els) "      <div />"))
+        react          (react-code code objects
+                                   :markup (fn [_ els] (reset! layers els) "      <div />"))
         layer          (get @layers (thi/id :a))]
     (t/is (cstr/includes? react "<div />") "the markup holds the board")
     (t/is (nil? (:attrs layer)) "nothing plays on the layer's own box")
     (t/is (cstr/includes? ((:trim layer) 0 "  ") "strokeDasharray: [\"0 1\", \"1 0\", \"1 0\"]"))
     (t/is (cstr/includes? ((:trim layer) 0.25 "  ") "strokeDashoffset: [0.25, 0.25, 0.25]")
-          "a piece of the outline that starts a quarter along")
-    (t/is (nil? (ctac/motion-react code objects)) "without the markup, no element to trim")))
+          "a piece of the outline that starts a quarter along")))
 
 (t/deftest css-plays-a-trim-on-the-elements-of-the-stroke
   (let [[objects code] (trimmed)
@@ -739,7 +773,7 @@
   (let [turned "matrix(0.966, 0.259, -0.259, 0.966, 0, 0)"
         react  (fn [f]
                  (let [[objects code] (board-scene f)]
-                   (ctac/motion-react code objects :class-name #(:name %) :rest-transform (constantly turned))))
+                   (react-code code objects :rest-transform (constantly turned))))
         moves  (react #(-> %
                            (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})
                            (cta/add-keyframe (thi/id :a) {:time 400 :property :x :value 60})))

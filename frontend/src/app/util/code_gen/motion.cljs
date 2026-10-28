@@ -237,7 +237,6 @@
   (let [marked (marked-objects codes objects guides)]
     (ctac/motion-react codes objects
                        :ids ids
-                       :class-name cgc/shape->selector
                        :rest-transform (partial rest-transform objects)
                        :markup (fn [code layers] (jsx/board-jsx marked code layers)))))
 

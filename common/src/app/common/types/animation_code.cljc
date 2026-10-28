@@ -19,7 +19,6 @@
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.path :as path]
-   [app.common.types.text-units :as tu]
    [clojure.set :as set]
    [cuerdas.core :as str]))
 
@@ -781,15 +780,6 @@
   "The helper of `transform-template`."
   "const withUnit = (value, unit) => (typeof value === \"number\" ? `${value}${unit}` : value);")
 
-(defn- react-text
-  "The JSX of the text `text`: an expression of a JS string."
-  [text]
-  (str "{\"" (-> text
-                 (str/replace "\\" "\\\\")
-                 (str/replace "\"" "\\\"")
-                 (str/replace "\n" "\\n"))
-       "\"}"))
-
 (defn- react-props
   "The motion.dev props of the animated `values`, indented by `indent`."
   [values indent]
@@ -800,114 +790,80 @@
        indent "}}\n"))
 
 (defn- react-units
-  "The `motion.span` of each unit of the text of `layer`, which the code
-  plays one by one (see `cta/unit-timelines`), with the text between them
-  as it is, a `br` between its paragraphs: `{:template? :code :attrs}`,
-  `:attrs` the props of the unit `k` as a function of it and the indent
-  (for the units the HTML of the text wraps, see `motion-react`)."
+  "The animation of the units of the text of `layer`, which the code plays
+  one by one (see `cta/unit-timelines`): `{:template? :attrs}`, `:attrs`
+  the props of the unit `k` (its `motion.span`) as a function of it and
+  the indent, nil past its last unit."
   [{:keys [shape units]} objects]
-  (let [{units-tl :timeline :keys [ids bases]} units
+  (let [{units-tl :timeline :keys [ids]} units
         played  (-> units-tl cta/expand-paths cta/cut-timeline)
         sampled (cta/expand-springs played)
         seen    (acss/unit-perspective objects shape)
-        spans   (mapv (fn [k id]
+        spans   (mapv (fn [id]
                         (let [unit   {:id id :shape (cta/unit-shape units-tl objects id) :clock units-tl}
                               values (merge-scale (layer-animation unit objects played sampled))]
                           {:values values
-                           :tilt? (some #(contains? #{"rotateX" "rotateY"} (:name %)) values)
-                           :class (str "penpot-unit penpot-unit-" k)}))
-                      (range)
-                      ids)
-        attrs   (fn [k indent]
-                  (when-let [{:keys [values tilt?]} (get spans k)]
-                    (str indent "style={{ display: \"inline-block\" }}\n"
-                         (when tilt?
-                           (str indent (unit-tilt-template seen) "\n"))
-                         (react-props values indent))))
-        texts   (tu/paragraph-texts (:content shape))
-        ;; the pieces of each paragraph: its units, the text between them
-        pieces  (for [[p text] (map-indexed vector texts)]
-                  (let [in-p (filter (fn [[_ base]] (= p (:paragraph base)))
-                                     (map vector (range) bases))]
-                    (loop [at 0 units in-p out []]
-                      (if-let [[[k {:keys [start end]}] & more] (seq units)]
-                        (recur end more (cond-> out
-                                          (< at start) (conj (subs text at start))
-                                          :always      (conj [k (subs text start end)])))
-                        (cond-> out (< at (count text)) (conj (subs text at)))))))
-        piece   (fn [item]
-                  (if (string? item)
-                    (str "        " (react-text item) "\n")
-                    (let [[k text] item]
-                      (str "        <motion.span\n"
-                           "          className=\"" (:class (nth spans k)) "\"\n"
-                           (attrs k "          ")
-                           "        >" (react-text text) "</motion.span>\n"))))]
+                           :tilt? (some #(contains? #{"rotateX" "rotateY"} (:name %)) values)}))
+                      ids)]
     {:template? (some :tilt? spans)
-     :attrs attrs
-     :code  (str/join "        <br />\n" (map #(str/join "" (map piece %)) pieces))}))
+     :attrs (fn [k indent]
+              (when-let [{:keys [values tilt?]} (get spans k)]
+                (str indent "style={{ display: \"inline-block\" }}\n"
+                     (when tilt?
+                       (str indent (unit-tilt-template seen) "\n"))
+                     (react-props values indent))))}))
 
 (defn- react-layer
   "The animation of `layer` as React: `:attrs`, the props of its element
   (its pivot, its transform template and its values) as a function of the
   indent, nil when nothing plays on it; `:units`, those of the units of a
-  text the code plays by units (see `react-units`); `:trim`, of a layer
-  that trims its stroke, the props of an element painting it (its dash,
-  see `trim-react-values`) as a function of where its piece of the
-  outline starts and the indent; and `:code`, the `motion.div` of the
-  layer, holding the `motion.span` of each unit, when anything plays on
-  it. `rest-transform`, if any, gives the transform the CSS of the layer
-  gives it at rest, which its template keeps: motion.dev writes the
-  `transform` of a layer that plays any of it."
-  [layer objects played sampled class-name rest-transform]
-  (let [values   (merge-scale (layer-animation layer objects played sampled))
-        names    (into #{} (map :name) values)
-        origin   (:origin layer)
-        units    (when (:units layer) (react-units layer objects))
-        rest     (when (and (some? rest-transform) (some transform-names names))
-                   (rest-transform (:shape layer)))
-        tilt?    (or (contains? names "rotateX") (contains? names "rotateY") (contains? names "z"))
+  text the code plays by units (see `react-units`); and `:trim`, of a
+  layer that trims its stroke, the props of an element painting it (its
+  dash, see `trim-react-values`) as a function of where its piece of the
+  outline starts and the indent. `rest-transform`, if any, gives the
+  transform the CSS of the layer gives it at rest, which its template
+  keeps: motion.dev writes the `transform` of a layer that plays any of
+  it."
+  [layer objects played sampled rest-transform]
+  (let [values    (merge-scale (layer-animation layer objects played sampled))
+        names     (into #{} (map :name) values)
+        origin    (:origin layer)
+        units     (when (:units layer) (react-units layer objects))
+        rest      (when (and (some? rest-transform) (some transform-names names))
+                    (rest-transform (:shape layer)))
+        tilt?     (or (contains? names "rotateX") (contains? names "rotateY") (contains? names "z"))
         template? (or tilt?
                       (and (contains? names "rotate") (contains? names "scaleX"))
                       (not (str/blank? rest)))
-        props    (fn [indent]
-                   (str indent "style={{ originX: " (react-number (:x origin)) ", originY: " (react-number (:y origin)) " }}\n"
-                        (when template?
-                          (str indent
-                               (if tilt?
-                                 (tilt-template (:lift (frame-at played objects layer 0)) rest)
-                                 (transform-template rest))
-                               "\n"))
-                        (react-props values indent)))
-        trimmed? (and (not= :text (get-in layer [:shape :type]))
-                      (some cta/trim-keyframe?
-                            (:keyframes (get-in played [:tracks (:id layer)]))))]
+        trimmed?  (and (not= :text (get-in layer [:shape :type]))
+                       (some cta/trim-keyframe?
+                             (:keyframes (get-in played [:tracks (:id layer)]))))]
     {:id (:id layer)
      :template? (or template? (:template? units))
-     :attrs (when (seq values) props)
+     :attrs (when (seq values)
+              (fn [indent]
+                (str indent "style={{ originX: " (react-number (:x origin)) ", originY: " (react-number (:y origin)) " }}\n"
+                     (when template?
+                       (str indent
+                            (if tilt?
+                              (tilt-template (:lift (frame-at played objects layer 0)) rest)
+                              (transform-template rest))
+                            "\n"))
+                     (react-props values indent))))
      :units units
      :trim (when trimmed?
              (fn [from indent]
                (let [values (layer-animation (assoc layer :trim-from from) objects played sampled
                                              :specs trim-react-values)]
                  (when (seq values)
-                   (react-props values indent)))))
-     :code (when (or (seq values) (some? units))
-             (str "      {/* " (or (get-in layer [:shape :name]) "Layer") " */}\n"
-                  "      <motion.div\n"
-                  "        className=\"" (class-name (:shape layer)) "\"\n"
-                  (props "        ")
-                  (if (some? units)
-                    (str "      >\n" (:code units) "      </motion.div>")
-                    "      />")))}))
+                   (react-props values indent)))))}))
 
 (defn- react-board
-  "The React component `component` of the board of `code`: its animated
-  layers (those of `ids` only when given). With `markup`, a function of
-  `code` and the animation of its layers as `react-layer` gives it (by
-  id), the JSX of the board (see `motion-react`); else the `motion.div` of
-  each animated layer, one after another."
-  [{:keys [board-id timeline] :as code} component objects ids class-name markup rest-transform]
+  "The React component `component` of the board of `code`: the JSX
+  `markup` gives of `code` and the animation of its animated layers (those
+  of `ids` only when given) as `react-layer` gives it, by id (see
+  `motion-react`)."
+  [{:keys [board-id timeline] :as code} component objects ids markup rest-transform]
   (let [board   (get objects board-id)
         played  (memoize (fn [clock]
                            (-> (cta/resolve-animations clock objects) cta/expand-loops cta/expand-paths cta/cut-timeline)))
@@ -926,11 +882,8 @@
         divs    (into []
                       (comp (map (fn [layer]
                                    (let [p (played (:clock layer))]
-                                     (react-layer layer objects p (cta/expand-springs p) class-name rest-transform))))
-                            ;; without the markup, no element paints a stroke to trim
-                            (filter #(if (some? markup)
-                                       (or (:attrs %) (:units %) (:trim %))
-                                       (:code %))))
+                                     (react-layer layer objects p (cta/expand-springs p) rest-transform))))
+                            (filter #(or (:attrs %) (:units %) (:trim %))))
                       layers)
         markers (sort-by :time (:markers timeline))]
     (when (seq divs)
@@ -940,15 +893,12 @@
             (name (cta/playback-mode timeline)) "."
             (when (seq markers)
               (str " Markers: " (str/join ", " (map #(str (:name %) " " (:time %) " ms") markers)) "."))
-            (when (some? markup)
-              " Its layers take the CSS of the code of the Inspect.")
+            " Its layers take the CSS of the code of the Inspect."
             " */\n"
             "export function " component "() {\n"
             "  return (\n"
             "    <MotionConfig reducedMotion=\"user\">\n"
-            (if (some? markup)
-              (markup code (into {} (map (juxt :id identity)) divs))
-              (str/join "\n" (keep :code divs)))
+            (markup code (into {} (map (juxt :id identity)) divs))
             "\n"
             "    </MotionConfig>\n"
             "  );\n"
@@ -956,26 +906,24 @@
 
 (defn motion-react
   "The animation of the boards of `codes` (see `cltl/code-timelines`; one
-  or several) as React code for motion.dev: one component by board, one
-  `motion.div` by animated layer (those of `ids` only when given), its
-  class from `class-name` (`acss/shape-css-class` of its id by default) and
-  each value with its keyframes, `times` and an easing by segment, the
-  clock of the layer (a copy's, its main's) repeating it. A value that is
-  one spring segment on a clock playing once is a spring of motion.dev,
-  rescaled to settle where Penpot's does; other springs, motion paths and
-  segments the properties behind a value ease apart are sampled. With
-  `markup`, a function of the code of a board and the animation of its
-  layers (see `react-layer`, by id), the component holds the JSX it gives:
-  the board with all its layers, the animated ones as `motion` elements.
-  `rest-transform`, a function of a shape, gives the transform the CSS of
-  a layer gives it at rest, which a layer playing its transform keeps
-  (see `transform-template`). Nil when nothing animates."
-  [codes objects & {:keys [ids class-name markup rest-transform]}]
-  (let [codes      (if (map? codes) [codes] codes)
-        class-name (or class-name #(acss/shape-css-class (:id %)))
-        names      (component-names (map #(get objects (:board-id %)) codes))
-        boards     (into [] (keep identity)
-                         (map #(react-board %1 %2 objects ids class-name markup rest-transform) codes names))]
+  or several) as React code for motion.dev: one component by board,
+  holding the JSX `markup` gives, a function of the code of a board and
+  the animation of its animated layers (those of `ids` only when given;
+  see `react-layer`, by id): the board with all its layers, the animated
+  ones as `motion` elements. Each value plays with its keyframes, `times`
+  and an easing by segment, the clock of the layer (a copy's, its main's)
+  repeating it. A value that is one spring segment on a clock playing
+  once is a spring of motion.dev, rescaled to settle where Penpot's does;
+  other springs, motion paths and segments the properties behind a value
+  ease apart are sampled. `rest-transform`, a function of a shape, gives
+  the transform the CSS of a layer gives it at rest, which a layer
+  playing its transform keeps (see `transform-template`). Nil when
+  nothing animates."
+  [codes objects & {:keys [ids markup rest-transform]}]
+  (let [codes  (if (map? codes) [codes] codes)
+        names  (component-names (map #(get objects (:board-id %)) codes))
+        boards (into [] (keep identity)
+                     (map #(react-board %1 %2 objects ids markup rest-transform) codes names))]
     (when (seq boards)
       (str "import { MotionConfig, motion } from \"motion/react\";\n"
            "\n"
