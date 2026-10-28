@@ -518,15 +518,17 @@
                               resolved-shapes
                               (->> (cfh/clean-loops objects shapes)
                                    (mapcat #(cfh/get-children-with-self objects (:id %))))
+                              codes (cgm/code-of-boards page (:files @st/state)
+                                                        (into #{} (map :id) resolved-shapes))
                               ;; the units of the split texts the CSS of
-                              ;; `Timeline.toCSS` plays one by one
-                              units (cgm/code-units (cgm/code-of-boards page (:files @st/state)
-                                                                        (into #{} (map :id) resolved-shapes))
-                                                    objects)
-                              with-units #(cgm/with-code-units % units)]
-                          (conj acc (cg/generate-formatted-markup-code (d/update-vals objects with-units)
+                              ;; `Timeline.toCSS` plays one by one, and the
+                              ;; strokes it trims
+                              units (cgm/code-units codes objects)
+                              trims (cgm/code-trims codes objects)
+                              mark  #(-> % (cgm/with-code-units units) (cgm/with-code-trims trims))]
+                          (conj acc (cg/generate-formatted-markup-code (d/update-vals objects mark)
                                                                        type
-                                                                       (mapv with-units resolved-shapes)))))
+                                                                       (mapv mark resolved-shapes)))))
                       []))]
 
             (st/emit! (se/event plugin-id "copy-inspect-code"))

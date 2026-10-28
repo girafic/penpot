@@ -12,6 +12,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.types.shape.layout :as ctl]
    [app.config :as cfg]
+   [app.main.data.exports.svg-vectors :as svgv]
    [app.main.ui.shapes.text.html-text :as text]
    [app.util.code-gen.common :as cgc]
    [app.util.code-gen.markup-svg :refer [generate-svg]]
@@ -29,7 +30,10 @@
            shape-html
            (cond
              (cgc/svg-markup? shape)
-             (let [svg-markup (generate-svg objects shape)]
+             (let [svg-markup (cond-> (generate-svg objects shape)
+                                ;; its trim plays on its strokes (see
+                                ;; `app.util.code-gen.motion/code-trims`)
+                                (:code-trim shape) (svgv/trimmed-markup shape))]
                (dm/fmt "%<div class=\"%\">\n%\n%</div>"
                        indent
                        (dm/str "shape " (d/name (:type shape)) " "

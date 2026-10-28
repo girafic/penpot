@@ -173,6 +173,12 @@
           (when (seq codes)
             (cgm/code-units codes (:objects page))))
 
+        ;; the layers whose strokes it trims, which their SVG gets ready for
+        code-trims
+        (mf/with-memo [codes page]
+          (when (seq codes)
+            (cgm/code-trims codes (:objects page))))
+
         style-code
         (mf/use-memo
          (mf/deps fontfaces-css style-type shapes all-children cg/generate-style-code)
@@ -192,12 +198,11 @@
 
         markup-code
         (mf/use-memo
-         (mf/deps markup-type shapes images-data objects code-units)
+         (mf/deps markup-type shapes images-data objects code-units code-trims)
          (fn []
-           (if (seq code-units)
-             (cg/generate-formatted-markup-code (d/update-vals objects #(cgm/with-code-units % code-units))
-                                                markup-type
-                                                (mapv #(cgm/with-code-units % code-units) shapes))
+           (if (or (seq code-units) (seq code-trims))
+             (let [mark #(-> % (cgm/with-code-units code-units) (cgm/with-code-trims code-trims))]
+               (cg/generate-formatted-markup-code (d/update-vals objects mark) markup-type (mapv mark shapes)))
              (cg/generate-formatted-markup-code objects markup-type shapes))))
 
         on-markup-copied

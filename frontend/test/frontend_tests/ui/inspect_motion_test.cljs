@@ -15,8 +15,10 @@
    [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
+   [app.common.test-helpers.shapes :as cthsh]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
+   [app.common.types.path :as path]
    [app.common.uuid :as uuid]
    [app.main.ui.inspect.motion-timeline :as mtl]
    [app.util.code-gen :as cg]
@@ -220,3 +222,48 @@
           "its HTML wraps them")
     (t/is (str/includes? css (str (cgm/code-selector text) " .penpot-unit-2 {")) "its CSS plays each")
     (t/is (str/includes? css "display: inline-block;"))))
+
+;; TRIMS
+
+(defn- trim-scene
+  "Board :card holding a rect :bg at rest, a rect :box fading in and a
+  path :ring whose stroke draws itself, its trim end 0 to 1 in 800 ms:
+  `{:page :files :board :ids}`."
+  []
+  (let [ring  (path/from-plain [{:command :move-to :params {:x 20 :y 150}}
+                                {:command :line-to :params {:x 220 :y 150}}])
+        file  (-> (cthf/sample-file :file1)
+                  (ctho/add-frame :card :x 0 :y 0 :width 400 :height 300 :name "Card")
+                  (ctho/add-rect :bg :parent-label :card :x 10 :y 10 :width 100 :height 100 :name "Bg")
+                  (ctho/add-rect :box :parent-label :card :x 200 :y 10 :width 40 :height 40 :name "Box")
+                  (cthsh/add-sample-shape :ring :parent-label :card :type :path :name "Ring"
+                                          :content ring :fills []
+                                          :strokes [{:stroke-color "#22c55e" :stroke-opacity 1 :stroke-width 4
+                                                     :stroke-alignment :center :stroke-style :solid}]))
+        board (cthi/id :card)
+        tl    (-> (cta/make-timeline {:board-id board :duration 1000})
+                  (cta/add-keyframe (cthi/id :ring) {:time 0 :property :trim-end :value 0 :easing :linear})
+                  (cta/add-keyframe (cthi/id :ring) {:time 800 :property :trim-end :value 1})
+                  (cta/add-keyframe (cthi/id :box) {:time 0 :property :opacity :value 0})
+                  (cta/add-keyframe (cthi/id :box) {:time 500 :property :opacity :value 1}))
+        file  (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                           (pcb/with-page (cthf/current-page file))
+                                           (pcb/set-timeline board tl)))
+        page  (cthf/current-page file)]
+    {:page page
+     :files {(:id file) file}
+     :board board
+     :ids (into #{board} (get-in page [:objects board :shapes]))}))
+
+(t/deftest the-css-of-the-inspect-trims-the-stroke-its-html-draws
+  (let [{:keys [page files board ids]} (trim-scene)
+        objects (:objects page)
+        codes   (cgm/code-of-boards page files ids)
+        ring    (cthi/id :ring)
+        markup  (cg/generate-markup-code (cgm/marked-objects codes objects nil) "html" [(get objects board)])
+        css     (cgm/animation-css page files ids)]
+    (t/is (= #{ring} (cgm/code-trims codes objects)))
+    (t/is (str/includes? markup "pathLength=\"1\"") "its outline of length 1")
+    (t/is (str/includes? css (str ".strokes[id$=\"-" ring "\"]")) "on the element that paints the stroke")
+    (t/is (str/includes? css "stroke-dasharray: 0 1;"))
+    (t/is (not (str/includes? css (str "penpot-anim-" ring))) "nothing plays on its box")))

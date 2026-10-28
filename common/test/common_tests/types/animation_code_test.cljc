@@ -688,3 +688,25 @@
         css (acss/timeline->css (:timeline code) objects)]
     (t/is (cstr/includes? css "--penpot-gradient-color-0: rgba(255, 0, 0, 0.5);")
           "the resting stops are faded by the opacity of the fill")))
+
+;; TRIMS
+
+(defn- trimmed
+  "`[objects code]` of :a trimming its stroke, its end 0 to 1 in 800 ms."
+  []
+  (board-scene #(-> %
+                    (cta/add-keyframe (thi/id :a) {:time 0 :property :trim-end :value 0 :easing :linear})
+                    (cta/add-keyframe (thi/id :a) {:time 800 :property :trim-end :value 1}))))
+
+(t/deftest css-plays-a-trim-on-the-elements-of-the-stroke
+  (let [[objects code] (trimmed)
+        dash  (fn [values] [(str "dash: " (get values :trim-end) ";")])
+        css   (acss/timeline->css (:timeline code) objects
+                                  {:trims (fn [shape _] [[(str "." (:name shape) " path") dash]])})]
+    (t/is (cstr/includes? css "@keyframes penpot-trim-"))
+    (t/is (cstr/includes? css "0% { dash: 0; animation-timing-function: linear; }"))
+    (t/is (cstr/includes? css "Rect1 path {\n  animation: penpot-trim-"))
+    (t/is (not (cstr/includes? css "@keyframes penpot-anim-"))
+          "a layer that only trims plays nothing on its box")
+    (t/is (cstr/includes? (acss/timeline->css (:timeline code) objects) "@keyframes penpot-anim-")
+          "without trims, as before")))

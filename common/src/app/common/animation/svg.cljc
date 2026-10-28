@@ -172,7 +172,7 @@
   "The dash pattern of the dashed `stroke` its dash, gap and offset in
   `values` play (at `index`), the others as they rest (see
   `ctap/stroke-dash`); none when the stroke trims (`trimmed?`), whose trim
-  takes the dash of its vectors (see `svg-trim-declarations`)."
+  takes the dash of its vectors (see `trim-declarations`)."
   [stroke index values trimmed?]
   (when (and (ctap/dashed-stroke? stroke) (not trimmed?)
              (some #(contains? values %) [:stroke-dash :stroke-gap :stroke-dash-offset]))
@@ -186,11 +186,11 @@
 (defn trim-piece-class
   "The class of the element drawing the subpath `k` of a trimmed stroke
   (see `aexp/trim-pieces`), whose trim plays from where it begins on
-  them all (see `svg-trim-declarations`)."
+  them all (see `trim-declarations`)."
   [k]
   (str "trim-piece-" k))
 
-(defn- svg-trim-declarations
+(defn trim-declarations
   "The dash of the strokes of a layer drawn from `:trim-start` to
   `:trim-end` moved along by `:trim-offset` of `values`, on outlines of
   length 1 (the vectors of the layer have a `pathLength` of 1), or on
@@ -230,6 +230,13 @@
 
       (let [paint (str group ".stroke-shape > :not(defs)")]
         {:paint paint :outline [paint]}))))
+
+(defn stroke-paint
+  "The selector of the element the stroke `index` of `shape` paints, as
+  the SVG renderer draws its strokes (see `svg-stroke-elements`): the one
+  a trim dashes (see `trim-declarations`)."
+  [shape index]
+  (:paint (svg-stroke-elements shape index)))
 
 (defn- svg-outline-elements
   "The elements that draw the outline of `shape` as the SVG renderer
@@ -325,7 +332,7 @@
                  decls  (fn [values from]
                           (let [color   (indexed-value (:stroke-color values) index)
                                 opacity (indexed-value (:stroke-opacity values) index)
-                                trims   (when-not text? (svg-trim-declarations values from))]
+                                trims   (when-not text? (trim-declarations values from))]
                             (cond-> (vec trims)
                               (some? color)   (conj (str "stroke: " color ";"))
                               (some? opacity) (conj (str "stroke-opacity: " (acss/fmt opacity) ";"))

@@ -681,8 +681,10 @@
   With `eased?`, as the canvas eases each property (see `eased-stops`);
   else a stop of each keyframe, which code reads best, its timing that
   of the stretch to the next. `scene`, the light and the depth cues of
-  its board (see `scene-layers`), plays with it."
-  [timeline shape track kf-name origin rest-transform & {:keys [svg? sized? eased? scene]}]
+  its board (see `scene-layers`), plays with it. `declarations`, if any,
+  gives the declarations of the values at a stop in place of the ones of
+  a box (see `values->declarations`)."
+  [timeline shape track kf-name origin rest-transform & {:keys [svg? sized? eased? scene declarations]}]
   (let [duration (max 1 (:duration timeline))
         sid      (:shape-id track)
         kfs      (:keyframes track)
@@ -704,8 +706,10 @@
                                         (map (fn [t] [t (some #(when (= (:time %) t) (keyframe-timing %)) kfs)])
                                              times))]
                    (let [pct   (fmt (* 100.0 (/ (double t) duration)))
-                         decls (cond-> (values->declarations shape (values t) origin rest-transform svg?
-                                                             (cta/track-origin track))
+                         decls (cond-> (if (some? declarations)
+                                         (vec (declarations (values t)))
+                                         (values->declarations shape (values t) origin rest-transform svg?
+                                                               (cta/track-origin track)))
                                  (and seg-timing (< t duration))
                                  (conj (str "animation-timing-function: " seg-timing ";")))]
                      (str "  " pct "% { " (str/join " " decls) " }")))]
@@ -804,10 +808,14 @@
   those that play any (see `svg-group-plays?`), but the width and height
   of the shapes of `:sized`, which play on their elements (see
   `svg-sized?`), each property eased as the canvas eases it (see
-  `eased-stops`)."
+  `eased-stops`). `:trims`, a function of a shape and its track, gives
+  the elements a trim of its strokes dashes, `[selector declarations]`
+  each, `declarations` a function of its values then (see
+  `app.common.animation.svg/trim-declarations`); they play the trim on
+  their own. Without it, as on a box, no trim plays."
   ([timeline objects]
    (timeline->css timeline objects nil))
-  ([timeline objects {:keys [ids selector origin transform units svg? sized]}]
+  ([timeline objects {:keys [ids selector origin transform units svg? sized trims]}]
    (let [;; an SVG draws 3D flat, in no light
          scenes   (if svg? {} (scene-layers timeline objects))
          timeline (-> timeline
@@ -870,14 +878,39 @@
                        (str "  display: " display ";\n"))
                      "  animation: " kf-name " " duration "ms linear " iter ";\n"
                      "  transform-origin: " ((:origin units) text k) ";\n}")])))
+         trim?    #(contains? cta/trim-properties (:property %))
+         ;; the elements the trim of a stroke dashes play it on their own
+         trim-rules
+         (when (some? trims)
+           (for [[sid track] (:tracks timeline)
+                 :let  [shape (get objects sid)]
+                 :when (and (some? shape) (or (nil? ids) (contains? ids sid))
+                            (some trim? (:keyframes track)))
+                 [k [selector declarations]] (map-indexed vector (trims shape track))]
+             (let [kf-name (str "penpot-trim-" sid "-" k)]
+               [selector
+                (str (css-comment (str (or (:name shape) sid) ", trim")) "\n"
+                     (track->keyframes-css timeline shape (update track :keyframes #(filterv trim? %)) kf-name nil nil
+                                           :declarations declarations)
+                     "\n\n"
+                     selector " {\n  animation: " kf-name " " duration "ms linear " iter ";\n}")])))
          rules    (into []
                         (keep (fn [[sid track]]
                                 (when-let [shape (and (or (nil? ids) (contains? ids sid))
                                                       (or (not svg?) (svg-group-plays? track (contains? sized sid)))
+                                                      ;; a layer that plays only the trim of its strokes
+                                                      ;; plays it on them (see `trim-rules`)
+                                                      (not (and (some? trims)
+                                                                (seq (:keyframes track))
+                                                                (every? trim? (:keyframes track))
+                                                                (nil? (get scenes sid))))
                                                       (get objects sid))]
                                   (let [kf-name  (str "penpot-anim-" sid)
                                         selector (selector shape)
                                         comment  (css-comment (or (:name shape) sid))
+                                        ;; its trim plays on its strokes
+                                        track    (cond-> track
+                                                   (some? trims) (update :keyframes #(filterv (complement trim?) %)))
                                         ;; an SVG plays its gradients by SMIL
                                         gradient (when-not svg? (gradient-rule timeline shape track))]
                                     [selector
@@ -898,7 +931,7 @@
                                      gradient]))))
                         (:tracks timeline))
          gradients (keep #(nth % 2) rules)
-         rules    (into rules unit-rules)]
+         rules    (-> rules (into unit-rules) (into trim-rules))]
      (if (empty? rules)
        ""
        (str (when (seq gradients)

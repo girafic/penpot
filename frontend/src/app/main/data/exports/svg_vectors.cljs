@@ -12,6 +12,7 @@
   texts as the outlines of their glyphs (see `outlined`)."
   (:require
    ["react-dom/server" :as rds]
+   [app.common.animation.export :as aexp]
    [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
@@ -209,7 +210,7 @@
   strokes."
   "(<g class=\"(?:inner-|outer-)?stroke-shape\">(?:<defs>[\\s\\S]*?</defs>)?)<path ([^>]*)></path>")
 
-(defn- split-trim-pieces
+(defn split-trim-pieces
   "`markup` with the stroke each stroke of the shape `id` paints (see
   `stroke-paint-re`) split into its subpaths (see `split-path`): the
   canvas trims an outline of several subpaths along them all, an SVG
@@ -282,6 +283,19 @@
     (reduce (fn [markup id] (.join (.split markup (:whole (get elements id))) ""))
             copied
             @used)))
+
+(defn trimmed-markup
+  "The SVG `markup` of `shape`, as the code of the Inspect writes it, with
+  its strokes ready for its trim to play on them as on an SVG (see
+  `asvg/trim-declarations`): its `<use>`s copies, the stroke of an
+  outline of several subpaths in a piece each (see `split-trim-pieces`),
+  the outlines its strokes are drawn along of length 1."
+  [markup shape]
+  (let [id     (:id shape)
+        pieces (aexp/trim-pieces shape)]
+    (cond-> (inline-uses markup)
+      (some? pieces) (split-trim-pieces id pieces)
+      :always        (with-path-length id))))
 
 (mf/defc ^:private layer-svg*
   [{:keys [objects shape]}]

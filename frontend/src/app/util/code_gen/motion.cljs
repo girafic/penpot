@@ -12,6 +12,8 @@
   with the classes the HTML of the Inspect gives the shapes."
   (:require
    [app.common.animation.css :as acss]
+   [app.common.animation.export :as aexp]
+   [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
@@ -103,6 +105,62 @@
     (assoc shape :code-units bases)
     shape))
 
+(defn code-trims
+  "The layers of the boards of `codes` (see `code-of-boards`) whose
+  strokes the code trims: those their timelines, as they play, trim (the
+  trim of a group plays on the layers in it, see `cta/resolve-animations`),
+  of the ones it writes as SVG (see `cgc/svg-markup?`), but texts."
+  [codes objects]
+  (into #{}
+        (comp (mapcat (fn [{:keys [timeline copies]}] (cons timeline (map :timeline copies))))
+              (mapcat #(:tracks (cta/resolve-animations % objects)))
+              (keep (fn [[id track]]
+                      (let [shape (get objects id)]
+                        (when (and (some? shape)
+                                   (cgc/svg-markup? shape)
+                                   (not (cfh/text-shape? shape))
+                                   (some #(contains? cta/trim-properties (:property %)) (:keyframes track)))
+                          id)))))
+        codes))
+
+(defn with-code-trims
+  "`shape` marked `:code-trim` when the code trims its strokes (see
+  `code-trims`), so its SVG has them ready for it (see
+  `app.main.data.exports.svg-vectors/trimmed-markup`)."
+  [shape trims]
+  (cond-> shape
+    (contains? trims (:id shape)) (assoc :code-trim true)))
+
+(defn marked-objects
+  "`objects` as the code of the Inspect writes their HTML for the
+  animation of the boards of `codes`: the texts it plays by units with
+  their units (see `with-code-units`), the layers whose strokes it trims
+  marked (see `with-code-trims`), and without the helper layers `guides`
+  (see `guide-ids`)."
+  [codes objects guides]
+  (let [units   (code-units codes objects)
+        trims   (code-trims codes objects)
+        objects (if (seq guides)
+                  (:objects (reduce #(ctst/delete-shape %1 %2 true) {:objects objects} guides))
+                  objects)]
+    (d/update-vals objects #(-> % (with-code-units units) (with-code-trims trims)))))
+
+(defn- trim-paint
+  "The selectors of the elements the trim of the strokes of `shape` plays
+  on in the code of the Inspect (see `acss/timeline->css`):
+  the one each of its strokes paints, or each piece of it (see
+  `app.main.data.exports.svg-vectors/trimmed-markup`), with the
+  declarations of its trim from where its piece starts. None of a shape
+  the code draws as a box, whose border no trim dashes, or of a text."
+  [shape selector]
+  (when (and (cgc/svg-markup? shape) (not= :text (:type shape)))
+    (let [pieces (aexp/trim-pieces shape)]
+      (for [index (range (count (:strokes shape)))
+            :let  [paint (asvg/stroke-paint shape index)]
+            [k [from _]] (if (some? pieces) (map-indexed vector pieces) [[nil [0]]])]
+        [(str selector " " paint (when (some? k) (str "." (asvg/trim-piece-class k))))
+         #(asvg/trim-declarations % from)]))))
+
 (def ^:private unit-options
   "How the CSS of the Inspect plays the units of a text (see
   `acss/timeline->css`): characters and words, the classes its HTML gives
@@ -126,7 +184,9 @@
                  ;; flat: the animation writes the tilt itself (see
                  ;; `acss/frame-values`)
                  :transform #(sv/get-value :transform (dissoc % :rotate-x :rotate-y :translate-z) objects {})
-                 :units (assoc unit-options :texts #(code-units? (get objects %)))}]
+                 :units (assoc unit-options :texts #(code-units? (get objects %)))
+                 ;; on the strokes its SVG draws (see `code-trims`)
+                 :trims (fn [shape _] (trim-paint shape (code-selector shape)))}]
     (some->> (seq codes)
              (mapcat (fn [{:keys [timeline copies]}] (cons timeline (map :timeline copies))))
              (map #(acss/timeline->css % objects options))
