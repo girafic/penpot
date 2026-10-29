@@ -219,6 +219,12 @@ pub fn tile_screen_xy(tile: Tile, tile_size: f32, offset: skia::Point) -> (f32, 
     )
 }
 
+/// Screen-space rect of `tile`, placed as `tile_screen_xy` places it.
+pub fn tile_screen_rect(tile: Tile, offset: skia::Point) -> skia::Rect {
+    let (x, y) = tile_screen_xy(tile, TILE_SIZE, offset);
+    skia::Rect::from_xywh(x, y, TILE_SIZE, TILE_SIZE)
+}
+
 /// The document `area` (shown at `scale`) where the tiles put it: its
 /// offset rounded to whole pixels, as `tile_screen_xy` places them, so that
 /// what renders the visible area in one pass does not sit a fraction of a
@@ -568,6 +574,39 @@ mod tests {
             }
             assert_eq!(aligned.width(), area.width());
             assert_eq!(aligned.height(), area.height());
+        }
+    }
+
+    #[test]
+    fn a_tile_shows_a_point_where_the_one_pass_render_does() {
+        let cases = [
+            (10.3, -7.6, 2.0),
+            (-55.7, 12.15, 2.77),
+            (-103.5, 0.5, 1.0),
+            (437.83, 276.71, 1.37),
+        ];
+        for (left, top, scale) in cases {
+            let offset = skia::Point::new(left * scale, top * scale);
+            let aligned =
+                pixel_aligned_area(skia::Rect::from_xywh(left, top, 1200.0, 900.0), scale);
+            for (x, y) in [(left + 3.3, top + 5.1), (left + 700.0, top + 450.2)] {
+                let tile = Tile(
+                    (x * scale / TILE_SIZE).floor() as i32,
+                    (y * scale / TILE_SIZE).floor() as i32,
+                );
+                // a tile draws its document rect from its top-left corner
+                let (doc_x, doc_y) = get_tile_pos(tile, scale);
+                let placed = tile_screen_rect(tile, offset);
+                let tiled = (
+                    placed.left + (x - doc_x) * scale,
+                    placed.top + (y - doc_y) * scale,
+                );
+                let pass = ((x - aligned.left) * scale, (y - aligned.top) * scale);
+                assert!(
+                    (tiled.0 - pass.0).abs() < 1e-2 && (tiled.1 - pass.1).abs() < 1e-2,
+                    "{tiled:?} vs {pass:?} in {tile:?} at {left}, {top}, {scale}"
+                );
+            }
         }
     }
 

@@ -4818,14 +4818,15 @@ impl RenderState {
                     if !is_empty || self.current_tile_had_shapes {
                         if self.options.is_interactive_transform() {
                             // During drag, avoid snapshot-based caching. Draw Current directly
-                            // into Target (and Cache, for the debug views) to reduce stalls.
+                            // into Target (and Cache, for the debug views) to reduce stalls,
+                            // where the atlas and the one-pass render put the tile.
                             let draw_on_cache = if self.options.is_debug_visible() {
                                 surfaces::DrawOnCache::Yes
                             } else {
                                 surfaces::DrawOnCache::No
                             };
                             self.surfaces.draw_current_tile_into_backbuffer(
-                                &tile_rect,
+                                &tiles::tile_screen_rect(current_tile, self.viewbox.get_offset()),
                                 self.background_color,
                                 draw_on_cache,
                             );
