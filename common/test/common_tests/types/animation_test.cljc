@@ -1447,6 +1447,36 @@
         (t/is (<= 0 (get-in over [:stops 0 :opacity]) 1))
         (t/is (<= 0 (get-in over [:stops 0 :offset]) 1))))))
 
+(t/deftest a-morph-and-a-gradient-play-alike-on-layers-that-share-them
+  ;; `values-at` keeps the rows of a track by its keyframes alone (in the
+  ;; browser), so they must not depend on the layer that plays them
+  (let [sid    (uuid/next)
+        other  (uuid/next)
+        two    (linear-gradient [{:color "#ff0000" :opacity 1 :offset 0}
+                                 {:color "#0000ff" :opacity 1 :offset 1}])
+        three  (linear-gradient [{:color "#000000" :opacity 1 :offset 0}
+                                 {:color "#808080" :opacity 1 :offset 0.5}
+                                 {:color "#ffffff" :opacity 1 :offset 1}])
+        tl     (-> (mk-timeline)
+                   (cta/add-keyframe sid {:time 0 :property :content
+                                          :value (path/from-string "M 0 0 L 30 0 L 30 30 Z")})
+                   (cta/add-keyframe sid {:time 1000 :property :content
+                                          :value (path/from-string "M 0 0 L 40 0 L 40 20 L 0 20 Z")})
+                   (cta/add-keyframe sid {:time 0 :property :fill-gradient :index 0 :value two})
+                   (cta/add-keyframe sid {:time 1000 :property :fill-gradient :index 0 :value three}))
+        track  (cta/get-track tl sid)
+        shared (assoc-in tl [:tracks other] (assoc track :shape-id other))
+        ;; the same keyframes in a vector of their own, which nothing keeps rows of
+        fresh  (assoc-in tl [:tracks other] (assoc track :shape-id other :keyframes (into [] (:keyframes track))))]
+    (doseq [t [0 250 500 1000]]
+      (let [values (cta/values-at shared t)]
+        (t/is (= (get values sid) (get values other)) (str "both layers at " t))
+        (t/is (= (get values other) (get (cta/values-at fresh t) other)) (str "as worked out anew at " t))))
+    (t/testing "the outlines are matched and the stops evened"
+      (let [values (get (cta/values-at shared 500) other)]
+        (t/is (some? (:content values)))
+        (t/is (= 3 (count (get-in values [:fill-gradient 0 :stops]))))))))
+
 (t/deftest shadow-offset-and-blur-follow-time
   (let [shape (cts/setup-shape
                {:type :rect :x 0 :y 0 :width 100 :height 100
