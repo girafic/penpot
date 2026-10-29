@@ -2730,6 +2730,40 @@
                tracks)))
     timeline))
 
+(defn- slot-rows*
+  [shape-id keyframes]
+  (reduce-kv (fn [rows [property index] keyframes]
+               (conj rows [property index
+                           (cond-> (sort-keyframes keyframes)
+                             (= :content property) (->> (matched-row [shape-id index]))
+                             (ctap/gradient-property? property) (ctap/evened-gradient-row))]))
+             []
+             (group-by keyframe-slot keyframes)))
+
+;; The rows `slot-rows` made of the keyframes of a track, by those
+;; keyframes, gone with them: every frame of the playback reads the same
+;; keyframes, which only an edit changes.
+#?(:cljs
+   (defonce ^:private slot-rows-cache
+     (js/WeakMap.)))
+
+(defn- slot-rows
+  "The `keyframes` of the track of `shape-id` by slot, `[property index
+  keyframes]` each: sorted by time, the outlines of a path matched to
+  morph into each other (see `matched-row`) and the gradients evened
+  (see `ctap/evened-gradient-row`). In the browser the same as last
+  time while `keyframes` are."
+  [shape-id keyframes]
+  #?(:cljs
+     (if (seq keyframes)
+       (or (.get slot-rows-cache keyframes)
+           (let [rows (slot-rows* shape-id keyframes)]
+             (.set slot-rows-cache keyframes rows)
+             rows))
+       [])
+     :clj
+     (slot-rows* shape-id keyframes)))
+
 (defn values-at
   "Return `{shape-id {property value}}` with the interpolated value of
   every animated property of every track of `timeline` at `time` (ms).
@@ -2740,20 +2774,15 @@
   [timeline time]
   (reduce-kv
    (fn [acc shape-id track]
-     (let [loops    (get track :loops #{})
-           by-slot  (group-by keyframe-slot (:keyframes track))
-           values   (reduce-kv
-                     (fn [m [property index] keyframes]
-                       (let [keyframes (cond-> (sort-keyframes keyframes)
-                                         (= :content property) (->> (matched-row [shape-id index]))
-                                         (ctap/gradient-property? property) (ctap/evened-gradient-row))
-                             time      (if (contains? loops (slot-key property index))
+     (let [loops  (get track :loops #{})
+           values (reduce (fn [m [property index keyframes]]
+                            (let [time (if (contains? loops (slot-key property index))
                                          (loop-time keyframes time)
                                          time)
-                             v         (property-value-at keyframes time)]
-                         (cond-> m (some? v) (store-value property index v))))
-                     {}
-                     by-slot)]
+                                  v    (property-value-at keyframes time)]
+                              (cond-> m (some? v) (store-value property index v))))
+                          {}
+                          (slot-rows shape-id (:keyframes track)))]
        (cond-> acc (seq values) (assoc shape-id values))))
    {}
    (:tracks timeline)))

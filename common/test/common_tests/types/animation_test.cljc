@@ -126,6 +126,29 @@
     (t/is (mth/close? 100.0 (double (get-in vs [sid :x])) 0.001))
     (t/is (mth/close? 0.5 (double (get-in vs [sid :opacity])) 0.001))))
 
+(t/deftest values-at-follows-the-keyframes
+  (let [sid   (uuid/next)
+        other (uuid/next)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 1000 :property :x :value 200})
+                  (cta/add-keyframe sid {:time 0 :property :x :value 0})
+                  (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
+                  (cta/add-keyframe sid {:time 1000 :property :opacity :value 0}))
+        x     #(double (get-in (cta/values-at %1 %2) [%3 :x]))]
+    (t/testing "the same keyframes give the same values every time"
+      (t/is (= (cta/values-at tl 250) (cta/values-at tl 250)))
+      (t/is (mth/close? 50.0 (x tl 250 sid) 0.001))
+      (t/is (mth/close? 150.0 (x tl 750 sid) 0.001)))
+    (t/testing "changed keyframes play as they are now"
+      (let [moved (cta/add-keyframe tl sid {:time 1000 :property :x :value 400})]
+        (t/is (mth/close? 200.0 (x moved 500 sid) 0.001))
+        (t/is (mth/close? 100.0 (x tl 500 sid) 0.001))))
+    (t/testing "two layers with the same keyframes both play them"
+      (let [shared (assoc-in tl [:tracks other] (assoc (cta/get-track tl sid) :shape-id other))
+            values (cta/values-at shared 500)]
+        (t/is (= (get values sid) (get values other)))
+        (t/is (mth/close? 0.5 (double (get-in values [other :opacity])) 0.001))))))
+
 (t/deftest timeline->opacity-only-opacity
   (let [sid (uuid/next)
         tl  (-> (mk-timeline)
