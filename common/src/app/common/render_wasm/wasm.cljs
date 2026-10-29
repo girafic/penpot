@@ -17,6 +17,11 @@
 (defonce internal-frame-type FRAME_TYPE_NONE)
 (defonce internal-module #js {})
 
+;; How many times a shape was made current in WASM (`use-shape`), which
+;; every write of shape properties does first: a writer that remembers it
+;; can tell whether another one wrote since.
+(defonce shape-uses 0)
+
 ;; Reference to the HTML canvas element.
 (defonce canvas nil)
 ;; Snapshot of the current canvas as an `ImageBitmap`, suitable for painting

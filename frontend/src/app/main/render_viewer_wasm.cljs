@@ -56,14 +56,15 @@
   does (see `dwm/set-wasm-modifiers`): its transforms as modifiers, the
   other attributes it animates (opacity, colours...) as shape
   properties, with the ones the frame before set (`prev`) back first. A
-  nil `modif-tree` shows the shapes as they are. The attribute changes
-  it made."
-  [objects prev modif-tree]
+  nil `modif-tree` shows the shapes as they are. With `shown?` WASM
+  shows `prev` still, and the shapes it leaves as they are need no
+  update. The attribute changes it made."
+  [objects prev shown? modif-tree]
   (let [changes (if (some? modif-tree)
                   (vec (wasm.modifiers/extract-property-changes modif-tree))
                   [])]
     (when (or (seq prev) (seq changes))
-      (let [[changed shape-changes] (wasm.modifiers/property-changes objects prev changes)]
+      (let [[changed shape-changes] (wasm.modifiers/property-changes objects prev changes shown?)]
         (doseq [[id properties] shape-changes]
           (wasm.shape/set-shape-properties! (get changed id) properties))))
     (wasm.api/clean-modifiers)
@@ -230,10 +231,14 @@
            render-key   (when (and (empty? include-ids) (empty? clear-fills-ids))
                           [object-id scale size vis-w vis-h dpr])
            do-render!   (fn [os-canvas prev-props]
-                          (let [props  (show-animation! page-objects prev-props (force modifiers))
+                          (let [;; no other writer used a shape since
+                                ;; the last frame (see `wasm/shape-uses`)
+                                shown? (= (:props-uses @viewer-snapshot) wasm/shape-uses)
+                                props  (show-animation! page-objects prev-props shown? (force modifiers))
                                 again? (and (some? render-key)
                                             (= render-key (:render-key @viewer-snapshot)))]
-                            (swap! viewer-snapshot assoc :props props :render-key render-key)
+                            (swap! viewer-snapshot assoc :props props :props-uses wasm/shape-uses
+                                   :render-key render-key)
                             (viewer-do-render! page-objects canvas os-canvas object-id
                                                vis-w vis-h scale size include-ids
                                                clear-fills-ids again? finish)))]

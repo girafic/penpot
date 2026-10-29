@@ -20,6 +20,7 @@
   ;; Use `wasm/live?` (not `initialized?`) so context-restore reload can
   ;; select shapes while `reloading?` still blocks external app callers.
   (when (wasm/live?)
+    (set! wasm/shape-uses (inc wasm/shape-uses))
     (let [buffer (uuid/get-u32 id)]
       (h/call wasm/internal-module "_use_shape"
               (aget buffer 0)

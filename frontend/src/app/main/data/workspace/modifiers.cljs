@@ -19,6 +19,7 @@
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.render-wasm.api.select :as wselect]
+   [app.common.render-wasm.wasm :as wasm]
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
    [app.common.types.modifiers :as ctm]
@@ -332,11 +333,21 @@
       (d/not-empty? position-data)
       (assoc :position-data position-data))))
 
+;; The property changes `set-wasm-props!` pushed last and the WASM shape
+;; uses after (see `wasm/shape-uses`): while no other writer used a shape
+;; since, WASM shows them.
+(def ^:private pushed-wasm-props (volatile! nil))
+
 (defn- set-wasm-props!
   [objects prev-wasm-props wasm-props]
-  (let [[objects-changed shape-changes]
-        (wasm.modifiers/property-changes objects prev-wasm-props wasm-props)]
-    (wasm.shape/process-shape-changes! objects-changed shape-changes)))
+  (let [[pushed uses] @pushed-wasm-props
+        shown? (and (some? pushed)
+                    (identical? pushed prev-wasm-props)
+                    (= uses wasm/shape-uses))
+        [objects-changed shape-changes]
+        (wasm.modifiers/property-changes objects prev-wasm-props wasm-props shown?)]
+    (wasm.shape/process-shape-changes! objects-changed shape-changes)
+    (vreset! pushed-wasm-props [wasm-props wasm/shape-uses])))
 
 (defonce ^{:doc "In motion mode, the modif-tree of the edit in progress (a drag)
   that shows over the animation (see `edit-preview-tree`), for the motion
