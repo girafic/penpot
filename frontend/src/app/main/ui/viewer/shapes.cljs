@@ -410,6 +410,17 @@
                  :fill-opacity (if show-interactions 0.2 0)
                  :pointer-events "all"}])])))
 
+(defn hotspot-shapes
+  "The shapes of the board `frame-id` of `objects` that get a hotspot
+  (see `frame-hotspots*`), those with interactions, in the order of
+  `hotspot-ids`; with `shape-filter` (of an id), those it is true of."
+  [objects frame-id shape-filter]
+  (->> (cond->> (hotspot-ids objects frame-id)
+         shape-filter (filter shape-filter))
+       (keep #(get objects %))
+       (filter (fn [s] (and (not (:hidden s))
+                            (seq (:interactions s)))))))
+
 (mf/defc frame-hotspots*
   "Renders interaction hotspots for a frame subtree (WASM viewer mode).
   `objects` must be the prepared (vbox-space) objects and `frame` the prepared
@@ -419,13 +430,7 @@
   true when it should be included (used to split fixed-scroll vs normal layers)."
   [{:keys [objects all-objects shape-filter frame]}]
   (let [all-objects (or all-objects objects)
-        frame-id    (:id frame)
-        ids         (cond->> (hotspot-ids objects frame-id)
-                      shape-filter (filter shape-filter))
-        hotspots    (->> ids
-                         (keep #(get objects %))
-                         (filter (fn [s] (and (not (:hidden s))
-                                              (seq (:interactions s))))))]
+        hotspots    (hotspot-shapes objects (:id frame) shape-filter)]
     [:g {}
      (for [shape hotspots]
        [:> hotspot* {:key (str (:id shape))

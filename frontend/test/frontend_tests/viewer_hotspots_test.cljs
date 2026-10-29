@@ -67,3 +67,15 @@
             "tilted: the corners it shows at"))
     (let [objs (update flat r assoc :rotate-y 150 :backface-hidden true)]
       (t/is (nil? (vs/hotspot-outline objs (get objs r))) "its back hidden: nothing to click"))))
+
+(t/deftest only-the-shapes-with-interactions-get-a-hotspot
+  ;; a board without them has no hotspot to follow the animation with
+  (let [[a b c] (map #(uuid/custom 9 %) [2 3 4])
+        click   [{:event-type :click :action-type :navigate :destination board-id}]
+        objs    (objects (shape board-id :frame uuid/zero 0 0 400 400 :frame-id uuid/zero :shapes [a b c])
+                         (shape a :rect board-id 0 0 100 100 :interactions click)
+                         (shape b :rect board-id 100 0 100 100)
+                         (shape c :rect board-id 200 0 100 100 :interactions click :hidden true))]
+    (t/is (= [a] (map :id (vs/hotspot-shapes objs board-id nil))))
+    (t/is (empty? (vs/hotspot-shapes objs board-id #(not= a %))) "the shape filter leaves it out")
+    (t/is (empty? (vs/hotspot-shapes (update objs a dissoc :interactions) board-id nil)))))

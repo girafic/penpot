@@ -34,11 +34,11 @@
 (defn- use-posed-modifiers
   "The modif-tree the ref `modifiers-ref` (of a delay, see
   `interactions/viewport*`) holds, followed at most every
-  `hotspot-interval` ms, the last one always."
-  [modifiers-ref]
-  (let [state* (mf/use-state #(some-> modifiers-ref deref force))]
-    (mf/with-effect [modifiers-ref]
-      (when (some? modifiers-ref)
+  `hotspot-interval` ms, the last one always; nil without `follow?`."
+  [modifiers-ref follow?]
+  (let [state* (mf/use-state #(when follow? (some-> modifiers-ref deref force)))]
+    (mf/with-effect [modifiers-ref follow?]
+      (when (and follow? (some? modifiers-ref))
         (let [key     (js/Symbol "hotspots")
               last-at (volatile! 0)
               timer   (volatile! nil)
@@ -56,15 +56,19 @@
           (fn []
             (remove-watch modifiers-ref key)
             (some-> @timer js/clearTimeout)))))
-    (deref state*)))
+    (when follow? (deref state*))))
 
 (mf/defc wasm-hotspots-svg*
   "The hotspots of the board, over its WASM picture, where its shapes
   show: as the animation of `modifiers-ref` poses them (see
-  `use-posed-modifiers`), tilted and in depth (see `shapes/hotspot*`)."
+  `use-posed-modifiers`), tilted and in depth (see `shapes/hotspot*`).
+  A board without hotspots does not follow the animation: posing all
+  its shapes takes a while."
   [{:keys [vbox size class prepared prepared-all prepared-frame shape-filter
            objects frame delta modifiers-ref]}]
-  (let [modifiers (use-posed-modifiers modifiers-ref)
+  (let [hotspots? (mf/with-memo [prepared prepared-frame shape-filter]
+                    (boolean (seq (shapes/hotspot-shapes prepared (:id prepared-frame) shape-filter))))
+        modifiers (use-posed-modifiers modifiers-ref hotspots?)
         prepared  (mf/with-memo [prepared modifiers objects frame size delta]
                     (if (and (seq modifiers) (some? objects))
                       (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
