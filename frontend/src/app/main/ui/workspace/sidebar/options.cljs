@@ -61,7 +61,6 @@
   (let [shape-type (dm/get-prop shape :type)
         shape-id   (dm/get-prop shape :id)
 
-        wasm-modifiers (mf/deref refs/workspace-wasm-modifiers)
         modifiers  (mf/deref refs/workspace-modifiers)
 
         motion-id  (mf/use-ctx ctx/motion-shape-id)
@@ -70,16 +69,24 @@
         transform  (mf/deref refs/current-transform)
         objects    (mf/deref refs/workspace-page-objects)
 
+        ;; In motion mode the design tab shows the shape as it is at the
+        ;; playhead, except while it is being transformed on the canvas.
+        at-playhead? (and (= motion-id shape-id) (some? timeline) (nil? transform))
+
+        ;; the WASM modifiers of this shape alone, and none while it shows
+        ;; at the playhead, so that the frames of a playing animation do not
+        ;; render the tab again
+        wasm-modifiers
+        (mf/deref (mf/with-memo [shape-id at-playhead?]
+                    (refs/workspace-wasm-modifiers-of (if at-playhead? #{} #{shape-id}))))
+
         shape
         (cond
-          ;; In motion mode the design tab shows the shape as it is at the
-          ;; playhead, except while it is being transformed on the canvas.
-          (and (= motion-id shape-id) (some? timeline) (nil? transform))
+          at-playhead?
           (dwa/shape-at timeline objects shape playhead)
 
           (features/active-feature? @st/state "render-wasm/v1")
-          (let [wasm-modifiers (into {} wasm-modifiers)]
-            (gsh/apply-transform shape (get wasm-modifiers shape-id)))
+          (gsh/apply-transform shape (get wasm-modifiers shape-id))
 
           :else
           (gsh/transform-shape shape (dm/get-in modifiers [shape-id :modifiers])))

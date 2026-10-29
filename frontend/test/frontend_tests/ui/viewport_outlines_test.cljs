@@ -58,3 +58,10 @@
     (let [moved (vpu/outline-objects objects {id (gmt/translate-matrix (gpt/point 10 0))} #{id} nil)]
       (t/is (= (+ 10 (get-in objects [id :selrect :x])) (get-in moved [id :selrect :x]))
             "moved as a drag in WASM moves them"))))
+
+(t/deftest the-outlines-take-the-boards-their-shapes-are-in
+  (let [[objects _ id] (morphing)
+        bid            (get-in objects [id :parent-id])]
+    (t/is (contains? (vpu/outline-ids objects #{id}) bid) "whose tilt tilts them")
+    (t/is (contains? (vpu/outline-ids objects #{id}) id))
+    (t/is (= #{} (vpu/outline-ids objects #{})))))

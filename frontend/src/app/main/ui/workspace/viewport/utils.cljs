@@ -149,14 +149,21 @@
      objects
      id-set)))
 
+(defn outline-ids
+  "The shapes of `ids`, those the outlines of the WASM viewport draw, and
+  the groups and boards they are in, whose tilts tilt them (see
+  `app.common.geom.tilt`)."
+  [objects ids]
+  (into (set ids) (mapcat #(cfh/get-parent-ids objects %)) ids))
+
 (defn outline-objects
   "`objects` with the shapes of `ids`, those the outlines of the WASM
   viewport draw, as it shows them: moved by `wasm-modifiers` while
   dragged and, in motion mode while paused, where the animation shows
   them (`shown`, a delay of `cltl/shown-shapes`, see `with-shown`), a
   path with the outline it has at the playhead. The groups and boards
-  they are in too, whose tilts tilt them (see `app.common.geom.tilt`)."
+  they are in too (see `outline-ids`)."
   [objects wasm-modifiers ids shown]
-  (let [ids (into (set ids) (mapcat #(cfh/get-parent-ids objects %)) ids)]
+  (let [ids (outline-ids objects ids)]
     (cond-> (apply-wasm-modifiers-to-ids objects wasm-modifiers ids)
       (some? shown) (with-shown shown ids))))

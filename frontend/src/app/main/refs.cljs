@@ -429,6 +429,14 @@
     (rx/sub! ms/wasm-modifiers #(reset! a %))
     a))
 
+(defn workspace-wasm-modifiers-of
+  "`workspace-wasm-modifiers` of the shapes of `ids` alone, `{id
+  transform}`, nil without any: a frame of an animation that moves other
+  shapes leaves it as it is, so what reads it does not render again.
+  Make it once for a set of ids (see `mf/with-memo`)."
+  [ids]
+  (l/derived #(not-empty (select-keys % ids)) workspace-wasm-modifiers =))
+
 (def ^:private workspace-modifiers-with-objects
   (l/derived
    (fn [state]

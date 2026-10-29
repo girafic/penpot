@@ -185,7 +185,11 @@
 
         drawing           (mf/deref refs/workspace-drawing)
         focus             (mf/deref refs/workspace-focus-selected)
-        wasm-modifiers    (mf/deref refs/workspace-wasm-modifiers)
+        ;; the WASM modifiers of the selected shapes alone (of the outlined
+        ;; ones below), so that a frame of an animation that moves other
+        ;; shapes does not render the viewport again
+        wasm-modifiers    (mf/deref (mf/with-memo [selected]
+                                      (refs/workspace-wasm-modifiers-of selected)))
         workspace-editor-state (mf/deref refs/workspace-editor-state)
         ;; the canvas in its small window over the maximized timeline
         ;; shows the animation alone, without what edits it
@@ -309,10 +313,14 @@
           [base-objects selected highlighted edition @hover-ids @hover @frame-hover]
           (outline-wasm-source-ids base-objects selected highlighted edition @hover-ids @hover @frame-hover))
 
+        outline-modifiers
+        (mf/deref (mf/with-memo [base-objects outline-wasm-ids]
+                    (refs/workspace-wasm-modifiers-of (utils/outline-ids base-objects outline-wasm-ids))))
+
         objects-for-outlines
         (mf/with-memo
-          [base-objects wasm-modifiers outline-wasm-ids shown]
-          (utils/outline-objects base-objects wasm-modifiers outline-wasm-ids shown))
+          [base-objects outline-modifiers outline-wasm-ids shown]
+          (utils/outline-objects base-objects outline-modifiers outline-wasm-ids shown))
 
         zoom              (d/check-num zoom 1)
 
@@ -1010,7 +1018,6 @@
            :wasm-guides? true
            :hover-frame guide-frame
            :disabled-guides disabled-guides?
-           :modifiers wasm-modifiers
            :on-guide-drag on-guide-drag
            :on-guide-hover on-guide-hover}])
 

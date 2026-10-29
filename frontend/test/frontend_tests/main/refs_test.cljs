@@ -6,6 +6,8 @@
 
 (ns frontend-tests.main.refs-test
   (:require
+   [app.common.geom.matrix :as gmt]
+   [app.common.geom.point :as gpt]
    [app.common.uuid :as uuid]
    [app.main.refs :as refs]
    [cljs.test :as t :include-macros true]))
@@ -28,3 +30,29 @@
   (t/is (false? (resolved-uri? (uuid/next))))
   (t/is (false? (resolved-uri? nil)))
   (t/is (false? (resolved-uri? 42))))
+
+(t/deftest the-wasm-modifiers-of-some-shapes-change-with-theirs-alone
+  (let [id      (uuid/next)
+        other   (uuid/next)
+        move    #(gmt/translate-matrix (gpt/point % 0))
+        before  @refs/workspace-wasm-modifiers
+        ref     (refs/workspace-wasm-modifiers-of #{id})
+        changes (atom 0)]
+    (add-watch ref ::test (fn [_ _ _ _] (swap! changes inc)))
+    (try
+      (reset! refs/workspace-wasm-modifiers {id (move 10) other (move 1)})
+      (t/is (= {id (move 10)} @ref))
+      (t/is (= 1 @changes))
+
+      (reset! refs/workspace-wasm-modifiers {id (move 10) other (move 2)})
+      (t/is (= 1 @changes) "another shape moving, as a frame of an animation moves it")
+
+      (reset! refs/workspace-wasm-modifiers {id (move 20) other (move 3)})
+      (t/is (= {id (move 20)} @ref))
+      (t/is (= 2 @changes))
+
+      (reset! refs/workspace-wasm-modifiers {other (move 4)})
+      (t/is (nil? @ref) "none once its shapes have none")
+      (finally
+        (remove-watch ref ::test)
+        (reset! refs/workspace-wasm-modifiers before)))))
