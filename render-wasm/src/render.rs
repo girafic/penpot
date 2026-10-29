@@ -2884,15 +2884,16 @@ impl RenderState {
     /// tiles.
     fn should_render_viewport_pass(&self, base_object: Option<&Uuid>, sync_render: bool) -> bool {
         let uncached = self.pending_tiles.visible_uncached.len();
-        let visible = uncached + self.pending_tiles.visible_cached.len();
-        let workspace =
-            !sync_render && base_object.is_none() && self.options.is_interactive_transform();
-        let viewer = sync_render && base_object.is_some() && self.viewer_animation_frame;
-        (workspace || viewer)
-            && !self.viewer_masked_pass()
-            && self.include_filter.is_none()
-            && visible >= 2
-            && uncached * 2 >= visible
+        viewport_pass_wanted(PassRequest {
+            sync_render,
+            base_object: base_object.is_some(),
+            interactive: self.options.is_interactive_transform(),
+            viewer_frame: self.viewer_animation_frame,
+            masked: self.viewer_masked_pass(),
+            filtered: self.include_filter.is_some(),
+            visible: uncached + self.pending_tiles.visible_cached.len(),
+            uncached,
+        })
     }
 
     /// Render the visible area in one pass, every shape once (the shapes of
@@ -5516,6 +5517,38 @@ fn scene_shade_filter(element: &Shape) -> Option<skia::ColorFilter> {
     })
 }
 
+/// What decides whether a frame renders the visible area in one pass (see
+/// `RenderState::should_render_viewport_pass`).
+#[derive(Clone, Copy, Debug, Default)]
+struct PassRequest {
+    sync_render: bool,
+    /// Renders one board, as the view mode does.
+    base_object: bool,
+    /// An interactive transform runs: a drag, the animation preview.
+    interactive: bool,
+    /// A frame of an animation the view mode plays.
+    viewer_frame: bool,
+    /// A masked pass of the view mode.
+    masked: bool,
+    /// Only some shapes render.
+    filtered: bool,
+    visible: usize,
+    uncached: usize,
+}
+
+/// The workspace during an interactive transform (whatever the quality it
+/// renders in), or the view mode playing an animation, when at least half
+/// of the visible tiles are to render again.
+fn viewport_pass_wanted(request: PassRequest) -> bool {
+    let workspace = !request.sync_render && !request.base_object && request.interactive;
+    let viewer = request.sync_render && request.base_object && request.viewer_frame;
+    (workspace || viewer)
+        && !request.masked
+        && !request.filtered
+        && request.visible >= 2
+        && request.uncached * 2 >= request.visible
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6032,5 +6065,87 @@ mod tests {
             .expect("a clipping shape starts a stack");
 
         assert_eq!(stack[0].0, Rect::from_ltrb(2.0, 2.0, 98.0, 98.0));
+    }
+
+    #[test]
+    fn the_one_pass_render_takes_frames_that_change_most_tiles() {
+        let playing = PassRequest {
+            interactive: true,
+            visible: 12,
+            uncached: 9,
+            ..Default::default()
+        };
+        let viewer = PassRequest {
+            sync_render: true,
+            base_object: true,
+            viewer_frame: true,
+            visible: 12,
+            uncached: 12,
+            ..Default::default()
+        };
+        // the preview plays in one pass in full quality as in fast mode: the
+        // quality takes no part
+        assert!(viewport_pass_wanted(playing));
+        assert!(viewport_pass_wanted(viewer));
+        assert!(viewport_pass_wanted(PassRequest {
+            uncached: 6,
+            ..playing
+        }));
+
+        let tiles = [
+            (
+                "a tile or two of a drag",
+                PassRequest {
+                    uncached: 5,
+                    ..playing
+                },
+            ),
+            (
+                "a single visible tile",
+                PassRequest {
+                    visible: 1,
+                    uncached: 1,
+                    ..playing
+                },
+            ),
+            (
+                "a settled render",
+                PassRequest {
+                    interactive: false,
+                    ..playing
+                },
+            ),
+            (
+                "a thumbnail or an export",
+                PassRequest {
+                    sync_render: true,
+                    ..playing
+                },
+            ),
+            (
+                "a board without its animation playing",
+                PassRequest {
+                    viewer_frame: false,
+                    ..viewer
+                },
+            ),
+            (
+                "a masked pass of the view mode",
+                PassRequest {
+                    masked: true,
+                    ..viewer
+                },
+            ),
+            (
+                "some shapes only",
+                PassRequest {
+                    filtered: true,
+                    ..playing
+                },
+            ),
+        ];
+        for (what, request) in tiles {
+            assert!(!viewport_pass_wanted(request), "{what}");
+        }
     }
 }
