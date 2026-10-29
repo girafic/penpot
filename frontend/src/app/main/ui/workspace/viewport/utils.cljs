@@ -158,12 +158,11 @@
 
 (defn outline-objects
   "`objects` with the shapes of `ids`, those the outlines of the WASM
-  viewport draw, as it shows them: moved by `wasm-modifiers` while
+  viewport draw with the groups and boards they are in (see
+  `outline-ids`), as it shows them: moved by `wasm-modifiers` while
   dragged and, in motion mode while paused, where the animation shows
   them (`shown`, a delay of `cltl/shown-shapes`, see `with-shown`), a
-  path with the outline it has at the playhead. The groups and boards
-  they are in too (see `outline-ids`)."
+  path with the outline it has at the playhead."
   [objects wasm-modifiers ids shown]
-  (let [ids (outline-ids objects ids)]
-    (cond-> (apply-wasm-modifiers-to-ids objects wasm-modifiers ids)
-      (some? shown) (with-shown shown ids))))
+  (cond-> (apply-wasm-modifiers-to-ids objects wasm-modifiers ids)
+    (some? shown) (with-shown shown ids)))

@@ -42,7 +42,7 @@
 (t/deftest a-morphing-path-is-outlined-as-it-is-shown
   (let [[objects timelines id] (morphing)
         shown    (delay (cltl/shown-shapes timelines objects 1000))
-        outlined (vpu/outline-objects objects {} #{id} shown)]
+        outlined (vpu/outline-objects objects {} (vpu/outline-ids objects #{id}) shown)]
     (t/is (= (str (:content (get @shown id))) (str (get-in outlined [id :content])))
           "the outline it has at the playhead")
     (t/is (not= (str (get-in objects [id :content])) (str (get-in outlined [id :content])))
@@ -54,8 +54,8 @@
         lazy   (delay (reset! forced true) {})]
     (t/is (= objects (vpu/outline-objects objects {} #{} lazy)))
     (t/is (false? @forced) "nothing worked out without shapes to outline")
-    (t/is (= objects (vpu/outline-objects objects {} #{id} nil)) "outside motion mode, as they are")
-    (let [moved (vpu/outline-objects objects {id (gmt/translate-matrix (gpt/point 10 0))} #{id} nil)]
+    (t/is (= objects (vpu/outline-objects objects {} (vpu/outline-ids objects #{id}) nil)) "outside motion mode, as they are")
+    (let [moved (vpu/outline-objects objects {id (gmt/translate-matrix (gpt/point 10 0))} (vpu/outline-ids objects #{id}) nil)]
       (t/is (= (+ 10 (get-in objects [id :selrect :x])) (get-in moved [id :selrect :x]))
             "moved as a drag in WASM moves them"))))
 

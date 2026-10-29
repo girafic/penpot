@@ -313,14 +313,19 @@
           [base-objects selected highlighted edition @hover-ids @hover @frame-hover]
           (outline-wasm-source-ids base-objects selected highlighted edition @hover-ids @hover @frame-hover))
 
+        ;; with the groups and boards they are in, whose tilts tilt them
+        outline-ids
+        (mf/with-memo [base-objects outline-wasm-ids]
+          (utils/outline-ids base-objects outline-wasm-ids))
+
         outline-modifiers
-        (mf/deref (mf/with-memo [base-objects outline-wasm-ids]
-                    (refs/workspace-wasm-modifiers-of (utils/outline-ids base-objects outline-wasm-ids))))
+        (mf/deref (mf/with-memo [outline-ids]
+                    (refs/workspace-wasm-modifiers-of outline-ids)))
 
         objects-for-outlines
         (mf/with-memo
-          [base-objects outline-modifiers outline-wasm-ids shown]
-          (utils/outline-objects base-objects outline-modifiers outline-wasm-ids shown))
+          [base-objects outline-modifiers outline-ids shown]
+          (utils/outline-objects base-objects outline-modifiers outline-ids shown))
 
         zoom              (d/check-num zoom 1)
 
