@@ -219,6 +219,19 @@ pub fn tile_screen_xy(tile: Tile, tile_size: f32, offset: skia::Point) -> (f32, 
     )
 }
 
+/// The document `area` (shown at `scale`) where the tiles put it: its
+/// offset rounded to whole pixels, as `tile_screen_xy` places them, so that
+/// what renders the visible area in one pass does not sit a fraction of a
+/// pixel off them.
+pub fn pixel_aligned_area(area: skia::Rect, scale: f32) -> skia::Rect {
+    skia::Rect::from_xywh(
+        -(-area.left * scale).round() / scale,
+        -(-area.top * scale).round() / scale,
+        area.width(),
+        area.height(),
+    )
+}
+
 /// Screen-space top-left of `doc_rect`: `doc * scale + round(pan * scale)`.
 pub fn doc_rect_screen_xy(doc_rect: skia::Rect, pan: skia::Point, scale: f32) -> (f32, f32) {
     (
@@ -527,6 +540,35 @@ mod tests {
         assert_eq!(y2 - y0, TILE_SIZE);
         assert_eq!(y1, y0);
         assert_eq!(x2, x0);
+    }
+
+    #[test]
+    fn a_pixel_aligned_area_shows_a_point_where_the_tiles_do() {
+        for (left, top, scale) in [
+            (10.3, -7.6, 2.0),
+            (103.25, 40.5, 1.0),
+            (-55.7, 12.15, 2.77),
+            (0.0, 0.0, 1.39),
+        ] {
+            let area = skia::Rect::from_xywh(left, top, 800.0, 600.0);
+            let aligned = pixel_aligned_area(area, scale);
+            let (x0, y0) = tile_screen_xy(
+                Tile(0, 0),
+                TILE_SIZE,
+                skia::Point::new(left * scale, top * scale),
+            );
+            for (x, y) in [(left + 3.3, top + 5.1), (left + 400.0, top + 299.9)] {
+                // a point drawn into the tiles, and drawn in one pass from the aligned area
+                let tiled = (x * scale + x0, y * scale + y0);
+                let pass = ((x - aligned.left) * scale, (y - aligned.top) * scale);
+                assert!(
+                    (tiled.0 - pass.0).abs() < 1e-2 && (tiled.1 - pass.1).abs() < 1e-2,
+                    "{tiled:?} vs {pass:?} at {left}, {top}, {scale}"
+                );
+            }
+            assert_eq!(aligned.width(), area.width());
+            assert_eq!(aligned.height(), area.height());
+        }
     }
 
     #[test]

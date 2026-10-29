@@ -2874,20 +2874,19 @@ impl RenderState {
     }
 
     /// Whether this frame renders the visible area in one pass instead of by
-    /// tiles (see `render_viewport_pass`): during an interactive transform in
-    /// fast mode (the animation preview playing, a drag), or a frame of an
-    /// animation the view mode plays, that left at least half of the visible
-    /// tiles to render again. Tiles draw each shape once per tile it
-    /// touches, so when most of them change, as when a whole board animates,
-    /// one pass does the same work only once; a drag that touches a tile or
-    /// two keeps the tiles.
+    /// tiles (see `render_viewport_pass`): during an interactive transform
+    /// (the animation preview playing, fast or in full quality, a drag), or a
+    /// frame of an animation the view mode plays, that left at least half of
+    /// the visible tiles to render again. Tiles draw each shape once per tile
+    /// it touches, and blur and shadows over the margins of each, so when
+    /// most of them change, as when a whole board animates, one pass does
+    /// the same work only once; a drag that touches a tile or two keeps the
+    /// tiles.
     fn should_render_viewport_pass(&self, base_object: Option<&Uuid>, sync_render: bool) -> bool {
         let uncached = self.pending_tiles.visible_uncached.len();
         let visible = uncached + self.pending_tiles.visible_cached.len();
-        let workspace = !sync_render
-            && base_object.is_none()
-            && self.options.is_interactive_transform()
-            && self.options.is_fast_mode();
+        let workspace =
+            !sync_render && base_object.is_none() && self.options.is_interactive_transform();
         let viewer = sync_render && base_object.is_some() && self.viewer_animation_frame;
         (workspace || viewer)
             && !self.viewer_masked_pass()
@@ -2909,7 +2908,8 @@ impl RenderState {
         timestamp: i32,
     ) -> Result<Option<FrameType>> {
         let scale = self.get_scale();
-        let area = self.viewbox.area;
+        // where the tiles it stands in for put the visible area
+        let area = tiles::pixel_aligned_area(self.viewbox.area, scale);
         let width = (area.width() * scale).ceil() as i32;
         let height = (area.height() * scale).ceil() as i32;
         let root_ids = if let Some(id) = base_object {
