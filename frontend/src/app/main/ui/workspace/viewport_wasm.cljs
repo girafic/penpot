@@ -188,8 +188,7 @@
         ;; the WASM modifiers of the selected shapes alone (of the outlined
         ;; ones below), so that a frame of an animation that moves other
         ;; shapes does not render the viewport again
-        wasm-modifiers    (mf/deref (mf/with-memo [selected]
-                                      (refs/workspace-wasm-modifiers-of selected)))
+        wasm-modifiers    (ui-hooks/use-wasm-modifiers-of selected)
         workspace-editor-state (mf/deref refs/workspace-editor-state)
         ;; the canvas in its small window over the maximized timeline
         ;; shows the animation alone, without what edits it
@@ -319,8 +318,7 @@
           (utils/outline-ids base-objects outline-wasm-ids))
 
         outline-modifiers
-        (mf/deref (mf/with-memo [outline-ids]
-                    (refs/workspace-wasm-modifiers-of outline-ids)))
+        (ui-hooks/use-wasm-modifiers-of outline-ids)
 
         objects-for-outlines
         (mf/with-memo

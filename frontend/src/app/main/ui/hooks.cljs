@@ -301,6 +301,17 @@
    (mf/with-memo [focus objects]
      (cpf/focus-objects objects focus))))
 
+(defn use-wasm-modifiers-of
+  "The WASM modifiers of the shapes of `ids` (see
+  `refs/workspace-wasm-modifiers-of`): the component renders again only
+  when theirs change. Read anew on every render, as on the render that
+  makes the ref for new `ids` `mf/deref` still gives the value of the
+  ref before."
+  [ids]
+  (let [ref (mf/with-memo [ids] (refs/workspace-wasm-modifiers-of ids))]
+    (mf/deref ref)
+    @ref))
+
 ;; FIXME: replace with rumext
 (defn use-debounce
   [ms value]

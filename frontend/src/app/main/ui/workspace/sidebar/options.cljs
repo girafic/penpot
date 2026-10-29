@@ -23,6 +23,7 @@
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
+   [app.main.ui.hooks :as h]
    [app.main.ui.inspect.right-sidebar :as hrs]
    [app.main.ui.workspace.sidebar.debug-shape-info :refer [debug-shape-info*]]
    [app.main.ui.workspace.sidebar.options.drawing :as drawing]
@@ -77,8 +78,8 @@
         ;; at the playhead, so that the frames of a playing animation do not
         ;; render the tab again
         wasm-modifiers
-        (mf/deref (mf/with-memo [shape-id at-playhead?]
-                    (refs/workspace-wasm-modifiers-of (if at-playhead? #{} #{shape-id}))))
+        (h/use-wasm-modifiers-of (mf/with-memo [shape-id at-playhead?]
+                                   (if at-playhead? #{} #{shape-id})))
 
         shape
         (cond

@@ -56,3 +56,17 @@
       (finally
         (remove-watch ref ::test)
         (reset! refs/workspace-wasm-modifiers before)))))
+
+(t/deftest the-wasm-modifiers-of-new-shapes-read-at-once
+  ;; `use-wasm-modifiers-of` reads the ref it makes for new ids on the same
+  ;; render, before anything watches it
+  (let [id     (uuid/next)
+        other  (uuid/next)
+        move   (gmt/translate-matrix (gpt/point 10 0))
+        before @refs/workspace-wasm-modifiers]
+    (try
+      (reset! refs/workspace-wasm-modifiers {id move other move})
+      (t/is (= {id move} @(refs/workspace-wasm-modifiers-of #{id})))
+      (t/is (nil? @(refs/workspace-wasm-modifiers-of #{})) "none for no shapes")
+      (finally
+        (reset! refs/workspace-wasm-modifiers before)))))
