@@ -3509,6 +3509,14 @@
 
 (declare ^:private shape-modifiers*)
 
+;; The modifiers `shape->modifiers` gave a shape last and what it gave
+;; them of, by the shape, gone with it: an animation holds most of its
+;; layers still most of the time, and every frame of the playback reads
+;; the same shapes.
+#?(:cljs
+   (defonce ^:private modifiers-cache
+     (js/WeakMap.)))
+
 (defn shape->modifiers
   "Build a single modifiers record for `shape` from the interpolated
   `values` (positions relative to `origin`), turning and scaling around
@@ -3518,11 +3526,25 @@
   pipeline in every renderer (SVG via `transform-shape`, WASM via
   `set-shape-opacity`) and in export. The outline of a path, a keyframe
   of the row of `track` (see `ctao/outline->content`), is its content where
-  it rests, which the transform moves, turns and scales then."
+  it rests, which the transform moves, turns and scales then. In the
+  browser the same as last time while the shape and what it is given are."
   ([shape values origin pivot]
    (shape->modifiers shape values origin pivot nil))
   ([shape values origin pivot track]
-   (shape-modifiers* shape values origin pivot track)))
+   #?(:cljs
+      (let [cached (when (some? shape) (.get modifiers-cache shape))]
+        (if (and (some? cached)
+                 (identical? track (aget cached 3))
+                 (= values (aget cached 0))
+                 (= origin (aget cached 1))
+                 (= pivot (aget cached 2)))
+          (aget cached 4)
+          (let [modifiers (shape-modifiers* shape values origin pivot track)]
+            (when (some? shape)
+              (.set modifiers-cache shape #js [values origin pivot track modifiers]))
+            modifiers)))
+      :clj
+      (shape-modifiers* shape values origin pivot track))))
 
 (defn- shape-modifiers*
   [shape values origin pivot track]

@@ -160,6 +160,24 @@
     (t/is (contains? op sid))
     (t/is (mth/close? 0.5 (double (get op sid)) 0.001))))
 
+(t/deftest the-modifiers-of-a-shape-follow-its-values
+  (let [shape  (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        origin (gpt/point 0 0)
+        mods   #(cta/shape->modifiers shape %1 origin nil %2)
+        held   (mods {:x 10 :opacity 0.5} nil)]
+    (t/testing "the same values give the same modifiers, a held layer each frame"
+      (t/is (= held (mods {:x 10 :opacity 0.5} nil)))
+      #?(:cljs (t/is (identical? held (mods {:x 10 :opacity 0.5} nil)) "not made again")))
+    (t/testing "other values give the modifiers of those"
+      (let [moved (mods {:x 20 :opacity 0.5} nil)]
+        (t/is (not= held moved))
+        (t/is (mth/close? 20.0 (double (:x (gpt/transform (gpt/point 0 0) (ctm/modifiers->transform moved))))))))
+    (t/testing "another shape, origin or track gives its own"
+      (let [other (assoc shape :opacity 0.9)]
+        (t/is (= held (cta/shape->modifiers other {:x 10 :opacity 0.5} origin nil nil)))
+        (t/is (not= held (cta/shape->modifiers shape {:x 10 :opacity 0.5} (gpt/point 5 0) nil nil)))
+        (t/is (= held (mods {:x 10 :opacity 0.5} {:shape-id (:id shape)})))))))
+
 (t/deftest timeline->modif-tree-moves-shape
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
         sid   (:id shape)
