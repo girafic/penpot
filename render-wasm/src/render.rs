@@ -4402,6 +4402,13 @@ impl RenderState {
                     continue;
                 }
 
+                // Nor does a layer at opacity 0 draw anything (a group of
+                // them blurred each of its layers to show none of them),
+                // but a mask, which hides its group.
+                if mask.is_none() && shows_nothing(&transformed_element) {
+                    continue;
+                }
+
                 // A tilted layer that shows its back while it hides it, or
                 // that reaches the viewer, draws nothing of what it holds.
                 if let Some(projection) = projection.as_ref() {
@@ -5509,6 +5516,16 @@ fn blurred_surfaces(shape: &Shape, skip_strokes: bool, skip_effects: bool) -> (b
     )
 }
 
+/// Whether a layer shows nothing, nor anything it holds: it is at opacity
+/// 0 and has nothing that ignores its opacity, a background blur or the
+/// shadows a clipped, blurred board draws before its layer opens.
+fn shows_nothing(shape: &Shape) -> bool {
+    shape.opacity() <= 0.0
+        && shape.visible_background_blur().is_none()
+        && !(shape.frame_clip_layer_blur().is_some()
+            && shape.drop_shadows_visible().next().is_some())
+}
+
 /// Paint for the layer of a shape that needs one (see `Shape::needs_layer`):
 /// its opacity and blend mode, but for a masked group, whose outer layer
 /// applies them (see `masked_group_layer_paint`).
@@ -5669,6 +5686,44 @@ mod tests {
             blurred_surfaces(&shape, false, true),
             (true, false),
             "fast mode draws no inner shadows"
+        );
+    }
+
+    #[test]
+    fn a_layer_at_opacity_0_shows_nothing_but_what_ignores_its_opacity() {
+        use crate::shapes::{Blur, BlurType};
+        let mut shape = Shape::new(Uuid::new_v4());
+        shape.set_selrect(0.0, 0.0, 100.0, 100.0);
+        assert!(!shows_nothing(&shape), "opaque");
+        shape.set_opacity(0.01);
+        assert!(!shows_nothing(&shape), "almost transparent");
+        shape.set_opacity(0.0);
+        assert!(shows_nothing(&shape), "transparent");
+
+        shape.set_background_blur(Some(Blur::new(BlurType::BackgroundBlur, false, 8.0)));
+        assert!(!shows_nothing(&shape), "its background blur");
+        shape.set_background_blur(Some(Blur::new(BlurType::BackgroundBlur, true, 8.0)));
+        assert!(shows_nothing(&shape), "a hidden background blur");
+
+        shape.set_shape_type(Type::Frame(Frame::default()));
+        shape.set_clip(true);
+        shape.set_blur(Some(Blur::new(BlurType::LayerBlur, false, 4.0)));
+        shape.add_shadow(Shadow::new(
+            skia::Color::BLACK,
+            4.0,
+            0.0,
+            (2.0, 2.0),
+            ShadowStyle::Drop,
+            false,
+        ));
+        assert!(
+            !shows_nothing(&shape),
+            "the shadows of a clipped, blurred board"
+        );
+        shape.set_clip(false);
+        assert!(
+            shows_nothing(&shape),
+            "the shadows of a board that does not clip"
         );
     }
 
