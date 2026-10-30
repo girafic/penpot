@@ -2348,15 +2348,24 @@ impl RenderState {
                 // Wrap ALL fill/stroke/shadow rendering so a single GPU blur pass calls
                 let blur_filter_for_layers: Option<skia::ImageFilter> = blur_sigma_for_layers
                     .and_then(|sigma| skia::image_filters::blur((sigma, sigma), None, None, None));
+                // Skip stroke rendering for clipped frames - they are drawn in render_shape_exit
+                // over the children. Drawing twice would cause incorrect opacity blending.
+                let skip_strokes = matches!(shape.shape_type, Type::Frame(_)) && shape.clip_content;
+                let (blur_strokes, blur_inner_shadows) =
+                    blurred_surfaces(&shape, skip_strokes, skip_effects);
                 let open_blur_layers = |surfaces: &mut Surfaces, filter: &skia::ImageFilter| {
                     let mut layer_paint = skia::Paint::default();
                     layer_paint.set_image_filter(filter.clone());
                     let layer_rec = skia::canvas::SaveLayerRec::default().paint(&layer_paint);
                     surfaces.canvas(fills_surface_id).save_layer(&layer_rec);
-                    surfaces.canvas(strokes_surface_id).save_layer(&layer_rec);
-                    surfaces
-                        .canvas(innershadows_surface_id)
-                        .save_layer(&layer_rec);
+                    if blur_strokes {
+                        surfaces.canvas(strokes_surface_id).save_layer(&layer_rec);
+                    }
+                    if blur_inner_shadows {
+                        surfaces
+                            .canvas(innershadows_surface_id)
+                            .save_layer(&layer_rec);
+                    }
                 };
                 open_shape_draw(
                     &matrix,
@@ -2394,9 +2403,6 @@ impl RenderState {
                     )?;
                 }
 
-                // Skip stroke rendering for clipped frames - they are drawn in render_shape_exit
-                // over the children. Drawing twice would cause incorrect opacity blending.
-                let skip_strokes = matches!(shape.shape_type, Type::Frame(_)) && shape.clip_content;
                 if !skip_strokes {
                     // Pass strokes in natural order; stroke merging handles top-most ordering internally.
                     let visible_strokes: Vec<&Stroke> = shape.visible_strokes().collect();
@@ -2431,8 +2437,12 @@ impl RenderState {
                 }
 
                 if blur_filter_for_layers.is_some() {
-                    self.surfaces.canvas(innershadows_surface_id).restore();
-                    self.surfaces.canvas(strokes_surface_id).restore();
+                    if blur_inner_shadows {
+                        self.surfaces.canvas(innershadows_surface_id).restore();
+                    }
+                    if blur_strokes {
+                        self.surfaces.canvas(strokes_surface_id).restore();
+                    }
                     self.surfaces.canvas(fills_surface_id).restore();
                 }
             }
@@ -5487,6 +5497,18 @@ fn open_shape_draw(
     }
 }
 
+/// Whether a shape blurred by a layer draws on its strokes surface and on
+/// its inner shadows surface, besides its fills (`skip_strokes`: a clipped
+/// board draws its strokes over its children instead). Only the surfaces
+/// it draws on get a blur layer: a layer blurs all of its area on restore,
+/// drawn into or not.
+fn blurred_surfaces(shape: &Shape, skip_strokes: bool, skip_effects: bool) -> (bool, bool) {
+    (
+        !skip_strokes && shape.has_visible_strokes(),
+        !skip_effects && shape.inner_shadows_visible().next().is_some(),
+    )
+}
+
 /// Paint for the layer of a shape that needs one (see `Shape::needs_layer`):
 /// its opacity and blend mode, but for a masked group, whose outer layer
 /// applies them (see `masked_group_layer_paint`).
@@ -5599,6 +5621,55 @@ mod tests {
         for ry in [30.0, 60.0, 80.0] {
             assert_eq!(tilted_blur_pixel(ry).r(), 255, "turned {ry}°, blurred");
         }
+    }
+
+    #[test]
+    fn a_blurred_shape_blurs_only_the_surfaces_it_draws_on() {
+        let mut shape = Shape::new(Uuid::new_v4());
+        shape.set_selrect(0.0, 0.0, 100.0, 100.0);
+        assert_eq!(
+            blurred_surfaces(&shape, false, false),
+            (false, false),
+            "its fills"
+        );
+
+        shape.add_stroke(Stroke::new_center_stroke(
+            4.0,
+            crate::shapes::StrokeStyle::Solid,
+            None,
+            None,
+            None,
+            None,
+        ));
+        assert_eq!(
+            blurred_surfaces(&shape, false, false),
+            (true, false),
+            "a stroke"
+        );
+        assert_eq!(
+            blurred_surfaces(&shape, true, false),
+            (false, false),
+            "a clipped board draws its strokes later"
+        );
+
+        shape.add_shadow(Shadow::new(
+            skia::Color::BLACK,
+            4.0,
+            0.0,
+            (2.0, 2.0),
+            ShadowStyle::Inner,
+            false,
+        ));
+        assert_eq!(
+            blurred_surfaces(&shape, false, false),
+            (true, true),
+            "an inner shadow"
+        );
+        assert_eq!(
+            blurred_surfaces(&shape, false, true),
+            (true, false),
+            "fast mode draws no inner shadows"
+        );
     }
 
     #[test]
