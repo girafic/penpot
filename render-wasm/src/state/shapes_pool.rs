@@ -219,8 +219,15 @@ impl ShapesPoolImpl {
         self.uuid_to_idx.contains_key(id)
     }
 
+    /// The shape `id` to change. The modified copy `get` serves of it is
+    /// made from it, so it goes: the next `get` makes it from the change.
+    /// (The view mode clears the fills of a board for its layer fixed when
+    /// scrolling while an animation sets modifiers.)
     pub fn get_mut(&mut self, id: &Uuid) -> Option<&mut Shape> {
         let idx = *self.uuid_to_idx.get(id)?;
+        if let Some(cell) = self.modified_shape_cache.get_mut(&idx) {
+            *cell = OnceCell::new();
+        }
         Some(&mut self.shapes[idx])
     }
 
@@ -691,5 +698,46 @@ impl Clone for ShapesPoolImpl {
             scale_content: self.scale_content.clone(),
             has_tilts: self.has_tilts,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shapes::{Fill, Frame, Rect, SolidColor};
+
+    #[test]
+    fn a_change_shows_through_the_modified_copy() {
+        let mut pool = ShapesPool::new();
+        pool.initialize(2);
+        let [board_id, rect_id] = [(); 2].map(|_| Uuid::new_v4());
+        {
+            let board = pool.add_shape(board_id);
+            board.set_shape_type(Type::Frame(Frame::default()));
+            board.set_selrect(0.0, 0.0, 400.0, 800.0);
+            board.add_fill(Fill::Solid(SolidColor(skia::Color::WHITE)));
+            board.children = vec![rect_id];
+        }
+        {
+            let rect = pool.add_shape(rect_id);
+            rect.set_shape_type(Type::Rect(Rect::default()));
+            rect.set_selrect(20.0, 20.0, 120.0, 120.0);
+            rect.set_parent(board_id);
+        }
+        // an animation moves the rect: the board is served as a copy
+        pool.set_modifiers(HashMap::from([(rect_id, Matrix::translate((10.0, 0.0)))]));
+        assert_eq!(pool.get(&board_id).expect("board").fills().count(), 1);
+
+        pool.get_mut(&board_id).expect("board").clear_fills();
+        assert_eq!(
+            pool.get(&board_id).expect("board").fills().count(),
+            0,
+            "the copy made before the change goes"
+        );
+        assert_eq!(
+            pool.get(&rect_id).expect("rect").selrect().left(),
+            30.0,
+            "the modifiers stay"
+        );
     }
 }
