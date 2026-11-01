@@ -1,0 +1,74 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_sizes.scss" as *;
+@use "ds/_borders.scss" as *;
+
+// As the menu of the interactions beside it in the header.
+.device-menu {
+  position: relative;
+}
+
+.trigger {
+  @include deprecated.body-small-typography;
+
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+  height: deprecated.$s-32;
+  white-space: nowrap;
+  border: none;
+  border-radius: deprecated.$br-8;
+  background-color: var(--input-background-color);
+  padding: deprecated.$s-8;
+  cursor: pointer;
+}
+
+.title {
+  color: var(--input-foreground-color-active);
+}
+
+.value {
+  color: var(--input-foreground-color);
+}
+
+.arrow {
+  @include deprecated.flex-center;
+
+  height: 100%;
+  width: deprecated.$s-16;
+
+  svg {
+    @extend %button-icon-small;
+
+    stroke: var(--icon-foreground);
+    transform: rotate(90deg);
+  }
+}
+
+.menu {
+  position: absolute;
+  inset-block-start: calc(100% + var(--sp-xs));
+  inset-inline-end: 0;
+  z-index: deprecated.$z-index-4;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: $sz-224;
+  margin: 0;
+  padding: var(--sp-xs);
+  border: $b-1 solid var(--color-background-quaternary);
+  border-radius: $br-8;
+  background-color: var(--color-background-tertiary);
+  box-shadow: var(--el-shadow-dark);
+  list-style: none;
+}
+
+.separator {
+  block-size: $b-1;
+  margin-block: var(--sp-xs);
+  background-color: var(--color-background-quaternary);
+}

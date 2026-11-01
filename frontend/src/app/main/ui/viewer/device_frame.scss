@@ -1,0 +1,142 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+// The colors of a device, dark or light: the glass round a phone's
+// screen and the cutouts stay black in both. Its box comes inline (see
+// `dvd/layout`), in the stage of the view mode.
+.drawing {
+  --device-band: #2c2c2e;
+  --device-edge: #4b4b4f;
+  --device-face: #050505;
+  --device-button: #3a3a3c;
+  --device-base: #2e2e31;
+  --device-base-dark: #1b1b1d;
+  --device-chin: #2c2c2e;
+  --device-front: #050505;
+  --device-stand: #3a3a3c;
+  --device-ring: #48484a;
+  --device-lens: #1b1b1e;
+  --device-toolbar: #2c2c2e;
+  --device-rule: #000;
+  --device-field: #3a3a3c;
+  --device-title: #e5e5e7;
+
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.drawing[data-finish="light"] {
+  --device-band: #d3d4d7;
+  --device-edge: #a9aaad;
+  --device-face: #f3f3f5;
+  --device-button: #c2c3c6;
+  --device-base: #d9dadd;
+  --device-base-dark: #b5b6b9;
+  --device-chin: #d6d7da;
+  --device-front: #f5f5f7;
+  --device-stand: #cfd0d3;
+  --device-ring: #c3c4c7;
+  --device-lens: #2a2a2d;
+  --device-toolbar: #ececee;
+  --device-rule: #d1d1d5;
+  --device-field: #dcdce0;
+  --device-title: #3a3a3c;
+}
+
+.band {
+  fill: var(--device-band);
+  stroke: var(--device-edge);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.glass,
+.cutout {
+  fill: #000;
+}
+
+.face {
+  fill: var(--device-face);
+}
+
+.button {
+  fill: var(--device-button);
+}
+
+.base {
+  fill: var(--device-base);
+  stroke: var(--device-edge);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.base-dark {
+  fill: var(--device-base-dark);
+}
+
+.chin {
+  fill: var(--device-chin);
+  stroke: var(--device-edge);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.front {
+  fill: var(--device-front);
+}
+
+.stand {
+  fill: var(--device-stand);
+}
+
+.ring {
+  fill: none;
+  stroke: var(--device-ring);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.lens {
+  fill: var(--device-lens);
+}
+
+// the fold of an open iPhone Duo, over its screen: seen on dark and light
+.crease {
+  fill: rgb(128 128 128 / 0.18);
+}
+
+.toolbar {
+  fill: var(--device-toolbar);
+  stroke: var(--device-edge);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.rule {
+  fill: var(--device-rule);
+}
+
+.close {
+  fill: #ff5f57;
+}
+
+.minimize {
+  fill: #febc2e;
+}
+
+.zoom {
+  fill: #28c840;
+}
+
+.field {
+  fill: var(--device-field);
+}
+
+.title {
+  fill: var(--device-title);
+  font-family: "worksans", "vazirmatn", sans-serif;
+}

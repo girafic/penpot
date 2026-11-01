@@ -9,6 +9,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
    [app.main.router :as rt]
+   [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [cljs.test :as t]
    [potok.v2.core :as ptk]))
@@ -151,3 +152,96 @@
           ;; ones that can restart the zoom cycle.
           navigations (filter #(= :app.main.router/navigate (ptk/type %)) events)]
       (t/is (empty? navigations)))))
+
+
+;; --- Devices
+
+(defn- device-state
+  "A view mode showing a board `bw` × `bh` in a viewport `vw` wide, the
+  device `choice` picked, with the query params `query`."
+  [choice bw bh vw query]
+  {:route {:params {:query (merge {:page-id (str page-id) :index "0"} query)}}
+   :viewer {:pages {page-id {:frames [{:selrect {:width bw :height bh}}]}}}
+   :viewer-local {:viewport-size {:width vw :height 800}
+                  :device {:choice choice :finish "dark"}}})
+
+(t/deftest a-device-shows-the-board-as-wide-as-its-screen
+  (let [state (device-state "iphone-island" 402 874 201 {})]
+    (t/is (= :iphone-island (:kind (dv/device-shown state))))
+    (t/is (= 0.5 (get-in (ptk/update dv/zoom-to-device state) [:viewer-local :zoom])))
+
+    (t/testing "the zoom of the menus rests, their zoom type kept"
+      (let [fitted (ptk/update dv/zoom-to-fit state)
+            filled (ptk/update dv/zoom-to-fill state)]
+        (t/is (= [0.5 :fit] (mapv #(get-in fitted [:viewer-local %]) [:zoom :zoom-type])))
+        (t/is (= [0.5 :fill] (mapv #(get-in filled [:viewer-local %]) [:zoom :zoom-type])))
+        (t/is (= 0.5 (get-in (ptk/update dv/reset-zoom state) [:viewer-local :zoom])))
+        (t/is (= state (ptk/update dv/increase-zoom state)))
+        (t/is (= state (ptk/update dv/decrease-zoom state)))))
+
+    (t/testing "it refits as the viewport resizes"
+      (t/is (= [dv/zoom-to-device] (watch-events dv/refit-zoom state))))))
+
+(t/deftest without-a-device-the-zoom-is-as-it-was
+  (let [state (device-state "none" 402 874 201 {})]
+    (t/is (nil? (dv/device-shown state)))
+    (t/is (= (/ 200 874) (get-in (ptk/update dv/zoom-to-fit
+                                             (assoc-in state [:viewer-local :viewport-size :height] 200))
+                                 [:viewer-local :zoom]))
+          "fitted in a low viewport")
+    (t/is (= 1.3 (get-in (ptk/update dv/increase-zoom (assoc-in state [:viewer-local :zoom] 1))
+                         [:viewer-local :zoom])))
+    (t/is (= [dv/zoom-to-fit]
+             (watch-events dv/refit-zoom (assoc-in state [:viewer-local :zoom-type] :fit)))
+          "fitted again once the device goes")
+    (t/is (empty? (watch-events dv/refit-zoom state)) "at a zoom of its own it stays"))
+  (t/is (nil? (dv/device-shown (device-state "auto" 1920 1080 800 {})))
+        "automatic leaves a slide alone")
+  (t/is (nil? (dv/device-shown (device-state "iphone-island" 402 874 201 {:section "comments"})))
+        "only in the Interactions section"))
+
+(t/deftest picking-a-device-keeps-it-in-the-url
+  (let [state  (device-state "none" 402 874 201 {:zoom "fit"})
+        ;; the state it leaves and the navigation of the URL it asks
+        set-to (fn [choice finish]
+                 (let [event (dv/set-device choice finish)
+                       state (ptk/update event state)]
+                   [state (some-> (watch-events (first (watch-events event state)) state) first deref)]))
+        [picked {:keys [id params options]}] (set-to "macbook" "light")]
+    (t/is (= {:choice "macbook" :finish "light"} (dv/device picked)))
+    (t/is (= :viewer id))
+    (t/is (= ["macbook" "light" "fit"] ((juxt :device :device-color :zoom) params)) "other params kept")
+    (t/is (true? (::rt/replace options)))
+    (t/is (not (contains? (:params (second (set-to "ipad" "dark"))) :device-color))
+          "dark is the default")
+    (t/is (= {:choice "none" :finish "dark"} (dv/device (first (set-to "toaster" "pink"))))
+          "a choice it does not know is none")
+    (let [framed (assoc-in state [:route :params :query :device] "ipad")
+          event  (dv/set-device "none" "dark")
+          after  (ptk/update event framed)
+          {:keys [params]} (some-> (watch-events (first (watch-events event after)) after) first deref)]
+      (t/is (not (contains? params :device)) "none drops it"))
+    (let [same  (assoc-in state [:route :params :query :device] "ipad")
+          after (ptk/update (dv/set-device "ipad" "dark") same)]
+      (t/is (empty? (watch-events (first (watch-events (dv/set-device "ipad" "dark") after)) after))
+            "the URL says it already"))))
+
+(t/deftest the-view-mode-keeps-the-device-for-the-next-time
+  (let [before [(get storage/user ::dv/device) (get storage/user ::dv/device-color)]
+        state  (device-state "none" 402 874 201 {})]
+    (ptk/effect (dv/set-device "watch" "light") state nil)
+    (t/is (= ["watch" "light"] [(get storage/user ::dv/device) (get storage/user ::dv/device-color)]))
+    (ptk/effect (dv/set-device "ipad" "dark") (assoc state :viewer-preview {}) nil)
+    (t/is (= "watch" (get storage/user ::dv/device)) "not the device of the preview")
+
+    (t/testing "it starts with the device of its URL, else the one kept"
+      (let [init (fn [query] (dv/device (ptk/update (dv/initialize {:file-id page-id})
+                                                    {:route {:params {:query query}}})))]
+        (t/is (= {:choice "watch" :finish "light"} (init {})))
+        (t/is (= {:choice "ipad" :finish "dark"} (init {:device "ipad"})))
+        (t/is (= {:choice "none" :finish "dark"} (init {:preview "true"}))
+              "the preview says its own")))
+    (swap! storage/user (fn [kept]
+                          (reduce (fn [kept [k v]] (if (some? v) (assoc kept k v) (dissoc kept k)))
+                                  kept
+                                  [[::dv/device (first before)] [::dv/device-color (second before)]])))))

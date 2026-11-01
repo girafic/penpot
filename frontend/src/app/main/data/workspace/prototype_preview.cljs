@@ -76,11 +76,13 @@
 
 (defn ready-messages
   "What the preview tells a view mode that says it listens, as
-  `[[type data] ...]`: its `zoom`, how it shows the `interactions`, and,
-  while pinned (`follow?`), to go to the board `unsent` the pin held for
-  it (see `pin-step`)."
-  [{:keys [zoom interactions unsent follow?]}]
-  (cond-> [["penpot:preview-zoom" {:mode zoom}]]
+  `[[type data] ...]`: its `zoom`, the `device` it shows the board in,
+  of the `color` (see `app.main.data.viewer.devices`), how it shows the
+  `interactions`, and, while pinned (`follow?`), to go to the board
+  `unsent` the pin held for it (see `pin-step`)."
+  [{:keys [zoom device color interactions unsent follow?]}]
+  (cond-> [["penpot:preview-zoom" {:mode zoom}]
+           ["penpot:preview-device" {:device device :color color}]]
     (contains? interactions-modes interactions)
     (conj ["penpot:preview-interactions" {:mode interactions}])
 

@@ -26,6 +26,7 @@
    [app.main.data.event :as ev]
    [app.main.data.fonts :as df]
    [app.main.data.helpers :as dsh]
+   [app.main.data.viewer.devices :as dvd]
    [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.router :as rt]
@@ -58,6 +59,8 @@
 (declare zoom-to-fill)
 (declare zoom-to-fit)
 (declare reset-zoom)
+(declare initial-device)
+(declare update-device-querystring)
 
 (def ^:private
   schema:initialize
@@ -94,11 +97,13 @@
                       default-local-state
                       lstate)))
           (assoc-in [:viewer-local :share-id] share-id)
+          (assoc-in [:viewer-local :device] (initial-device (rt/get-params state)))
           (update :comments-local dcmt/merge-persisted-filters)))
 
     ptk/WatchEvent
     (watch [_ state _]
       (rx/of (fetch-bundle (d/without-nils params))
+             update-device-querystring
              ;; Only fetch threads for logged-in users
              (when (some? (:profile state))
                (fetch-comment-threads params))
@@ -466,6 +471,126 @@
         (->> (rp/cmd! :get-comments {:thread-id thread-id})
              (rx/map #(partial fetched %)))))))
 
+;; --- Devices
+;;
+;; The view mode can show its boards in a device (see
+;; `app.main.data.viewer.devices`): the one picked, `{:choice :finish}`,
+;; kept in the URL (`device`, `device-color`) and, in a view mode of its
+;; own, for the next time; the preview of the prototype tells its own.
+;; While one shows, the board is as wide as its screen: the zoom of the
+;; menus and shortcuts rests, their zoom type kept for when it goes.
+
+(defn- initial-device
+  "The device the view mode starts with, as its URL `params` say; else,
+  in a view mode of its own, the one picked last; else none."
+  [params]
+  (let [choice   (rt/get-query-param params :device)
+        preview? (= "true" (rt/get-query-param params :preview))]
+    (if (or (some? choice) preview?)
+      {:choice (dvd/parse-choice choice)
+       :finish (dvd/parse-finish (rt/get-query-param params :device-color))}
+      {:choice (dvd/parse-choice (get storage/user ::device))
+       :finish (dvd/parse-finish (get storage/user ::device-color))})))
+
+(defn device
+  "The device picked for the view mode in `state`, `{:choice :finish}`."
+  [state]
+  (dm/get-in state [:viewer-local :device]))
+
+(defn- shown-frame
+  "The board the view mode in `state` shows."
+  [state]
+  (let [params  (rt/get-params state)
+        page-id (some-> (:page-id params) uuid/parse)
+        index   (some-> (rt/get-query-param params :index) parse-long)
+        frames  (dm/get-in state [:viewer :pages page-id :frames])]
+    (when (seq frames)
+      (nth frames (min (or index 0) (dec (count frames)))))))
+
+(defn device-shown
+  "The device the view mode in `state` shows its board in (see
+  `dvd/resolve-device`): the one picked, for the board shown, in the
+  Interactions section only; nil for none."
+  [state]
+  (let [choice  (:choice (device state))
+        section (or (some-> (rt/get-query-param (rt/get-params state) :section) keyword)
+                    :interactions)]
+    (when (and (some? choice) (not= "none" choice) (= :interactions section))
+      (let [{:keys [width height]} (:selrect (shown-frame state))]
+        (dvd/resolve-device choice width height)))))
+
+(defn- device-zoom
+  "The zoom of the board shown as wide as the screen of its device (the
+  viewport then, see `set-viewport-size`); nil when no device shows it."
+  [state]
+  (when (some? (device-shown state))
+    (let [width (dm/get-in state [:viewer-local :viewport-size :width])
+          bw    (dm/get-in (shown-frame state) [:selrect :width])]
+      (when (and (number? width) (pos? width) (number? bw) (pos? bw))
+        (/ width bw)))))
+
+(def ^:private update-device-querystring
+  (ptk/reify ::update-device-querystring
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [{:keys [choice finish]} (device state)
+            params   (rt/get-params state)
+            framed?  (and (some? choice) (not= "none" choice))
+            expected (cond-> (dissoc params :device :device-color)
+                       framed?
+                       (assoc :device choice)
+
+                       (and framed? (= "light" finish))
+                       (assoc :device-color finish))]
+        ;; as the zoom: only when the URL does not say it already
+        (when (not= params expected)
+          (rx/of (rt/nav :viewer expected {::rt/replace true})))))))
+
+(defn set-device
+  "The view mode showing its boards in the device `choice` (one of
+  `dvd/choices`) in its `finish`: kept in the URL, and, in a view mode
+  of its own, for the next time."
+  [choice finish]
+  (let [choice (dvd/parse-choice choice)
+        finish (dvd/parse-finish finish)]
+    (ptk/reify ::set-device
+      ptk/UpdateEvent
+      (update [_ state]
+        (assoc-in state [:viewer-local :device] {:choice choice :finish finish}))
+
+      ptk/WatchEvent
+      (watch [_ _ _]
+        (rx/of update-device-querystring))
+
+      ptk/EffectEvent
+      (effect [_ state _]
+        (when-not (preview? state)
+          (swap! storage/user assoc ::device choice ::device-color finish))))))
+
+(def zoom-to-device
+  "The board shown as wide as the screen of its device, while one shows
+  it."
+  (ptk/reify ::zoom-to-device
+    ptk/UpdateEvent
+    (update [_ state]
+      (if-let [zoom (device-zoom state)]
+        (assoc-in state [:viewer-local :zoom] zoom)
+        state))))
+
+(def refit-zoom
+  "The board shown as wide as the screen of its device, or fitted or
+  filled again as its zoom type says, as the viewport resizes; at a zoom
+  of its own it stays."
+  (ptk/reify ::refit-zoom
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (some? (device-shown state))
+        (rx/of zoom-to-device)
+        (case (dm/get-in state [:viewer-local :zoom-type])
+          :fit  (rx/of zoom-to-fit)
+          :fill (rx/of zoom-to-fill)
+          (rx/empty))))))
+
 ;; --- Zoom Management
 
 (def update-zoom-querystring
@@ -490,25 +615,30 @@
     ptk/UpdateEvent
     (update [_ state]
       (let [increase #(min (* % 1.3) 200)]
-        (-> state
-            (update-in  [:viewer-local :zoom] (fnil increase 1))
-            (d/dissoc-in  [:viewer-local :zoom-type]))))))
+        ;; a device shows the board as wide as its screen
+        (if (some? (device-shown state))
+          state
+          (-> state
+              (update-in  [:viewer-local :zoom] (fnil increase 1))
+              (d/dissoc-in  [:viewer-local :zoom-type])))))))
 
 (def decrease-zoom
   (ptk/reify ::decrease-zoom
     ptk/UpdateEvent
     (update [_ state]
       (let [decrease #(max (/ % 1.3) 0.01)]
-        (-> state
-            (update-in [:viewer-local :zoom] (fnil decrease 1))
-            (d/dissoc-in  [:viewer-local :zoom-type]))))))
+        (if (some? (device-shown state))
+          state
+          (-> state
+              (update-in [:viewer-local :zoom] (fnil decrease 1))
+              (d/dissoc-in  [:viewer-local :zoom-type])))))))
 
 (def reset-zoom
   (ptk/reify ::reset-zoom
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (assoc-in  [:viewer-local :zoom] 1)
+          (assoc-in  [:viewer-local :zoom] (or (device-zoom state) 1))
           (d/dissoc-in  [:viewer-local :zoom-type])))))
 
 (def zoom-to-fit
@@ -528,7 +658,7 @@
             hdiff   (/ (:height osize) (:height srect))
             minzoom (min wdiff hdiff)]
         (-> state
-            (assoc-in  [:viewer-local :zoom] minzoom)
+            (assoc-in  [:viewer-local :zoom] (or (device-zoom state) minzoom))
             (assoc-in  [:viewer-local :zoom-type] :fit))))
 
     ptk/WatchEvent
@@ -555,7 +685,7 @@
 
             maxzoom (max wdiff hdiff)]
         (-> state
-            (assoc-in  [:viewer-local :zoom] maxzoom)
+            (assoc-in  [:viewer-local :zoom] (or (device-zoom state) maxzoom))
             (assoc-in  [:viewer-local :zoom-type] :fill))))
 
     ptk/WatchEvent

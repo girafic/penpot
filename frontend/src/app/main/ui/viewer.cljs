@@ -22,6 +22,7 @@
    [app.config :as cf]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
+   [app.main.data.viewer.devices :as dvd]
    [app.main.data.viewer.preview :as dvp]
    [app.main.data.viewer.shortcuts :as sc]
    [app.main.features :as features]
@@ -36,6 +37,7 @@
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.modal :refer [modal-container*]]
    [app.main.ui.viewer.comments :refer [comments-layer comments-sidebar*]]
+   [app.main.ui.viewer.device-frame :as dfr :refer [device-drawing*]]
    [app.main.ui.viewer.header :as header]
    [app.main.ui.viewer.inspect :as inspect]
    [app.main.ui.viewer.interactions :as interactions]
@@ -477,6 +479,26 @@
                     (or (some (comp seq :audio-clips) (vals (:timelines base-page)))
                         (some #(dv/board-sound? base-page files (:id %)) frames)))
 
+        ;; the device the board shows in, in the Interactions section
+        ;; (see `dv/device-shown`): the screen is the section of the
+        ;; board, the device drawn round it in a stage of its own
+        {device-choice :choice device-finish :finish} (:device local)
+        frame-w   (dm/get-in frame [:selrect :width])
+        frame-h   (dm/get-in frame [:selrect :height])
+        device    (mf/with-memo [device-choice section frame-w frame-h]
+                    (when (= section :interactions)
+                      (dvd/resolve-device device-choice frame-w frame-h)))
+        stage-ref  (mf/use-ref nil)
+        stage-size (dfr/use-size stage-ref (= section :interactions))
+        device-layout
+        (mf/with-memo [device stage-size]
+          (let [[sw sh] stage-size]
+            (when (and (some? device) (pos? sw) (pos? sh))
+              (dvd/layout device sw sh dvd/stage-padding))))
+        ;; whether a device showed the board last, to fit it again once
+        ;; the device goes
+        framed-ref (mf/use-ref false)
+
         fullscreen? (mf/deref header/fullscreen-ref)
         overlays    (mf/deref current-overlays-ref)
         ;; the preview shows in its bar whether it plays (see below)
@@ -691,10 +713,13 @@
           (.addEventListener js/window "message" on-message)
           #(.removeEventListener js/window "message" on-message))))
 
-    ;; fitted or filled as it resizes; at 100 % as it is
-    (mf/with-effect [preview (:viewport-size local) (:id frame)]
-      (when (and preview (some? frame))
-        (st/emit! (dvp/refit-preview))))
+    ;; as wide as the screen of its device, or, in the preview, fitted
+    ;; or filled as it resizes; at 100 % as it is
+    (mf/with-effect [preview (:viewport-size local) (:id frame) device]
+      (let [framed? (mf/ref-val framed-ref)]
+        (mf/set-ref-val! framed-ref (some? device))
+        (when (and (some? frame) (or preview (some? device) framed?))
+          (st/emit! dv/refit-zoom))))
 
     (mf/with-effect [preview]
       (when preview
@@ -729,6 +754,8 @@
                                                         (st/emit!))
                       "penpot:preview-zoom"    (some-> (dvp/preview-zoom (unchecked-get data "mode"))
                                                        (st/emit!))
+                      "penpot:preview-device"  (st/emit! (dv/set-device (unchecked-get data "device")
+                                                                        (unchecked-get data "color")))
                       "penpot:preview-interactions"
                       (let [mode (keyword (unchecked-get data "mode"))]
                         (when (contains? dv/valid-interaction-modes mode)
@@ -776,6 +803,13 @@
        (.addEventListener js/window "resize" set-up-new-size)
        (fn []
          (.removeEventListener js/window "resize" set-up-new-size))))
+
+    ;; the section resizes without the window too: as the screen of a
+    ;; device (see `dfr/screen-style`)
+    (mf/with-effect []
+      (let [observer (js/ResizeObserver. set-up-new-size)]
+        (.observe observer (mf/ref-val viewer-section-ref))
+        #(.disconnect observer)))
 
     (mf/use-effect
      (mf/deps nav-scroll)
@@ -929,10 +963,22 @@
                              :index index
                              :thumbnail-data (:thumbnails file)}]
 
+      (when (= section :interactions)
+        [:div {:ref stage-ref
+               :class (stl/css :device-stage)}
+         (when (some? device-layout)
+           [:> device-drawing* {:layout device-layout
+                                :kind (:kind device)
+                                :finish device-finish
+                                :label (:name frame)}])])
+
       [:section#viewer-section {:ref viewer-section-ref
                                 :data-viewer-section true
                                 :class (stl/css-case :viewer-section true
-                                                     :fullscreen fullscreen?)
+                                                     :fullscreen fullscreen?
+                                                     :in-device (some? device-layout))
+                                :style (when (some? device-layout)
+                                         (dfr/screen-style device-layout))
                                 :on-click click-on-screen}
 
        (cond
@@ -977,7 +1023,15 @@
               :section section
               :index index
               :animated (some? clock)
-              :sound board-sound?}]]))]]
+              :sound board-sound?}]]))]
+
+      ;; the island, notch or camera of the device, over its screen
+      (when (some? device-layout)
+        [:div {:class (stl/css :device-stage :device-cutouts)}
+         [:> device-drawing* {:layout device-layout
+                              :kind (:kind device)
+                              :finish device-finish
+                              :cutouts true}]])]
 
      (when-not preview
        [:& header/header {:project project
@@ -990,7 +1044,9 @@
                           :section section
                           :shown-thumbnails (:show-thumbnails local)
                           :interactions-mode interactions-mode
-                          :share share}])]))
+                          :share share
+                          :device (:device local)
+                          :framed (some? device)}])]))
 
 ;; --- Component: Viewer
 

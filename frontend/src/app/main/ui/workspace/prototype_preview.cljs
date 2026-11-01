@@ -12,18 +12,21 @@
   it loaded, or could not show) once that is saved. Closed, it stays
   loaded, hidden, to show again at once, for a while (see
   `unload-delay`); another page of the workspace starts without it. A
-  bar on top moves the window, with the boards before
-  and after, start again, the play buttons of an animated board, the
-  board it shows, a settings button, open in the view mode and close;
-  the corners at its bottom resize it. The menu of the settings button
-  holds the zoom (fit, fill or 100 %), how the interactions show, Follow
-  the selection (it shows the board selected in the workspace) and two
-  sizes of the window. Where it is, as `{:x :y :w :h}` px of the browser
-  window, Follow, the zoom and the interactions are kept for the next
-  time; open in the view mode closes it. The view mode tells it once it listens
-  (`penpot:preview-ready`), what it asks before is sent then, which
-  board it shows and where among the boards (`penpot:preview-shown`),
-  and how its animation plays (`penpot:preview-playback`)."
+  bar on top moves the window, with the boards before and after, start
+  again, the play buttons of an animated board, the board it shows, a
+  device button (the device it shows the board in, see
+  `app.main.data.viewer.devices`), a settings button, open in the view
+  mode and close; the corners at its bottom resize it. The menu of the
+  settings button holds the zoom (fit, fill or 100 %; none while a device
+  shows the board), how the interactions show, Follow the selection (it
+  shows the board selected in the workspace) and two sizes of the
+  window. Where it is, as `{:x :y :w :h}` px of the browser window,
+  Follow, the zoom, the interactions and the device are kept for the
+  next time; open in the view mode closes it. The view mode tells it
+  once it listens (`penpot:preview-ready`), what it asks before is sent
+  then, which board it shows and where among the boards
+  (`penpot:preview-shown`), and how its animation plays
+  (`penpot:preview-playback`)."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
@@ -33,6 +36,7 @@
    [app.main.data.changes :as dch]
    [app.main.data.common :as dcm]
    [app.main.data.persistence :as dps]
+   [app.main.data.viewer.devices :as dvd]
    [app.main.data.workspace.prototype-preview :as dwpp]
    [app.main.refs :as refs]
    [app.main.router :as rt]
@@ -41,6 +45,7 @@
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
+   [app.main.ui.viewer.device-menu :refer [device-items*]]
    [app.main.ui.workspace.canvas-window :as cw]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -101,6 +106,16 @@
       (cw/clamp-frame (assoc frame :w (wide (:h frame))) vw vh)
       frame)))
 
+(defn shown-size
+  "The size `[w h]` the window shows for a board `bw` × `bh` in the
+  device `choice` (one of `dvd/choices`): the device at its own size and
+  the room round it in the view mode, or the board without one."
+  [choice bw bh]
+  (if-let [device (dvd/resolve-device choice bw bh)]
+    (let [[w h] (dvd/outer-size device)]
+      [(+ w (* 2 dvd/stage-padding)) (+ h (* 2 dvd/stage-padding))])
+    [bw bh]))
+
 (def zoom-modes
   "The zooms of the preview, as its menu picks them: the board fitted in
   the window, filling it, or at its own size."
@@ -109,14 +124,16 @@
 (defn- preview-uri
   "The view mode of the page `page-id` of the file `file-id` as a
   preview, from the board `frame-id` (or where it starts), at `zoom`
-  (see `zoom-modes`)."
-  [file-id page-id frame-id zoom]
+  (see `zoom-modes`), in the device `device` of the color `color`."
+  [file-id page-id frame-id zoom device color]
   (rt/resolve-uri (:router @st/state) :viewer
                   (d/without-nils {:file-id (dm/str file-id)
                                    :page-id (dm/str page-id)
                                    :frame-id (some-> frame-id dm/str)
                                    :section "interactions"
                                    :zoom (when (contains? #{"fit" "fill"} zoom) zoom)
+                                   :device device
+                                   :device-color color
                                    :preview "true"})))
 
 (defn- post!
@@ -161,6 +178,14 @@
         interactions  (deref interactions*)
         menu*      (mf/use-state false)
         menu?      (deref menu*)
+        ;; the device it shows the board in, and its color (see
+        ;; `app.main.data.viewer.devices`)
+        device*    (mf/use-state #(dvd/parse-choice (get storage/user ::device)))
+        device     (deref device*)
+        color*     (mf/use-state #(dvd/parse-finish (get storage/user ::device-color)))
+        color      (deref color*)
+        device-menu* (mf/use-state false)
+        device-menu? (deref device-menu*)
         ;; whether the board shown animates, plays, sounds and is muted,
         ;; as the view mode tells (`penpot:preview-playback`)
         playback*  (mf/use-state nil)
@@ -181,9 +206,12 @@
         [vw vh]    (cw/use-window-size)
         stored*    (mf/use-state #(get storage/user ::frame))
         drag-frame* (mf/use-state nil)
+        ;; what the window shows of the board: in its device, if any
+        [shown-w shown-h] (shown-size device (:width board 16) (:height board 9))
+        framed?    (some? (dvd/resolve-device device (:width board) (:height board)))
         frame      (cw/clamp-frame (or (deref drag-frame*)
                                        (deref stored*)
-                                       (start-frame vw vh (:width board 16) (:height board 9)))
+                                       (start-frame vw vh shown-w shown-h))
                                    vw vh)
         iframe-ref (mf/use-ref nil)
         ;; the view mode loads once what is edited is saved
@@ -193,7 +221,7 @@
         run*       (mf/use-state 0)
         ;; the zoom it starts at, as it starts again
         uri        (mf/with-memo [file-id page-id start (deref run*)]
-                     (preview-uri file-id page-id start zoom))
+                     (preview-uri file-id page-id start zoom device color))
 
         ;; it shows where it is dragged, and stays where it is let go
         on-drag
@@ -282,10 +310,41 @@
         (mf/use-fn
          (fn [event]
            (dom/stop-propagation event)
+           (reset! device-menu* false)
            (swap! menu* not)))
 
         close-menu
         (mf/use-fn #(reset! menu* false))
+
+        toggle-device-menu
+        (mf/use-fn
+         (fn [event]
+           (dom/stop-propagation event)
+           (reset! menu* false)
+           (swap! device-menu* not)))
+
+        close-device-menu
+        (mf/use-fn #(reset! device-menu* false))
+
+        ;; the view mode shows the board in it at once, kept for the
+        ;; next time
+        on-device
+        (mf/use-fn
+         (mf/deps color)
+         (fn [choice]
+           (reset! device-menu* false)
+           (reset! device* choice)
+           (swap! storage/user assoc ::device choice)
+           (post! (mf/ref-val iframe-ref) "penpot:preview-device" {:device choice :color color})))
+
+        on-device-color
+        (mf/use-fn
+         (mf/deps device)
+         (fn [color]
+           (reset! device-menu* false)
+           (reset! color* color)
+           (swap! storage/user assoc ::device-color color)
+           (post! (mf/ref-val iframe-ref) "penpot:preview-device" {:device device :color color})))
 
         on-follow
         (mf/use-fn
@@ -319,13 +378,11 @@
         ;; needs, kept for the next time
         resize-to
         (mf/use-fn
-         (mf/deps frame vw vh board)
+         (mf/deps frame vw vh shown-w shown-h)
          (fn [size]
-           (let [bw    (:width board 16)
-                 bh    (:height board 9)
-                 frame (if (= size :actual)
-                         (actual-frame frame vw vh bw bh)
-                         (fitted-frame frame vw vh bw bh))]
+           (let [frame (if (= size :actual)
+                         (actual-frame frame vw vh shown-w shown-h)
+                         (fitted-frame frame vw vh shown-w shown-h))]
              (reset! menu* false)
              (reset! stored* frame)
              (swap! storage/user assoc ::frame frame))))
@@ -381,6 +438,7 @@
             held   (mf/ref-val held-ref)]
         (when ^boolean hidden
           (reset! menu* false)
+          (reset! device-menu* false)
           ;; the keys go to the workspace again
           (when (and (some? iframe) (identical? iframe (.-activeElement js/document)))
             (.blur iframe)))
@@ -433,7 +491,7 @@
     ;; what the view mode tells: it listens (it gets what was held for
     ;; it, see `dwpp/ready-messages`), the board it shows; Shift + Space
     ;; in it closes it too
-    (mf/with-effect [follow? zoom interactions]
+    (mf/with-effect [follow? zoom interactions device color]
       (let [on-message
             (fn [^js event]
               (let [iframe (mf/ref-val iframe-ref)
@@ -448,6 +506,7 @@
                       (mf/set-ref-val! refreshing-ref false)
                       (mf/set-ref-val! unsent-ref nil)
                       (doseq [[type data] (dwpp/ready-messages {:zoom zoom :interactions interactions
+                                                                :device device :color color
                                                                 :unsent unsent :follow? follow?})]
                         (post! iframe type data))
                       ;; closed while it loaded
@@ -556,6 +615,14 @@
              :on-pointer-down dom/stop-propagation
              :on-double-click dom/stop-propagation}
        [:> icon-button* {:variant "ghost"
+                         :aria-label (tr "viewer.header.device")
+                         :aria-haspopup "menu"
+                         :aria-expanded device-menu?
+                         :class (stl/css-case :menu-open device-menu?)
+                         :icon "device"
+                         :on-key-down keep-enter
+                         :on-click toggle-device-menu}]
+       [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.preview.options")
                          :aria-haspopup "menu"
                          :aria-expanded menu?
@@ -571,31 +638,43 @@
                          :aria-label (tr "workspace.preview.close")
                          :icon "close"
                          :on-click on-close}]]]
+     [:> dropdown-menu* {:show device-menu?
+                         :on-close close-device-menu
+                         :class (stl/css :menu)
+                         :style #js {"top" (dm/str (+ (:y frame) bar-height) "px")
+                                     "right" (dm/str (- vw (:x frame) (:w frame) -8) "px")}}
+      [:> device-items* {:choice device
+                         :finish color
+                         :on-choice on-device
+                         :on-finish on-device-color}]]
      [:> dropdown-menu* {:show menu?
                          :on-close close-menu
                          :class (stl/css :menu)
                          :style #js {"top" (dm/str (+ (:y frame) bar-height) "px")
                                      "right" (dm/str (- vw (:x frame) (:w frame) -8) "px")}}
-      [:> check-menu-item* {:label (tr "workspace.preview.zoom-fit")
-                            :icon i/fit-content
-                            :value "fit"
-                            :radio true
-                            :checked (= zoom "fit")
-                            :on-click on-zoom}]
-      [:> check-menu-item* {:label (tr "workspace.preview.zoom-fill")
-                            :icon i/fill-content
-                            :value "fill"
-                            :radio true
-                            :checked (= zoom "fill")
-                            :on-click on-zoom}]
-      [:> check-menu-item* {:label (tr "workspace.preview.zoom-100")
-                            :icon i/percentage
-                            :value "100"
-                            :radio true
-                            :checked (= zoom "100")
-                            :on-click on-zoom}]
-      [:li {:class (stl/css :menu-separator)
-            :role "separator"}]
+      ;; a device shows the board as wide as its screen: no zoom
+      (when-not framed?
+        [:*
+         [:> check-menu-item* {:label (tr "workspace.preview.zoom-fit")
+                               :icon i/fit-content
+                               :value "fit"
+                               :radio true
+                               :checked (= zoom "fit")
+                               :on-click on-zoom}]
+         [:> check-menu-item* {:label (tr "workspace.preview.zoom-fill")
+                               :icon i/fill-content
+                               :value "fill"
+                               :radio true
+                               :checked (= zoom "fill")
+                               :on-click on-zoom}]
+         [:> check-menu-item* {:label (tr "workspace.preview.zoom-100")
+                               :icon i/percentage
+                               :value "100"
+                               :radio true
+                               :checked (= zoom "100")
+                               :on-click on-zoom}]
+         [:li {:class (stl/css :menu-separator)
+               :role "separator"}]])
       [:> check-menu-item* {:label (tr "viewer.header.dont-show-interactions")
                             :value "hide"
                             :radio true

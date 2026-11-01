@@ -156,9 +156,9 @@
 
 (t/deftest ^:async the-preview-zooms-as-the-workspace-says
   (let [at     (fn [zoom-type] (assoc-in (viewer-state 0 nil) [:viewer-local :zoom-type] zoom-type))
-        fitted (await (emits (dvp/refit-preview) (at :fit)))
-        filled (await (emits (dvp/refit-preview) (at :fill)))
-        as-is  (await (emits (dvp/refit-preview) (ptk/update dv/reset-zoom (at :fit))))]
+        fitted (await (emits dv/refit-zoom (at :fit)))
+        filled (await (emits dv/refit-zoom (at :fill)))
+        as-is  (await (emits dv/refit-zoom (ptk/update dv/reset-zoom (at :fit))))]
     (t/is (identical? dv/zoom-to-fit (dvp/preview-zoom "fit")))
     (t/is (identical? dv/zoom-to-fill (dvp/preview-zoom "fill")))
     (t/is (identical? dv/reset-zoom (dvp/preview-zoom "100")))
@@ -182,23 +182,31 @@
     (t/is (= :hold (step {:listening? false})) "the view mode loads: once it listens")))
 
 (t/deftest a-view-mode-that-listens-gets-what-was-held
-  (t/is (= [["penpot:preview-zoom" {:mode "fit"}]]
-           (dwpp/ready-messages {:zoom "fit" :unsent nil :follow? true}))
-        "its zoom, always")
-  (t/is (= [["penpot:preview-zoom" {:mode "100"}]
-            ["penpot:preview-go" {:frameId (str board-b)}]]
-           (dwpp/ready-messages {:zoom "100" :unsent board-b :follow? true}))
-        "and the board held for it")
-  (t/is (= [["penpot:preview-zoom" {:mode "fill"}]]
-           (dwpp/ready-messages {:zoom "fill" :unsent board-b :follow? false}))
-        "not unpinned: a restart starts where it is")
-  (t/is (= [["penpot:preview-zoom" {:mode "fit"}]
-            ["penpot:preview-interactions" {:mode "hide"}]]
-           (dwpp/ready-messages {:zoom "fit" :interactions "hide"}))
-        "how it shows the interactions")
-  (t/is (= [["penpot:preview-zoom" {:mode "fit"}]]
-           (dwpp/ready-messages {:zoom "fit" :interactions "sometimes"}))
-        "not a mode the view mode does not know"))
+  (let [device ["penpot:preview-device" {:device "none" :color "dark"}]
+        ready  #(dwpp/ready-messages (merge {:device "none" :color "dark"} %))]
+    (t/is (= [["penpot:preview-zoom" {:mode "fit"}] device]
+             (ready {:zoom "fit" :unsent nil :follow? true}))
+          "its zoom and its device, always")
+    (t/is (= [["penpot:preview-zoom" {:mode "fit"}]
+              ["penpot:preview-device" {:device "ipad" :color "light"}]]
+             (ready {:zoom "fit" :device "ipad" :color "light"}))
+          "the device it picked")
+    (t/is (= [["penpot:preview-zoom" {:mode "100"}]
+              device
+              ["penpot:preview-go" {:frameId (str board-b)}]]
+             (ready {:zoom "100" :unsent board-b :follow? true}))
+          "and the board held for it")
+    (t/is (= [["penpot:preview-zoom" {:mode "fill"}] device]
+             (ready {:zoom "fill" :unsent board-b :follow? false}))
+          "not unpinned: a restart starts where it is")
+    (t/is (= [["penpot:preview-zoom" {:mode "fit"}]
+              device
+              ["penpot:preview-interactions" {:mode "hide"}]]
+             (ready {:zoom "fit" :interactions "hide"}))
+          "how it shows the interactions")
+    (t/is (= [["penpot:preview-zoom" {:mode "fit"}] device]
+             (ready {:zoom "fit" :interactions "sometimes"}))
+          "not a mode the view mode does not know")))
 
 (t/deftest ^:async the-preview-starts-where-the-view-mode-starts-without-its-board
   (let [route   (fn [state frame-id] (assoc-in state [:route :query-params :frame-id] (str frame-id)))

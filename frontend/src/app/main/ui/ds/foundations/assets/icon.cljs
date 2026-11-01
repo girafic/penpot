@@ -122,6 +122,7 @@
 (def ^:icon-id desc-sort "desc-sort")
 (def ^:icon-id detach "detach")
 (def ^:icon-id detached "detached")
+(def ^:icon-id device "device")
 (def ^:icon-id distribute-horizontally "distribute-horizontally")
 (def ^:icon-id distribute-vertical-spacing "distribute-vertical-spacing")
 (def ^:icon-id document "document")

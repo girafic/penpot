@@ -127,18 +127,6 @@
     "100"  dv/reset-zoom
     nil))
 
-(defn refit-preview
-  "The board of the preview fitted or filled again as it resizes, as its
-  zoom says (see `preview-zoom`); at its own size it stays."
-  []
-  (ptk/reify ::refit-preview
-    ptk/WatchEvent
-    (watch [_ state _]
-      (case (dm/get-in state [:viewer-local :zoom-type])
-        :fit  (rx/of dv/zoom-to-fit)
-        :fill (rx/of dv/zoom-to-fill)
-        (rx/empty)))))
-
 (defn- bundle-refreshed
   "The view mode showing `bundle`, and going to the board the preview
   waits for (see `dv/preview-go`), now that it may list it."

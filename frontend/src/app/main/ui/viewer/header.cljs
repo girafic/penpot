@@ -18,6 +18,7 @@
    [app.main.ui.formats :as fmt]
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.viewer.comments :refer [comments-menu]]
+   [app.main.ui.viewer.device-menu :refer [device-menu*]]
    [app.main.ui.viewer.interactions :refer [flows-menu* interactions-menu*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -37,6 +38,7 @@
   {::mf/memo true
    ::mf/props :obj}
   [{:keys [zoom
+           framed
            on-increase
            on-decrease
            on-zoom-reset
@@ -47,11 +49,14 @@
 
   (let [open*           (mf/use-state false)
         open?           (deref open*)
+        ;; a device shows the board as wide as its screen: no zoom
         open-dropdown
         (mf/use-fn
+         (mf/deps framed)
          (fn [event]
            (dom/stop-propagation event)
-           (reset! open* true)))
+           (when-not ^boolean framed
+             (reset! open* true))))
 
         close-dropdown
         (mf/use-fn
@@ -74,9 +79,12 @@
            (on-decrease)))]
 
     [:div {:class (stl/css-case :zoom-widget true
-                                :selected open?)
+                                :selected open?
+                                :locked framed)
            :on-click open-dropdown
-           :title (tr "workspace.header.zoom")}
+           :title (if ^boolean framed
+                    (tr "viewer.device.zoom-locked")
+                    (tr "workspace.header.zoom"))}
      [:span {:class (stl/css :label)} (fmt/format-percent zoom)]
      [:& dropdown {:show open?
                    :on-close close-dropdown}
@@ -120,7 +128,7 @@
                    :key (dm/str "zoom-fullscreen-" sc)} sc])]]]]]))
 
 (mf/defc header-options
-  [{:keys [section zoom page file index permissions interactions-mode share]}]
+  [{:keys [section zoom page file index permissions interactions-mode share device framed]}]
   (let [fullscreen?    (mf/deref fullscreen-ref)
 
         toggle-fullscreen
@@ -174,12 +182,14 @@
                       (when index
                         [:> flows-menu* {:page page :index index}])
                       [:> interactions-menu*
-                       {:interactions-mode interactions-mode}]]
+                       {:interactions-mode interactions-mode}]
+                      [:> device-menu* {:device device}]]
        :comments [:& comments-menu]
        [:div {:class (stl/css :view-options)}])
 
      [:& zoom-widget
       {:zoom zoom
+       :framed framed
        :on-increase handle-increase
        :on-decrease handle-decrease
        :on-zoom-reset handle-zoom-reset
@@ -266,7 +276,8 @@
 
 
 (mf/defc header
-  [{:keys [project file page frame zoom section permissions index interactions-mode shown-thumbnails share]}]
+  [{:keys [project file page frame zoom section permissions index interactions-mode shown-thumbnails share
+           device framed]}]
   (let [go-to-dashboard
         (mf/use-fn
          #(st/emit! (dv/go-to-dashboard)))
@@ -357,4 +368,6 @@
                          :index index
                          :zoom zoom
                          :interactions-mode interactions-mode
-                         :share share}]]))
+                         :share share
+                         :device device
+                         :framed framed}]]))

@@ -6164,6 +6164,66 @@ msgstr "%s - Penpot"
 msgid "token-actions.detach-token"
 msgstr "Detach token"
 
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.android"
+msgstr "Android phone"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.auto"
+msgstr "Automatic"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.browser"
+msgstr "Browser window"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.dark"
+msgstr "Dark"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.imac"
+msgstr "iMac"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.ipad"
+msgstr "iPad"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.iphone-duo"
+msgstr "iPhone Duo (foldable)"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.iphone-home"
+msgstr "iPhone SE"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.iphone-island"
+msgstr "iPhone with Dynamic Island"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.iphone-notch"
+msgstr "iPhone with notch"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.light"
+msgstr "Light"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.macbook"
+msgstr "MacBook"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.none"
+msgstr "No device"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.watch"
+msgstr "Apple Watch"
+
+#: src/app/main/ui/viewer/header.cljs
+msgid "viewer.device.zoom-locked"
+msgstr "The device sets the zoom"
+
 #: src/app/main/ui/viewer.cljs:572
 msgid "viewer.empty-state"
 msgstr "No boards found on the page."
@@ -6175,6 +6235,10 @@ msgstr "Board not found."
 #: src/app/main/ui/viewer/header.cljs:341
 msgid "viewer.header.comments-section"
 msgstr "Comments (%s)"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.header.device"
+msgstr "Device"
 
 #: src/app/main/ui/viewer/interactions.cljs:268
 msgid "viewer.header.dont-show-interactions"

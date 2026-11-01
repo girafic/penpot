@@ -8,6 +8,7 @@
   "The sizes the menu of the preview of the prototype gives its window."
   (:require
    [app.common.math :as mth]
+   [app.main.data.viewer.devices :as dvd]
    [app.main.ui.workspace.prototype-preview :as pp]
    [cljs.test :as t :include-macros true]))
 
@@ -27,3 +28,16 @@
   (let [{:keys [w h]} (pp/fitted-frame frame 1600 1000 400 1600)]
     (t/is (< w 600) "narrower for a tall board the browser window cannot hold")
     (t/is (mth/close? (/ 400 1600) (/ (- w 2) (- h pp/bar-height 2))) "as wide as the board then is")))
+
+
+(t/deftest the-window-shows-the-board-in-its-device
+  (t/is (= [402 874] (pp/shown-size "none" 402 874)) "no device: the board")
+  (t/is (= [1920 1080] (pp/shown-size "auto" 1920 1080)) "none for a slide")
+  (let [[w h]   (pp/shown-size "iphone-island" 402 874)
+        [ow oh] (dvd/outer-size (dvd/resolve-device "iphone-island" 402 874))]
+    (t/is (= [(+ ow 48) (+ oh 48)] [w h]) "the device and the room round it")
+    (t/is (< 402 w) "wider than the board")
+    (let [{:keys [w h]} (pp/actual-frame {:x 0 :y 0 :w 600 :h 600} 3000 3000 w h)
+          layout (dvd/layout (dvd/resolve-device "iphone-island" 402 874)
+                             (- w 2) (- h pp/bar-height 2) dvd/stage-padding)]
+      (t/is (= 1 (:scale layout)) "at its own size in the window as large as it"))))
