@@ -203,12 +203,14 @@
   margin: 0 auto;
 }
 
+// clips the boards that slide in and out; a clip, not a scroll container,
+// so the layers fixed when scrolling stick to the section that scrolls
 .viewer-clipper {
   display: grid;
   grid-template-rows: 1fr;
   grid-template-columns: 1fr;
   place-items: center center;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .viewer-overlay-background {

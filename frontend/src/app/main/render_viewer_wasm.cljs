@@ -5,9 +5,8 @@
 ;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.render-viewer-wasm
-  "WASM offscreen rendering for the shared viewer (snapshot + fixed-scroll)."
+  "WASM offscreen rendering for the shared viewer (snapshot + fixed layers)."
   (:require
-   [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.render-wasm.wasm :as wasm]
@@ -17,7 +16,6 @@
    [app.util.dom :as dom]
    [app.util.timers :as ts]
    [app.util.webapi :as webapi]
-   [goog.events :as events]
    [promesa.core :as p]
    [rumext.v2 :as mf]))
 
@@ -282,25 +280,6 @@
            (js/console.error "viewer-snapshot: render error" e)
            (finish)))))))
 
-(defn- use-fixed-scroll-sync!
-  [enabled? layer-ref]
-  (mf/use-layout-effect
-   (mf/deps enabled?)
-   (fn []
-     (when enabled?
-       (let [section (dom/get-element "viewer-section")
-             sync!
-             (fn []
-               (when-let [layer (mf/ref-val layer-ref)]
-                 (dom/set-style! layer "transform"
-                                 (dm/str "translate("
-                                         (or (dom/get-h-scroll-pos section) 0) "px, "
-                                         (or (dom/get-scroll-pos section) 0) "px)"))))]
-         (when section
-           (sync!)
-           (let [key (events/listen section "scroll" (fn [_] (sync!)))]
-             #(events/unlistenByKey key))))))))
-
 (defn- use-viewer-dpr-key
   "Bump a counter when browser zoom changes devicePixelRatio so WASM canvases
   are resized like the workspace viewport."
@@ -429,15 +408,14 @@
           #(remove-watch modifiers-ref key))))))
 
 (defn use-viewer-wasm-viewport!
-  "WASM render passes and fixed-scroll DOM sync for the viewer viewport.
+  "WASM render passes for the viewer viewport.
   `modifiers-ref`, when given, is a ref of the animation it plays at a
   time (a delay of its modif-tree, see `show-animation!`): it renders
   again at each of its frames. `frozen?` renders nothing: the canvases
   keep the picture drawn on them (see `copy-canvases!`)."
   [page-id page-objects size scale frame-id
-   not-fixed-ref fixed-ref fixed-scroll-layer-ref
+   not-fixed-ref fixed-ref
    not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta modifiers-ref frozen?]
-  (use-fixed-scroll-sync! (some? fixed-scroll-layer-ref) fixed-scroll-layer-ref)
   (let [dpr-key (use-viewer-dpr-key)]
     (use-viewer-wasm-layers! page-id page-objects size scale frame-id
                              not-fixed-ref fixed-ref

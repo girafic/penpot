@@ -151,7 +151,6 @@
         vbox      (:vbox size)
         is-fixed  (true? is-fixed)
 
-        fixed-layer-ref      (mf/use-ref nil)
         not-fixed-wasm-ref   (mf/use-ref nil)
         fixed-wasm-ref       (mf/use-ref nil)
 
@@ -218,7 +217,6 @@
     (rwv/use-viewer-wasm-viewport!
      page-id objects size scale frame-id
      not-fixed-wasm-ref fixed-wasm-ref
-     (when has-fixed? fixed-layer-ref)
      not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
      delta modifiers-ref (true? is-snapshot))
 
@@ -227,6 +225,17 @@
       [:*
        [:> wasm-layer* not-fixed-props]
 
+       ;; The layers fixed when scrolling: the scroll of the section moves
+       ;; the others, this one sticks to its top left corner (the browser
+       ;; holds it there as it scrolls, a scroll event would come a frame
+       ;; late). It is as large as nothing, its picture as large as the
+       ;; board hangs from it. Only its hotspots take a click, the rest goes
+       ;; to the layers that scroll below.
        (when has-fixed?
-         [:div {:ref fixed-layer-ref}
+         [:div {:style {:position "sticky"
+                        :top 0
+                        :left 0
+                        :width 0
+                        :height 0
+                        :pointer-events "none"}}
           [:> wasm-layer* fixed-props]])]]]))
