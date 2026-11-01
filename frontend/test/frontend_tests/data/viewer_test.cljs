@@ -200,6 +200,22 @@
   (t/is (nil? (dv/device-shown (device-state "iphone-island" 402 874 201 {:section "comments"})))
         "only in the Interactions section"))
 
+(t/deftest a-phone-turns-on-its-side-and-back
+  (let [state  (device-state "iphone-island" 402 874 402 {})
+        turned (ptk/update dv/turn-device state)]
+    (t/is (= :landscape (:hold (dv/device turned))))
+    (t/is (= [true 874 402] ((juxt :landscape? :screen-w :screen-h) (dv/device-shown turned))))
+    (t/is (= (/ 402 874) (get-in (ptk/update dv/zoom-to-device turned) [:viewer-local :zoom]))
+          "the board as wide as the screen on its side")
+    (t/is (nil? (:hold (dv/device (ptk/update dv/turn-device turned))))
+          "turned back, as it is drawn")
+    (t/is (nil? (:hold (dv/device (ptk/update (dv/set-device "ipad" "dark") turned))))
+          "another device stands as the boards do"))
+  (let [state (device-state "watch" 416 496 402 {})]
+    (t/is (= state (ptk/update dv/turn-device state)) "a watch does not turn"))
+  (let [state (device-state "none" 402 874 402 {})]
+    (t/is (= state (ptk/update dv/turn-device state)) "nor does no device")))
+
 (t/deftest picking-a-device-keeps-it-in-the-url
   (let [state  (device-state "none" 402 874 201 {:zoom "fit"})
         ;; the state it leaves and the navigation of the URL it asks

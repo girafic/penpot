@@ -92,6 +92,11 @@
   [kind]
   (true? (get-in specs [kind :touch])))
 
+(defn turns?
+  "Whether the device `kind` turns on its side: a phone or a tablet."
+  [kind]
+  (true? (get-in specs [kind :turns])))
+
 (defn- pages
   "The sizes a board taller than one as wide scrolls in, of `spec`."
   [spec]
@@ -171,6 +176,15 @@
         "auto" (auto-device bw bh)
         (when-let [kind (some #{(keyword choice)} kinds)]
           (device-of kind bw bh))))))
+
+(defn turn
+  "`device` (see `resolve-device`) turned a quarter: on its side, or
+  standing up again, its screen as wide as it was high."
+  [{:keys [landscape? screen-w screen-h] :as device}]
+  (assoc device
+         :landscape? (not landscape?)
+         :screen-w screen-h
+         :screen-h screen-w))
 
 ;; --- What is drawn
 

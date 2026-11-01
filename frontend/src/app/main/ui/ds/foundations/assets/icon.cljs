@@ -308,6 +308,7 @@
 (def ^:icon-id to-corner "to-corner")
 (def ^:icon-id to-curve "to-curve")
 (def ^:icon-id tree "tree")
+(def ^:icon-id turn-device "turn-device")
 (def ^:icon-id unlock "unlock")
 (def ^:icon-id user "user")
 (def ^:icon-id variant "variant")

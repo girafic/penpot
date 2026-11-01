@@ -13,9 +13,12 @@
   (:require
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.devices :as dvd]
+   [app.main.data.viewer.shortcuts :as sc]
    [app.main.store :as st]
    [app.main.ui.components.check-menu-item :refer [check-menu-item*]]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*]]
+   [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.icons :as deprecated-icon]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -84,8 +87,10 @@
 
 (mf/defc device-menu*
   "The menu of the devices in the header of the view mode, for the
-  device picked, `{:choice :finish}`."
-  [{:keys [device]}]
+  device picked, `{:choice :finish}`, and, when the device shown `turns`
+  (a phone or a tablet), the button that turns it on its side or stands
+  it up again (see `dv/turn-device`)."
+  [{:keys [device turns]}]
   (let [{:keys [choice finish]} device
         choice (dvd/parse-choice choice)
         finish (dvd/parse-finish finish)
@@ -106,7 +111,8 @@
                    (mf/deps choice)
                    (fn [finish]
                      (reset! open* false)
-                     (st/emit! (dv/set-device choice finish))))]
+                     (st/emit! (dv/set-device choice finish))))
+        on-turn   (mf/use-fn #(st/emit! dv/turn-device))]
     [:div {:class (stl/css :device-menu)}
      [:button {:type "button"
                :class (stl/css :trigger)
@@ -122,4 +128,9 @@
       [:> device-items* {:choice choice
                          :finish finish
                          :on-choice on-choice
-                         :on-finish on-finish}]]]))
+                         :on-finish on-finish}]]
+     (when (true? turns)
+       [:> icon-button* {:variant "ghost"
+                         :icon i/turn-device
+                         :aria-label (tr "viewer.device.turn" (sc/get-tooltip :turn-device))
+                         :on-click on-turn}])]))

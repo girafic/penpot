@@ -44,6 +44,7 @@
    [frontend-tests.data.viewer-devices-test]
    [frontend-tests.data.viewer-playback-test]
    [frontend-tests.data.viewer-test]
+   [frontend-tests.data.viewer-turn-test]
    [frontend-tests.data.workspace-audio-recording-test]
    [frontend-tests.data.workspace-audio-test]
    [frontend-tests.data.workspace-colors-test]
@@ -148,6 +149,7 @@
    [frontend-tests.ui.comments-clustering-test]
    [frontend-tests.ui.comments-position-modifier-test]
    [frontend-tests.ui.device-frame-test]
+   [frontend-tests.ui.device-menu-test]
    [frontend-tests.ui.drag-scroll-test]
    [frontend-tests.ui.drawarea-test]
    [frontend-tests.ui.ds-controls-numeric-input-test]
@@ -254,6 +256,7 @@
    'frontend-tests.data.viewer-devices-test
    'frontend-tests.data.viewer-playback-test
    'frontend-tests.data.viewer-test
+   'frontend-tests.data.viewer-turn-test
    'frontend-tests.data.workspace-audio-recording-test
    'frontend-tests.data.workspace-audio-test
    'frontend-tests.data.workspace-colors-test
@@ -357,6 +360,7 @@
    'frontend-tests.ui.comments-clustering-test
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.device-frame-test
+   'frontend-tests.ui.device-menu-test
    'frontend-tests.ui.drag-scroll-test
    'frontend-tests.ui.drawarea-test
    'frontend-tests.ui.ds-controls-numeric-input-test

@@ -322,6 +322,22 @@
              (.addEventListener container rendered-event on-render)
              (reset! timer (js/setTimeout done timeout-ms)))))))))
 
+(defn when-rendered
+  "A promise resolved once a canvas in `container` shows a board again
+  (see `when-frame-rendered`), or after `timeout-ms`."
+  [^js container timeout-ms]
+  (js/Promise.
+   (fn [resolve]
+     (if (nil? container)
+       (resolve nil)
+       (let [timer (atom nil)]
+         (letfn [(done [& _]
+                   (.removeEventListener container rendered-event done)
+                   (js/clearTimeout @timer)
+                   (resolve nil))]
+           (.addEventListener container rendered-event done)
+           (reset! timer (js/setTimeout done timeout-ms))))))))
+
 (defn copy-canvases!
   "Draw what the canvases in `from` show onto the ones in `to`, in order:
   a viewport that shows a board WASM has not drawn on it yet shows the

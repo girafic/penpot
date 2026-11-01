@@ -27,6 +27,7 @@
    [app.main.data.fonts :as df]
    [app.main.data.helpers :as dsh]
    [app.main.data.viewer.devices :as dvd]
+   [app.main.data.viewer.turn :as dvt]
    [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.router :as rt]
@@ -493,41 +494,47 @@
        :finish (dvd/parse-finish (get storage/user ::device-color))})))
 
 (defn device
-  "The device picked for the view mode in `state`, `{:choice :finish}`."
+  "The device picked for the view mode in `state`, `{:choice :finish
+  :hold}`: held the other way than the boards stand, `:hold` (see
+  `dvt/shown`)."
   [state]
   (dm/get-in state [:viewer-local :device]))
 
-(defn- shown-frame
-  "The board the view mode in `state` shows."
+(defn- shown-page
+  "The page the view mode in `state` shows."
   [state]
-  (let [params  (rt/get-params state)
-        page-id (some-> (:page-id params) uuid/parse)
-        index   (some-> (rt/get-query-param params :index) parse-long)
-        frames  (dm/get-in state [:viewer :pages page-id :frames])]
+  (let [page-id (some-> (:page-id (rt/get-params state)) uuid/parse)]
+    (dm/get-in state [:viewer :pages page-id])))
+
+(defn- shown-frame
+  "The board the view mode in `state` shows, as it is drawn (see
+  `dvt/shown` for the one its device shows)."
+  [state]
+  (let [index  (some-> (rt/get-query-param (rt/get-params state) :index) parse-long)
+        frames (:frames (shown-page state))]
     (when (seq frames)
       (nth frames (min (or index 0) (dec (count frames)))))))
 
 (defn device-shown
   "The device the view mode in `state` shows its board in (see
-  `dvd/resolve-device`): the one picked, for the board shown, in the
-  Interactions section only; nil for none."
+  `dvt/shown`): the one picked, held as picked, for the board shown, in
+  the Interactions section only; nil for none."
   [state]
-  (let [choice  (:choice (device state))
+  (let [{:keys [choice hold]} (device state)
         section (or (some-> (rt/get-query-param (rt/get-params state) :section) keyword)
-                    :interactions)]
-    (when (and (some? choice) (not= "none" choice) (= :interactions section))
-      (let [{:keys [width height]} (:selrect (shown-frame state))]
-        (dvd/resolve-device choice width height)))))
+                    :interactions)
+        frame   (shown-frame state)]
+    (when (and (some? choice) (not= "none" choice) (= :interactions section) (some? frame))
+      (:device (dvt/shown (:all-frames (shown-page state)) frame choice hold)))))
 
 (defn- device-zoom
   "The zoom of the board shown as wide as the screen of its device (the
   viewport then, see `set-viewport-size`); nil when no device shows it."
   [state]
-  (when (some? (device-shown state))
-    (let [width (dm/get-in state [:viewer-local :viewport-size :width])
-          bw    (dm/get-in (shown-frame state) [:selrect :width])]
-      (when (and (number? width) (pos? width) (number? bw) (pos? bw))
-        (/ width bw)))))
+  (when-let [{:keys [screen-w]} (device-shown state)]
+    (let [width (dm/get-in state [:viewer-local :viewport-size :width])]
+      (when (and (number? width) (pos? width) (number? screen-w) (pos? screen-w))
+        (/ width screen-w)))))
 
 (def ^:private update-device-querystring
   (ptk/reify ::update-device-querystring
@@ -566,6 +573,20 @@
       (effect [_ state _]
         (when-not (preview? state)
           (swap! storage/user assoc ::device choice ::device-color finish))))))
+
+(def turn-device
+  "The device of the view mode turned a quarter, on its side or standing
+  up again, when it is a phone or a tablet: the boards then show as it
+  is held (see `dvt/shown`); turned back, as they are drawn."
+  (ptk/reify ::turn-device
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [{:keys [choice]} (device state)
+            shown (device-shown state)]
+        (if (and (some? shown) (dvd/turns? (:kind shown)))
+          (assoc-in state [:viewer-local :device :hold]
+                    (dvt/next-hold (shown-frame state) choice shown))
+          state)))))
 
 (def zoom-to-device
   "The board shown as wide as the screen of its device, while one shows

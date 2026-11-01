@@ -5596,6 +5596,10 @@ msgstr "Show / Hide"
 msgid "shortcuts.toggle-zoom-style"
 msgstr "Toggle zoom style"
 
+#: src/app/main/data/viewer/shortcuts.cljs
+msgid "shortcuts.turn-device"
+msgstr "Rotate device"
+
 #: src/app/main/data/workspace/text/shortcuts.cljs:242
 msgid "shortcuts.underline"
 msgstr "Toggle underline"
@@ -6215,6 +6219,10 @@ msgstr "MacBook"
 #: src/app/main/ui/viewer/device_menu.cljs
 msgid "viewer.device.none"
 msgstr "No device"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.turn"
+msgstr "Rotate device (%s)"
 
 #: src/app/main/ui/viewer/device_menu.cljs
 msgid "viewer.device.watch"

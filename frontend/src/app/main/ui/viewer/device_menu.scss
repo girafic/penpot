@@ -8,9 +8,13 @@
 @use "ds/_sizes.scss" as *;
 @use "ds/_borders.scss" as *;
 
-// As the menu of the interactions beside it in the header.
+// As the menu of the interactions beside it in the header, the button
+// that turns the device after it.
 .device-menu {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
 }
 
 .trigger {

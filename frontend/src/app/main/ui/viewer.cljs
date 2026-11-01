@@ -25,6 +25,7 @@
    [app.main.data.viewer.devices :as dvd]
    [app.main.data.viewer.preview :as dvp]
    [app.main.data.viewer.shortcuts :as sc]
+   [app.main.data.viewer.turn :as dvt]
    [app.main.features :as features]
    [app.main.fonts :as fonts]
    [app.main.refs :as refs]
@@ -446,11 +447,40 @@
                    (fn []
                      (get-in data [:pages page-id])))
 
-        ;; The page as it is: only the viewport of the board plays its
-        ;; animation (see `animated-viewport*`), so the header, the
-        ;; thumbnails and the rest do not render again at each frame.
+        ;; the device the boards show in, in the Interactions section
+        ;; (see `dv/device-shown`): the screen is the section of the
+        ;; board, the device drawn round it in a stage of its own; held
+        ;; the other way than a board stands, a phone or a tablet shows
+        ;; it turned, or its counterpart (see `dvt/shown`)
+        {device-choice :choice device-finish :finish device-hold :hold} (:device local)
+        held?     (and (= section :interactions) (some? device-hold))
+
+        ;; The page as it is, but for the boards that show turned: only
+        ;; the viewport of the board plays its animation (see
+        ;; `animated-viewport*`), so the header, the thumbnails and the
+        ;; rest do not render again at each frame.
         files (mf/deref refs/files)
-        page  base-page
+        page  (mf/with-memo [base-page held? device-choice device-hold]
+                (if held?
+                  (let [objects (dvt/turn-objects (:objects base-page) (:all-frames base-page)
+                                                  device-choice device-hold)
+                        lookup  #(get objects (:id %))]
+                    (-> base-page
+                        (assoc :objects objects)
+                        (update :frames #(mapv lookup %))
+                        (update :all-frames #(mapv lookup %))))
+                  base-page))
+
+        ;; the board shown in place of `drawn`, a board of the page as it
+        ;; is drawn: it, turned, or its counterpart
+        show-board (mf/use-fn
+                    (mf/deps base-page page held? device-choice device-hold)
+                    (fn [drawn]
+                      (if (and held? (some? drawn))
+                        (get (:objects page)
+                             (:frame-id (dvt/shown (:all-frames base-page) drawn
+                                                   device-choice device-hold)))
+                        drawn)))
 
         text-shapes
         (hooks/use-equal-memo
@@ -462,7 +492,11 @@
         zoom-type (:zoom-type local)
 
         frames    (:frames page)
-        frame     (get frames index)
+        drawn     (get (:frames base-page) index)
+        frame     (show-board drawn)
+        device    (mf/with-memo [base-page drawn section device-choice device-hold]
+                    (when (and (= section :interactions) (some? drawn))
+                      (:device (dvt/shown (:all-frames base-page) drawn device-choice device-hold))))
 
         ;; What the board on screen plays on, its timeline or the
         ;; animations of the component copies in it (see `dv/board-clock`).
@@ -480,16 +514,8 @@
                     (or (some (comp seq :audio-clips) (vals (:timelines base-page)))
                         (some #(dv/board-sound? base-page files (:id %)) frames)))
 
-        ;; the device the board shows in, in the Interactions section
-        ;; (see `dv/device-shown`): the screen is the section of the
-        ;; board, the device drawn round it in a stage of its own
-        {device-choice :choice device-finish :finish} (:device local)
-        frame-w   (dm/get-in frame [:selrect :width])
-        frame-h   (dm/get-in frame [:selrect :height])
-        device    (mf/with-memo [device-choice section frame-w frame-h]
-                    (when (= section :interactions)
-                      (dvd/resolve-device device-choice frame-w frame-h)))
-        stage-ref  (mf/use-ref nil)
+        stage-ref   (mf/use-ref nil)
+        cutouts-ref (mf/use-ref nil)
         stage-size (dfr/use-size stage-ref (= section :interactions))
         device-layout
         (mf/with-memo [device stage-size]
@@ -507,13 +533,14 @@
         muted?      (mf/deref ref:audio-muted?)
 
         orig-frame
-        (mf/with-memo [current-animations]
+        (mf/with-memo [current-animations show-board]
           ;; We assume there can only be one animation with origin (this is used only in
           ;; navigation animations, and we cannot navigate to two different destinations
           ;; at the same time).
           (let [animation-with-origin (d/seek :orig-frame-id (vals current-animations))]
             (when animation-with-origin
-              (d/seek #(= (:id %) (:orig-frame-id animation-with-origin)) frames))))
+              (show-board (d/seek #(= (:id %) (:orig-frame-id animation-with-origin))
+                                  (:frames base-page))))))
 
         size
         (mf/with-memo [frame zoom]
@@ -783,6 +810,11 @@
        (let [name (:name file)]
          (dom/set-html-title (str "\u25b6 " (tr "title.viewer" name))))))
 
+    ;; a phone or a tablet turning on its side or standing up, once its
+    ;; screen shows the board the new way
+    (dfr/use-turn! stage-ref viewer-section-ref cutouts-ref device-layout (:kind device)
+                   #(rwv/when-rendered (mf/ref-val current-viewport-ref) 400))
+
     ;; the screen of a phone or a tablet scrolls when dragged
     (dds/use-drag-scroll! viewer-section-ref
                           (and (some? device-layout) (dvd/touch? (:kind device)))
@@ -963,9 +995,9 @@
                 :class (stl/css-case :thumbnails-close true
                                      :invisible (not (:show-thumbnails local false)))}]
 
-      [:> thumbnails-panel* {:frames frames
+      [:> thumbnails-panel* {:frames (:frames base-page)
                              :show (:show-thumbnails local false)
-                             :page page
+                             :page base-page
                              :index index
                              :thumbnail-data (:thumbnails file)}]
 
@@ -1033,7 +1065,8 @@
 
       ;; the island, notch or camera of the device, over its screen
       (when (some? device-layout)
-        [:div {:class (stl/css :device-stage :device-cutouts)}
+        [:div {:ref cutouts-ref
+               :class (stl/css :device-stage :device-cutouts)}
          [:> device-drawing* {:layout device-layout
                               :kind (:kind device)
                               :finish device-finish
@@ -1052,7 +1085,8 @@
                           :interactions-mode interactions-mode
                           :share share
                           :device (:device local)
-                          :framed (some? device)}])]))
+                          :framed (some? device)
+                          :turns (and (some? device) (dvd/turns? (:kind device)))}])]))
 
 ;; --- Component: Viewer
 

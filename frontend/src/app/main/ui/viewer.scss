@@ -117,6 +117,14 @@
   transform: translateY(var(--overscroll));
 }
 
+// a device that turns (see `dfr/use-turn!`): what its screen holds fixed
+// in the window would turn with it, it waits
+.viewer-section[data-turning] .viewer-bottom,
+.viewer-section[data-turning] .viewer-go-prev,
+.viewer-section[data-turning] .viewer-go-next {
+  visibility: hidden;
+}
+
 .inspect-layout .viewer-section {
   flex-wrap: nowrap;
   margin-top: 0;

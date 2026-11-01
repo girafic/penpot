@@ -66,6 +66,13 @@
                         :subsections [:zoom-viewer]
                         :fn #(st/emit! dv/toggle-fullscreen)}
 
+   :turn-device        {:tooltip "R"
+                        :label (fn [] (tr "shortcuts.turn-device"))
+                        :command "r"
+                        :section [:viewer]
+                        :subsections [:zoom-viewer]
+                        :fn #(st/emit! dv/turn-device)}
+
    :prev-frame         {:tooltip ds/left-arrow
                         :label (fn [] (tr "shortcuts.prev-frame"))
                         :command ["left" "up" "shift+enter" "pageup" "shift+space"]

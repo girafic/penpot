@@ -128,7 +128,7 @@
                    :key (dm/str "zoom-fullscreen-" sc)} sc])]]]]]))
 
 (mf/defc header-options
-  [{:keys [section zoom page file index permissions interactions-mode share device framed]}]
+  [{:keys [section zoom page file index permissions interactions-mode share device framed turns]}]
   (let [fullscreen?    (mf/deref fullscreen-ref)
 
         toggle-fullscreen
@@ -183,7 +183,7 @@
                         [:> flows-menu* {:page page :index index}])
                       [:> interactions-menu*
                        {:interactions-mode interactions-mode}]
-                      [:> device-menu* {:device device}]]
+                      [:> device-menu* {:device device :turns turns}]]
        :comments [:& comments-menu]
        [:div {:class (stl/css :view-options)}])
 
@@ -277,7 +277,7 @@
 
 (mf/defc header
   [{:keys [project file page frame zoom section permissions index interactions-mode shown-thumbnails share
-           device framed]}]
+           device framed turns]}]
   (let [go-to-dashboard
         (mf/use-fn
          #(st/emit! (dv/go-to-dashboard)))
@@ -370,4 +370,5 @@
                          :interactions-mode interactions-mode
                          :share share
                          :device device
-                         :framed framed}]]))
+                         :framed framed
+                         :turns turns}]]))
