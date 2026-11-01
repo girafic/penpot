@@ -97,6 +97,12 @@
   (t/is (nil? (dvd/resolve-device "auto" 0 874)))
   (t/is (nil? (dvd/resolve-device "auto" nil nil))))
 
+(t/deftest the-phones-and-tablets-scroll-when-dragged
+  (doseq [kind [:iphone-island :iphone-notch :iphone-home :iphone-duo :android :ipad :watch]]
+    (t/is (true? (dvd/touch? kind)) (name kind)))
+  (doseq [kind [:macbook :imac :browser :toaster]]
+    (t/is (false? (dvd/touch? kind)) (name kind))))
+
 (t/deftest the-choices-parse
   (t/is (= "ipad" (dvd/parse-choice "ipad")))
   (t/is (= "none" (dvd/parse-choice "toaster")))

@@ -57,34 +57,40 @@
   high, to a screen of `:open-ratio` measured on `:open-ref`. A browser
   shows a board whole up to as high as wide or `:window` px, a longer
   one in a window at least that high, its toolbar as large at any size
-  (no `:ref`)."
-  {:iphone-island {:ratio (/ 874 402) :turns true :auto true :tall true :ref 402
+  (no `:ref`). One with a `:touch` screen scrolls when dragged."
+  {:iphone-island {:ratio (/ 874 402) :turns true :auto true :tall true :ref 402 :touch true
                    :sizes [[393 852] [402 874] [430 932] [440 956]]}
-   :iphone-notch  {:ratio (/ 844 390) :turns true :auto true :tall true :ref 390
+   :iphone-notch  {:ratio (/ 844 390) :turns true :auto true :tall true :ref 390 :touch true
                    :sizes [[360 780] [375 812] [390 844] [414 896] [428 926]]}
-   :iphone-home   {:ratio (/ 667 375) :turns true :auto true :tall true :ref 375
+   :iphone-home   {:ratio (/ 667 375) :turns true :auto true :tall true :ref 375 :touch true
                    :sizes [[320 568] [375 667] [414 736]]}
-   :ipad          {:ratio (/ 1194 834) :turns true :auto true :tall true :ref 834
+   :ipad          {:ratio (/ 1194 834) :turns true :auto true :tall true :ref 834 :touch true
                    :sizes [[744 1133] [768 1024] [820 1180] [834 1112] [834 1194]
                            [1024 1366] [1027 1366]]}
-   :watch         {:ratio (/ 496 416) :turns false :auto true :ref 416
+   :watch         {:ratio (/ 496 416) :turns false :auto true :ref 416 :touch true
                    :sizes [[272 340] [312 390] [324 394] [352 430] [368 448]
                            [396 484] [416 496]]}
    :macbook       {:ratio (/ 982 1512) :turns false :auto true :ref 982
                    :sizes [[1280 832] [1512 982] [1728 1117]]}
-   :android       {:ratio (/ 915 412) :turns true :auto true :tall true :ref 412
+   :android       {:ratio (/ 915 412) :turns true :auto true :tall true :ref 412 :touch true
                    :sizes [[360 640] [360 780] [360 800] [384 854] [393 851]
                            [412 892] [412 914] [412 915] [412 917]]}
    :imac          {:ratio (/ 9 16) :turns false :auto false :ref 1260
                    :sizes []}
    ;; the foldable of the demo: a cover 270 × 396, open 568 × 400
-   :iphone-duo    {:ratio (/ 396 270) :turns false :auto false :ref 270
+   :iphone-duo    {:ratio (/ 396 270) :turns false :auto false :ref 270 :touch true
                    :open-ratio (/ 400 568) :open-ref 400
                    :sizes []}
    ;; the web presets of the workspace, less the size of a slide
    :browser       {:ratio (/ 800 1280) :turns false :auto true :tall true :window 1024
                    :sizes [[1280 800] [1366 768] [1440 1024]]
                    :pages [[1024 768] [1280 800] [1366 768] [1440 1024] [1920 1080]]}})
+
+(defn touch?
+  "Whether the device `kind` has a touch screen: one that scrolls when
+  dragged, as a finger does."
+  [kind]
+  (true? (get-in specs [kind :touch])))
 
 (defn- pages
   "The sizes a board taller than one as wide scrolls in, of `spec`."

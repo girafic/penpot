@@ -27,6 +27,7 @@
    [app.main.ui.shapes.shape :refer [shape-container]]
    [app.main.ui.shapes.svg-raw :as svg-raw]
    [app.main.ui.shapes.text :as text]
+   [app.main.ui.viewer.drag-scroll :as dds]
    [app.util.dom :as dom]
    [app.util.object :as obj]
    [app.util.timers :as tm]
@@ -240,8 +241,10 @@
 
 (defn- on-pointer-down
   [event shape base-frame frame-offset objects overlays]
-  (let [interactions (->> (:interactions shape)
-                          (filter #(or (= (:event-type %) :click)
+  (let [;; on a touch device a click acts on release (see `on-pointer-up`)
+        click?       (not (dds/defer-taps?))
+        interactions (->> (:interactions shape)
+                          (filter #(or (and click? (= (:event-type %) :click))
                                        (= (:event-type %) :mouse-press))))]
     (when (seq interactions)
       (dom/stop-propagation event)
@@ -250,12 +253,18 @@
 
 (defn- on-pointer-up
   [event shape base-frame frame-offset objects overlays]
-  (let [interactions (->> (:interactions shape)
-                          (filter #(= (:event-type %) :mouse-press)))]
-    (when (seq interactions)
+  (let [releases (->> (:interactions shape)
+                      (filter #(= (:event-type %) :mouse-press)))
+        ;; a tap on a touch device: a press that did not drag the screen
+        taps     (when (and (dds/defer-taps?) (not (dds/dragged?)))
+                   (->> (:interactions shape)
+                        (filter #(= (:event-type %) :click))))]
+    (when (or (seq releases) (seq taps))
       (dom/stop-propagation event)
-      (doseq [interaction interactions]
-        (deactivate-interaction interaction shape base-frame frame-offset objects overlays)))))
+      (doseq [interaction releases]
+        (deactivate-interaction interaction shape base-frame frame-offset objects overlays))
+      (doseq [interaction taps]
+        (activate-interaction interaction shape base-frame frame-offset objects overlays)))))
 
 (defn- on-pointer-enter
   [event shape base-frame frame-offset objects overlays]

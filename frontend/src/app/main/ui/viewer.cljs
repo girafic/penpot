@@ -38,6 +38,7 @@
    [app.main.ui.modal :refer [modal-container*]]
    [app.main.ui.viewer.comments :refer [comments-layer comments-sidebar*]]
    [app.main.ui.viewer.device-frame :as dfr :refer [device-drawing*]]
+   [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.viewer.header :as header]
    [app.main.ui.viewer.inspect :as inspect]
    [app.main.ui.viewer.interactions :as interactions]
@@ -781,6 +782,11 @@
      (fn []
        (let [name (:name file)]
          (dom/set-html-title (str "\u25b6 " (tr "title.viewer" name))))))
+
+    ;; the screen of a phone or a tablet scrolls when dragged
+    (dds/use-drag-scroll! viewer-section-ref
+                          (and (some? device-layout) (dvd/touch? (:kind device)))
+                          (some-> frame :fills first :fill-color))
 
     (mf/with-effect []
       (let [events

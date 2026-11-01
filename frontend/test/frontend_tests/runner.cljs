@@ -148,6 +148,7 @@
    [frontend-tests.ui.comments-clustering-test]
    [frontend-tests.ui.comments-position-modifier-test]
    [frontend-tests.ui.device-frame-test]
+   [frontend-tests.ui.drag-scroll-test]
    [frontend-tests.ui.drawarea-test]
    [frontend-tests.ui.ds-controls-numeric-input-test]
    [frontend-tests.ui.dynamic-modifiers-test]
@@ -356,6 +357,7 @@
    'frontend-tests.ui.comments-clustering-test
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.device-frame-test
+   'frontend-tests.ui.drag-scroll-test
    'frontend-tests.ui.drawarea-test
    'frontend-tests.ui.ds-controls-numeric-input-test
    'frontend-tests.ui.dynamic-modifiers-test

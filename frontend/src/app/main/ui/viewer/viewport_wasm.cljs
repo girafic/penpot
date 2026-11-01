@@ -93,11 +93,15 @@
        :shape-filter shape-filter}]]))
 
 (mf/defc wasm-layer*
+  "The WASM picture of the layers of `shape-filter` and their hotspots.
+  The ones that scroll (`scrolls`) move past an end of a touch screen
+  (see `.in-device[data-overscroll]` in the viewer styles)."
   [{:keys [canvas-ref scale size vbox
            prepared prepared-all prepared-frame class shape-filter
-           objects frame delta modifiers-ref]}]
+           objects frame delta modifiers-ref scrolls]}]
   (let [{:keys [width height]} (canvas-dimensions scale size)]
-    [:div {:style {:position "absolute"
+    [:div {:data-scroll-layer scrolls
+           :style {:position "absolute"
                    :top 0
                    :left 0
                    :width (:width size)
@@ -190,6 +194,7 @@
                    :delta delta
                    :modifiers-ref modifiers-ref
                    :canvas-ref not-fixed-wasm-ref
+                   :scrolls (not is-fixed)
                    :scale scale
                    :size size
                    :vbox vbox

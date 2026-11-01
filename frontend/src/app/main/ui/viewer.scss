@@ -106,6 +106,17 @@
   place-items: start center;
 }
 
+// a touch screen dragged past an end (see `app.main.ui.viewer.drag-scroll`):
+// what scrolls moves, the layers fixed when scrolling stay, and the screen
+// shows the background of the board
+.viewer-section.in-device[data-overscroll] {
+  background-color: var(--overscroll-color, var(--color-static-black));
+}
+
+.viewer-section.in-device[data-overscroll] [data-scroll-layer="true"] {
+  transform: translateY(var(--overscroll));
+}
+
 .inspect-layout .viewer-section {
   flex-wrap: nowrap;
   margin-top: 0;
