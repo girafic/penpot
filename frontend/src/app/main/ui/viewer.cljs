@@ -122,6 +122,14 @@
           drop (- (dvd/first-screen-h width height) (:screen-h device))]
       (when (pos? drop) drop))))
 
+(defn background
+  "The color round the board of `page` shown without a device (`device`
+  nil, see `dvt/shown`): the background of its prototype, nil for the
+  own color of the view mode."
+  [page device]
+  (when (nil? device)
+    (:prototype-background page)))
+
 (defn calculate-delta
   "Calculate the displacement we need to apply so that the original selrect appears in the
    same position as if it had no extra paddings, depending on the side the frame will
@@ -1036,7 +1044,9 @@
       :data-device-only (and (true? preview) (some? device-layout))}
 
 
-     [:div {:class (stl/css :viewer-content)}
+     [:div {:class (stl/css :viewer-content)
+            :style (when-let [color (background base-page device)]
+                     #js {:backgroundColor color})}
 
 
       [:button {:on-click on-thumbnails-close

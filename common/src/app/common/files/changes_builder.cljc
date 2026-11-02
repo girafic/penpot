@@ -264,7 +264,10 @@
                   (assoc :pixel-grid-color pixel-grid-color)
 
                   (some? pixel-grid-opacity)
-                  (assoc :pixel-grid-opacity pixel-grid-opacity))
+                  (assoc :pixel-grid-opacity pixel-grid-opacity)
+
+                  (contains? options :prototype-background)
+                  (assoc :prototype-background (:prototype-background options)))
 
          undo   (cond-> change
                   (some? name)
@@ -280,7 +283,10 @@
                   (assoc :pixel-grid-color (:pixel-grid-color page))
 
                   (some? pixel-grid-opacity)
-                  (assoc :pixel-grid-opacity (:pixel-grid-opacity page)))]
+                  (assoc :pixel-grid-opacity (:pixel-grid-opacity page))
+
+                  (contains? options :prototype-background)
+                  (assoc :prototype-background (:prototype-background page)))]
 
      (-> changes
          (update :redo-changes conj redo)

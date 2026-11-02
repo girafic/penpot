@@ -809,7 +809,9 @@
                                  :remove-interaction remove-interaction}])])]))
 
 (mf/defc interactions-menu*
-  [{:keys [shape]}]
+  "The prototype tab: the flows and interactions of the shape `shape`;
+  with none, the flows of the page and `children` under them."
+  [{:keys [shape children]}]
   (let [interactions  (get shape :interactions [])
         flows         (mf/deref refs/workspace-page-flows)
         framed-shape? (and shape (not (cfh/unframed-shape? shape)))]
@@ -819,8 +821,10 @@
        (when (cfh/frame-shape? shape)
          [:> shape-flows* {:flows flows
                            :shape shape}])
-       (when flows
-         [:> page-flows* {:flows flows}]))
+       [:*
+        (when flows
+          [:> page-flows* {:flows flows}])
+        children])
 
      (when framed-shape?
        [:> interactions* {:interactions interactions

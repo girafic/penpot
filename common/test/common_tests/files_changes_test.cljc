@@ -392,7 +392,36 @@
             res   (ch/process-changes data' [chg])
             page  (get-in res [:pages-index page-id])]
         (t/is (= "#ffffff" (:background page)))
-        (t/is (not (contains? page :background-token)))))))
+        (t/is (not (contains? page :background-token)))))
+
+    (t/testing "sets and clears the background of the prototype"
+      (let [set   (ch/process-changes data [{:type :mod-page :id page-id
+                                             :prototype-background "#1e1e1e"}])
+            other (ch/process-changes set [{:type :mod-page :id page-id :name "Other"}])
+            clear (ch/process-changes set [{:type :mod-page :id page-id
+                                            :prototype-background nil}])]
+        (t/is (= "#1e1e1e" (get-in set [:pages-index page-id :prototype-background])))
+        (t/is (= "#1e1e1e" (get-in other [:pages-index page-id :prototype-background]))
+              "another change of the page leaves it")
+        (t/is (not (contains? (get-in clear [:pages-index page-id]) :prototype-background)))))
+
+    (t/testing "builder undoes the background of the prototype, set or not before"
+      (doseq [before [nil "#ffffff"]]
+        (let [data    (cond-> data
+                        (some? before) (assoc-in [:pages-index page-id :prototype-background] before))
+              page    (get-in data [:pages-index page-id])
+              redo    (fn [color]
+                        (let [changes (-> (pcb/empty-changes)
+                                          (pcb/with-page page)
+                                          (pcb/mod-page {:prototype-background color}))]
+                          [(ch/process-changes data (:redo-changes changes)) changes]))
+              [redone changes] (redo "#1e1e1e")
+              undone  (ch/process-changes redone (:undo-changes changes))
+              [reset] (redo nil)]
+          (t/is (= "#1e1e1e" (get-in redone [:pages-index page-id :prototype-background])))
+          (t/is (= before (get-in undone [:pages-index page-id :prototype-background])))
+          (t/is (nil? (get-in reset [:pages-index page-id :prototype-background]))
+                "nil gives the view mode its own color back"))))))
 
 (t/deftest del-obj
   (let [file-id (uuid/custom 2 2)

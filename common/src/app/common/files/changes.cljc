@@ -348,7 +348,9 @@
      ;; Pixel grid display controls — nil removes the per-page override
      ;; and falls back to the default hardcoded grid color/opacity.
      [:pixel-grid-color {:optional true} [:maybe ctc/schema:hex-color]]
-     [:pixel-grid-opacity {:optional true} [:maybe ::sm/safe-number]]]]
+     [:pixel-grid-opacity {:optional true} [:maybe ::sm/safe-number]]
+     ;; nil gives the view mode its own color back
+     [:prototype-background {:optional true} [:maybe ctc/schema:hex-color]]]]
 
    [:set-plugin-data schema:set-plugin-data-change]
 
@@ -1047,7 +1049,8 @@
                             bg         (get params :background :not-found)
                             bg-token   (get params :background-token :not-found)
                             grid-color (get params :pixel-grid-color :not-found)
-                            grid-op    (get params :pixel-grid-opacity :not-found)]
+                            grid-op    (get params :pixel-grid-opacity :not-found)
+                            proto-bg   (get params :prototype-background :not-found)]
                         (cond-> page
                           (string? name)
                           (assoc :name name)
@@ -1074,7 +1077,13 @@
                           (assoc :pixel-grid-opacity grid-op)
 
                           (and (not= grid-op :not-found) (nil? grid-op))
-                          (dissoc :pixel-grid-opacity))))))
+                          (dissoc :pixel-grid-opacity)
+
+                          (string? proto-bg)
+                          (assoc :prototype-background proto-bg)
+
+                          (and (not= proto-bg :not-found) (nil? proto-bg))
+                          (dissoc :prototype-background))))))
 
 (defmethod process-change :set-plugin-data
   [data {:keys [object-type object-id page-id namespace key value]}]

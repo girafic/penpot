@@ -33,6 +33,7 @@
    [app.main.ui.workspace.sidebar.options.menus.grid-cell :as grid-cell]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [interactions-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.layout-container :as layout-container]
+   [app.main.ui.workspace.sidebar.options.menus.prototype-background :refer [prototype-background-menu*]]
    [app.main.ui.workspace.sidebar.options.page :as page]
    [app.main.ui.workspace.sidebar.options.shapes.bool :as bool]
    [app.main.ui.workspace.sidebar.options.shapes.circle :as circle]
@@ -338,7 +339,8 @@
         (case options-mode
           :prototype
           [:div {:class (stl/css :element-options :interaction-options)}
-           [:> interactions-menu* {:shape (first shapes)}]]
+           [:> interactions-menu* {:shape (first shapes)}
+            [:> prototype-background-menu*]]]
 
           :inspect
           [:div {:class (stl/css :element-options :inspect-options)}

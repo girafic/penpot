@@ -8553,6 +8553,18 @@ msgstr "Cancel"
 msgid "workspace.options.canvas-background"
 msgstr "Canvas background"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/prototype_background.cljs
+msgid "workspace.options.prototype-background"
+msgstr "Prototype background"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/prototype_background.cljs
+msgid "workspace.options.prototype-background-add"
+msgstr "Add prototype background"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/prototype_background.cljs
+msgid "workspace.options.prototype-background-hint"
+msgstr "Round the boards shown without a device"
+
 #: src/app/main/ui/workspace/sidebar/options/page.cljs:75
 msgid "workspace.options.canvas-background-section"
 msgstr "Canvas background section"

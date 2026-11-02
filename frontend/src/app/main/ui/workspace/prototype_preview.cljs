@@ -253,6 +253,11 @@
      [:bottom-left {:x left :y (- bottom side) :w side :h side}]
      [:bottom-right {:x (- right side) :y (- bottom side) :w side :h side}]]))
 
+(def ^:private ref:prototype-background
+  "The background of the prototype of the page, round a board shown
+  without a device (see `app.main.ui.viewer/background`)."
+  (l/derived (l/key :prototype-background) refs/workspace-page))
+
 (def ^:private drawn-wait-ms
   "How long, at most, the window shows its loader once what is edited is
   saved, ms: the view mode in it that never tells it drew its first
@@ -327,6 +332,7 @@
   [{:keys [file-id preview hidden]}]
   (let [{:keys [page-id frame-id]} preview
         objects    (mf/deref refs/workspace-page-objects)
+        background (mf/deref ref:prototype-background)
         current    (mf/deref refs/current-page-id)
         selected   (mf/deref refs/selected-shapes)
         ;; the board on screen, as the view mode tells it
@@ -924,7 +930,11 @@
                             :on-click on-actual-size}]
       [:> check-menu-item* {:label (tr "workspace.preview.window-fit")
                             :on-click on-fit-window}]]
-     [:div {:class (stl/css :content)}
+     ;; the background of the prototype round a board without a device,
+     ;; as the view mode in it shows it, while it loads
+     [:div {:class (stl/css :content)
+            :style (when (and (not framed?) (some? background))
+                     #js {:backgroundColor background})}
       (when ready?
         [:iframe {:key (deref run*)
                   :ref iframe-ref
