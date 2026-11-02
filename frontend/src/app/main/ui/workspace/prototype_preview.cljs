@@ -28,7 +28,9 @@
   next time; open in the view mode closes it. The view mode tells it
   once it listens (`penpot:preview-ready`), what it asks before is sent
   then, which board it shows and where among the boards
-  (`penpot:preview-shown`), and how its animation plays
+  (`penpot:preview-shown`), once it draws its first board
+  (`penpot:preview-drawn`: the window shows a loader, on the screen of
+  the device, until then) and how its animation plays
   (`penpot:preview-playback`)."
   (:require-macros [app.main.style :as stl])
   (:require
@@ -49,6 +51,8 @@
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
+   [app.main.ui.ds.product.loader :refer [loader*]]
+   [app.main.ui.viewer.device-frame :as dfr :refer [device-drawing*]]
    [app.main.ui.viewer.device-menu :refer [device-items*]]
    [app.main.ui.workspace.canvas-window :as cw]
    [app.util.dom :as dom]
@@ -218,16 +222,22 @@
   the round of a phone."
   12)
 
+(defn- device-layout
+  "Where the device `device` (see `shown-device`) shows alone in the
+  window at `frame`, as the view mode in it lays it out (see
+  `dvd/layout`): px of the view mode in the window."
+  [device {:keys [w h]}]
+  (dvd/layout device (- w (* 2 border)) (- h bar-height (* 2 border))
+              dvd/stage-padding dvd/preview-top))
+
 (defn grips
   "Where the frame of the device `device` (see `shown-device`) scales it,
   alone in the window at `frame` (see `scaled-frame`): `[mode {:x :y :w
   :h}]`, px of the view mode in the window, for each side round its
   screen, the top and the bottom as wide as the device, then each
   corner; `grip-out` out of it."
-  [device {:keys [w h]}]
-  (let [{:keys [x y screen] dw :w dh :h}
-        (dvd/layout device (- w (* 2 border)) (- h bar-height (* 2 border))
-                    dvd/stage-padding dvd/preview-top)
+  [device frame]
+  (let [{:keys [x y screen] dw :w dh :h} (device-layout device frame)
         {sx :x sy :y sw :w sh :h} screen
         left   (- x grip-out)
         top    (- y grip-out)
@@ -242,6 +252,39 @@
      [:top-right {:x (- right side) :y top :w side :h side}]
      [:bottom-left {:x left :y (- bottom side) :w side :h side}]
      [:bottom-right {:x (- right side) :y (- bottom side) :w side :h side}]]))
+
+(def ^:private drawn-wait-ms
+  "How long, at most, the window shows its loader once what is edited is
+  saved, ms: the view mode in it that never tells it drew its first
+  board, as one that could not open the file, shows then. The view mode
+  waits for its first board no more than 8 s once it shows it."
+  60000)
+
+(mf/defc loading*
+  "What the window shows while the view mode in it loads, until it draws
+  its first board (see `prototype-preview*`): the device alone at
+  `layout` (see `device-layout`) of the color `finish`, a loader on its
+  black screen; without one, the loader alone."
+  {::mf/private true}
+  [{:keys [device layout finish label title]}]
+  [:div {:class (stl/css :loading)}
+   (if (some? layout)
+     [:*
+      [:> device-drawing* {:layout layout
+                           :kind (:kind device)
+                           :finish finish
+                           :label label}]
+      [:div {:class (stl/css :loading-screen)
+             :style (dfr/screen-style layout)}
+       [:> loader* {:title title
+                    :overlay true
+                    :width (mth/clamp (mth/round (* 0.4 (get-in layout [:screen :w]))) 32 100)}]]
+      [:> device-drawing* {:layout layout
+                           :kind (:kind device)
+                           :finish finish
+                           :cutouts true}]]
+     [:> loader* {:title title
+                  :overlay true}])])
 
 (def zoom-modes
   "The zooms of the preview, as its menu picks them: the board fitted in
@@ -353,9 +396,12 @@
         ;; last showed (see the turn below)
         last-ref   (mf/use-ref nil)
         iframe-ref (mf/use-ref nil)
-        ;; the view mode loads once what is edited is saved
+        ;; the view mode loads once what is edited is saved, and shows
+        ;; once it draws its first board
         ready*     (mf/use-state false)
         ready?     (deref ready*)
+        drawn*     (mf/use-state false)
+        drawn?     (deref drawn*)
         ;; a new frame each time it starts again
         run*       (mf/use-state 0)
         ;; the zoom it starts at, as it starts again
@@ -628,7 +674,13 @@
     ;; a new view mode in the frame listens once it says so: a new src,
     ;; or the same one started again
     (mf/with-effect [uri (deref run*)]
-      (mf/set-ref-val! listening-ref false))
+      (mf/set-ref-val! listening-ref false)
+      (reset! drawn* false))
+
+    (mf/with-effect [ready? drawn?]
+      (when (and ready? (not drawn?))
+        (let [timer (js/setTimeout #(reset! drawn* true) drawn-wait-ms)]
+          #(js/clearTimeout timer))))
 
     ;; pinned, it shows the board of the selection (see `dwpp/pin-step`)
     (mf/with-effect [follow? ready? selected current page-id objects hidden]
@@ -675,6 +727,9 @@
                       (when (mf/ref-val hidden-ref)
                         (post! iframe "penpot:preview-hide"))
                       (resync!))
+
+                    "penpot:preview-drawn"
+                    (reset! drawn* true)
 
                     ;; it could not show what was edited
                     "penpot:preview-stale"
@@ -870,14 +925,20 @@
       [:> check-menu-item* {:label (tr "workspace.preview.window-fit")
                             :on-click on-fit-window}]]
      [:div {:class (stl/css :content)}
-      (if ready?
+      (when ready?
         [:iframe {:key (deref run*)
                   :ref iframe-ref
-                  :class (stl/css :frame)
+                  :class (stl/css-case :frame true
+                                       :frame-loading (not drawn?))
                   :src uri
                   :title (tr "workspace.preview.title")
-                  :allow "autoplay"}]
-        [:span {:class (stl/css :saving)} (tr "workspace.preview.saving")])
+                  :allow "autoplay"}])
+      (when-not ^boolean drawn?
+        [:> loading* {:device device-shown
+                      :layout (when framed? (device-layout device-shown frame))
+                      :finish color
+                      :label (:name board)
+                      :title (if ready? (tr "labels.loading") (tr "workspace.preview.saving"))}])
       ;; a device alone scales from anywhere on its frame
       (when (and ^boolean framed? ^boolean ready?)
         (for [[mode {:keys [x y w h]}] (grips device-shown frame)]

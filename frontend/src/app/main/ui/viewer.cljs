@@ -714,6 +714,25 @@
                              :landscape (when (some? device) (boolean (:landscape? device)))}
                         (.. js/window -location -origin)))))
 
+    ;; the preview shows a loader of its own until the first board is
+    ;; drawn: WASM draws it once it, the fonts and the images of the page
+    ;; load. A page without boards shows as it is.
+    (mf/with-effect [preview (some? frame) (empty? frames)]
+      (when preview
+        (let [alive? (volatile! true)
+              drawn  #(when @alive?
+                        (.postMessage (.-parent js/window) #js {:type "penpot:preview-drawn"}
+                                      (.. js/window -location -origin)))]
+          (cond
+            (and (some? frame) wasm?)
+            (.then (rwv/when-frame-rendered (mf/ref-val current-viewport-ref) (:id frame)
+                                            wasm-first-draw-wait-ms)
+                   drawn)
+
+            (or (some? frame) (empty? frames))
+            (drawn))
+          #(vreset! alive? false))))
+
     ;; the bar of the preview plays, pauses and stops the animation of the
     ;; board it shows, and turns its sound on and off: it is told whether
     ;; the board animates and sounds, and whether it plays, and asks for
