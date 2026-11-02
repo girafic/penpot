@@ -10,6 +10,7 @@
    [app.common.exceptions :as ex]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.render-wasm.wasm :as wasm]
+   [app.main.ui.viewer.viewport-common :as vpc]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.modifiers :as wasm.modifiers]
    [app.render-wasm.shape :as wasm.shape]
@@ -352,7 +353,7 @@
 
 (defn- use-viewer-wasm-layers!
   [page-id page-objects size scale frame-id not-fixed-ref fixed-ref
-   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta dpr-key
+   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins delta dpr-key
    modifiers-ref frozen?]
   ;; The hot-areas SVG shifts every object by `-(size + delta)` so the frame
   ;; `selrect` lands flush against the overlay snap side, ignoring the extra
@@ -372,7 +373,7 @@
         render!
         (mf/use-fn
          (mf/deps page-id page-objects render-size scale frame-id
-                  not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids frozen?)
+                  not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins frozen?)
          (fn [modifiers]
            (when (and (not frozen?) (get page-objects frame-id))
              (let [generation (inc (mf/ref-val generation-ref))]
@@ -394,7 +395,11 @@
                                  (and fixed-canvas (seq fixed-include-ids))
                                  (conj {:canvas fixed-canvas
                                         :opts   (cond-> {:include-ids fixed-include-ids
-                                                         :modifiers modifiers}
+                                                         ;; held at the bottom of a
+                                                         ;; screen lower than the board
+                                                         :modifiers (if (seq fixed-pins)
+                                                                      (delay (vpc/pin-modifiers (force modifiers) fixed-pins))
+                                                                      modifiers)}
                                                   (seq fixed-clear-fills-ids)
                                                   (assoc :clear-fills-ids fixed-clear-fills-ids))}))]
                            (when (seq passes)
@@ -428,12 +433,14 @@
   `modifiers-ref`, when given, is a ref of the animation it plays at a
   time (a delay of its modif-tree, see `show-animation!`): it renders
   again at each of its frames. `frozen?` renders nothing: the canvases
-  keep the picture drawn on them (see `copy-canvases!`)."
+  keep the picture drawn on them (see `copy-canvases!`). The fixed
+  layers of `fixed-pins` show that far up (see `vpc/fixed-pins`)."
   [page-id page-objects size scale frame-id
    not-fixed-ref fixed-ref
-   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta modifiers-ref frozen?]
+   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins
+   delta modifiers-ref frozen?]
   (let [dpr-key (use-viewer-dpr-key)]
     (use-viewer-wasm-layers! page-id page-objects size scale frame-id
                              not-fixed-ref fixed-ref
                              not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
-                             delta dpr-key modifiers-ref frozen?)))
+                             fixed-pins delta dpr-key modifiers-ref frozen?)))

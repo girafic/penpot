@@ -125,6 +125,14 @@
     (t/is (= [0 314 874 88] (box turned :tabs))
           "at the bottom of the screen it scrolls in")))
 
+(t/deftest a-board-turns-from-its-first-screen-in-a-lower-phone
+  (let [objects (phone-objects 874)
+        frames  [(get objects (cthi/id :menu))]
+        turned  (dvt/turn-objects objects frames "iphone-home" :landscape)]
+    (t/is (= [0 0 715 874] (box turned :menu)) "as wide as the screen of the iPhone SE on its side")
+    (t/is (= [0 314 715 88] (box turned :tabs))
+          "fixed when scrolling, from the bottom of the board's own screen to the bottom of this one")))
+
 (t/deftest a-board-with-a-counterpart-stays-as-it-is
   (let [objects (phone-objects 874)
         wide    (board "Menu (landscape)" 874 402)

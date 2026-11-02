@@ -111,11 +111,12 @@
 
 (defn- turn-board
   "`objects` with the board `frame` turned in `device` (see `shown`): its
-  layers fixed when scrolling stay where they were on the screen, by
-  their constraints as the screen turns; the others, by them as the
-  board turns."
+  layers fixed when scrolling stay where they were on its first screen
+  (see `dvd/first-screen-h`), by their constraints as it turns into the
+  screen; the others, by them as the board turns."
   [objects frame device]
   (let [id     (:id frame)
+        {fw :width fh :height} (:selrect frame)
         [w h]  (turned-size frame device)
         turned (resize objects id w h)
         fixed  (into #{}
@@ -124,10 +125,10 @@
                      (cfh/get-children-ids objects id))]
     (if (empty? fixed)
       turned
-      ;; the board as high as the screen was, its layers where they are,
+      ;; the board as its first screen, its layers where they are,
       ;; turned as the screen
       (let [screen (update objects id gsh/transform-shape
-                           (ctm/change-size (get objects id) (:screen-h device) (:screen-w device)))
+                           (ctm/change-size (get objects id) fw (dvd/first-screen-h fw fh)))
             screen (resize screen id (:screen-w device) (:screen-h device))]
         (reduce #(assoc %1 %2 (get screen %2)) turned fixed)))))
 

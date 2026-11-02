@@ -63,17 +63,19 @@
   show: as the animation of `modifiers-ref` poses them (see
   `use-posed-modifiers`), tilted and in depth (see `shapes/hotspot*`).
   A board without hotspots does not follow the animation: posing all
-  its shapes takes a while."
+  its shapes takes a while. The layers of `pins` show that far up (see
+  `vpc/fixed-pins`)."
   [{:keys [vbox size class prepared prepared-all prepared-frame shape-filter
-           objects frame delta modifiers-ref]}]
+           objects frame delta modifiers-ref pins]}]
   (let [hotspots? (mf/with-memo [prepared prepared-frame shape-filter]
                     (boolean (seq (shapes/hotspot-shapes prepared (:id prepared-frame) shape-filter))))
         modifiers (use-posed-modifiers modifiers-ref hotspots?)
-        prepared  (mf/with-memo [prepared modifiers objects frame size delta]
-                    (if (and (seq modifiers) (some? objects))
-                      (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
-                           (vpc/prepare-objects frame size delta))
-                      prepared))
+        prepared  (mf/with-memo [prepared modifiers objects frame size delta pins]
+                    (cond-> (if (and (seq modifiers) (some? objects))
+                              (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
+                                   (vpc/prepare-objects frame size delta))
+                              prepared)
+                      (seq pins) (vpc/pin-objects pins)))
         prepared-frame (or (get prepared (:id prepared-frame)) prepared-frame)]
     [:svg {:view-box vbox
            :width (:width size)
@@ -93,12 +95,13 @@
        :shape-filter shape-filter}]]))
 
 (mf/defc wasm-layer*
-  "The WASM picture of the layers of `shape-filter` and their hotspots.
-  The ones that scroll (`scrolls`) move past an end of a touch screen
-  (see `.in-device[data-overscroll]` in the viewer styles)."
+  "The WASM picture of the layers of `shape-filter` and their hotspots,
+  those of `pins` that far up (see `vpc/fixed-pins`). The ones that
+  scroll (`scrolls`) move past an end of a touch screen (see
+  `.in-device[data-overscroll]` in the viewer styles)."
   [{:keys [canvas-ref scale size vbox
            prepared prepared-all prepared-frame class shape-filter
-           objects frame delta modifiers-ref scrolls]}]
+           objects frame delta modifiers-ref scrolls pins]}]
   (let [{:keys [width height]} (canvas-dimensions scale size)]
     [:div {:data-scroll-layer scrolls
            :style {:position "absolute"
@@ -120,7 +123,8 @@
                              :objects objects
                              :frame frame
                              :delta delta
-                             :modifiers-ref modifiers-ref}]]))
+                             :modifiers-ref modifiers-ref
+                             :pins pins}]]))
 
 (defn- fixed-scroll-layer-ids
   [objects frame-id has-fixed?]
@@ -147,9 +151,11 @@
   "The board `frame` of `page` rendered by WASM. `modifiers-ref` holds
   the animation it plays, which shows over its shapes as they are loaded
   (see `rwv/use-viewer-wasm-viewport!`); `is-snapshot` draws nothing on
-  it (see `interactions/viewport*`)."
+  it (see `interactions/viewport*`). On a screen `fixed-drop` px lower
+  than its first one, its layers fixed when scrolling stay where their
+  vertical constraint holds them (see `vpc/fixed-pins`)."
   {::mf/wrap [mf/memo]}
-  [{:keys [page frame base offset size delta is-fixed modifiers-ref is-snapshot]}]
+  [{:keys [page frame base offset size delta is-fixed modifiers-ref is-snapshot fixed-drop]}]
   (let [;; the same point each render, or the layers would render again
         delta     (mf/with-memo [delta] (or delta (gpt/point 0 0)))
         vbox      (:vbox size)
@@ -185,6 +191,9 @@
 
         prepared-frame (get prepared frame-id)
 
+        pins (mf/with-memo [objects frame-id has-fixed? fixed-drop]
+               (when has-fixed? (vpc/fixed-pins objects frame-id fixed-drop)))
+
         not-fixed-props
         (mf/props {:prepared prepared
                    :prepared-all prepared-all
@@ -217,12 +226,13 @@
                    :size size
                    :vbox vbox
                    :class (stl/css :not-fixed)
-                   :shape-filter #(contains? fixed-mask-set %)})]
+                   :shape-filter #(contains? fixed-mask-set %)
+                   :pins pins})]
 
     (rwv/use-viewer-wasm-viewport!
      page-id objects size scale frame-id
      not-fixed-wasm-ref fixed-wasm-ref
-     not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
+     not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids pins
      delta modifiers-ref (true? is-snapshot))
 
     [:& (mf/provider shapes/base-frame-ctx) {:value (get prepared-all (:id base))}

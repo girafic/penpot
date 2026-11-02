@@ -8,6 +8,7 @@
   "Shared object preparation for viewer viewports (SVG and WASM)."
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
@@ -49,6 +50,47 @@
       (into #{}
             (filter #(contains? subtree %)
                     (get-fixed-ids objects))))))
+
+(defn fixed-pins
+  "How far up each layer of the board `frame-id` of `objects` fixed when
+  scrolling goes on a screen `drop` px of the board lower than its first
+  screen (see `viewer/fixed-drop`), to stay where its vertical
+  constraint holds it on the screen: as far at the bottom, half as far
+  in the middle, the others where they are. `{id distance}`, nil when
+  the screen is as high."
+  [objects frame-id drop]
+  (when (and (number? drop) (pos? drop))
+    (not-empty
+     (into {}
+           (keep (fn [id]
+                   (let [shape (get objects id)]
+                     (when (cfh/fixed-scroll? shape)
+                       (case (:constraints-v shape)
+                         :bottom [id drop]
+                         :center [id (/ drop 2)]
+                         nil)))))
+           (dm/get-in objects [frame-id :shapes])))))
+
+(defn pin-objects
+  "`objects` with each layer of `pins` (see `fixed-pins`), and the layers
+  in it, moved up as far."
+  [objects pins]
+  (reduce-kv (fn [objects id distance]
+               (let [modifiers (ctm/move-modifiers 0 (- distance))]
+                 (reduce #(d/update-when %1 %2 gsh/transform-shape modifiers)
+                         objects
+                         (cons id (cfh/get-children-ids objects id)))))
+             objects
+             pins))
+
+(defn pin-modifiers
+  "The modif-tree `modif-tree` (an animation at a time, or nil) with each
+  layer of `pins` (see `fixed-pins`) moved up as far after it."
+  [modif-tree pins]
+  (reduce-kv (fn [tree id distance]
+               (update-in tree [id :modifiers] ctm/add-modifiers (ctm/move-modifiers 0 (- distance))))
+             (or modif-tree {})
+             pins))
 
 (defn prepare-page-objects
   "Transform all page objects into vbox-space (for overlay positioning)."

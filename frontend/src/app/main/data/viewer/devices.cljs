@@ -182,6 +182,13 @@
         (when-let [kind (some #{(keyword choice)} kinds)]
           (device-of kind bw bh))))))
 
+(defn first-screen-h
+  "How high the first screen of a board `bw` × `bh` is, where its layers
+  fixed when scrolling sit: the screen of the device \"auto\" gives it,
+  else all of it."
+  [bw bh]
+  (min bh (or (:screen-h (resolve-device "auto" bw bh)) bh)))
+
 (defn turn
   "`device` (see `resolve-device`) turned a quarter: on its side, or
   standing up again, its screen as wide as it was high."

@@ -109,6 +109,19 @@
      :height      (* height zoom)
      :vbox        (dm/fmt "% % % %" 0 0 width height)}))
 
+(defn fixed-drop
+  "Px of the first screen of the board `frame` below the screen of
+  `device` (see `dvd/resolve-device`) it shows in: the screen of the
+  device \"auto\" gives it, else all of it (see `dvd/first-screen-h`).
+  Its layers fixed when scrolling sit on its first screen; those at its
+  bottom stay at the bottom of a lower one (see `vpc/fixed-pins`). Nil
+  without a device or with nothing below."
+  [frame device]
+  (when (some? device)
+    (let [{:keys [width height]} (:selrect frame)
+          drop (- (dvd/first-screen-h width height) (:screen-h device))]
+      (when (pos? drop) drop))))
+
 (defn calculate-delta
   "Calculate the displacement we need to apply so that the original selrect appears in the
    same position as if it had no extra paddings, depending on the side the frame will
@@ -320,9 +333,11 @@
   "The viewport of the board `frame` of `page`, which plays the animation
   of the view mode (see `animation-modifiers`) on its own: it takes the
   modif-tree at the playback time from a ref, so neither this nor the
-  rest of the view mode renders again at each frame."
+  rest of the view mode renders again at each frame. `fixed-drop`, the
+  px of its first screen below the screen of its device (see
+  `fixed-drop`)."
   {::mf/private true}
-  [{:keys [page frame size interactions-mode]}]
+  [{:keys [page frame size interactions-mode fixed-drop]}]
   (let [files         (mf/deref refs/files)
         ;; A delay: a frame the viewport does not get to is not worked out.
         modifiers-ref (mf/with-memo [page files]
@@ -335,12 +350,13 @@
       :size size
       :page page
       :modifiers-ref modifiers-ref
-      :interactions-mode interactions-mode}]))
+      :interactions-mode interactions-mode
+      :fixed-drop fixed-drop}]))
 
 (mf/defc viewer-wrapper
   {::mf/wrap-props false}
   [{:keys [wrapper-size orig-frame orig-viewport-ref orig-size page file users current-viewport-ref
-           size frame interactions-mode overlays zoom section index animated sound]}]
+           size frame interactions-mode overlays zoom section index animated sound fixed-drop]}]
 
   [:*
    [:& viewer-pagination-and-sidebar
@@ -386,7 +402,8 @@
        {:frame frame
         :size size
         :page page
-        :interactions-mode interactions-mode}]
+        :interactions-mode interactions-mode
+        :fixed-drop fixed-drop}]
 
       (for [overlay overlays]
         [:& viewer-overlay
@@ -494,9 +511,10 @@
         frames    (:frames page)
         drawn     (get (:frames base-page) index)
         frame     (show-board drawn)
-        device    (mf/with-memo [base-page drawn section device-choice device-hold]
+        shown     (mf/with-memo [base-page drawn section device-choice device-hold]
                     (when (and (= section :interactions) (some? drawn))
-                      (:device (dvt/shown (:all-frames base-page) drawn device-choice device-hold))))
+                      (dvt/shown (:all-frames base-page) drawn device-choice device-hold)))
+        device    (:device shown)
 
         ;; What the board on screen plays on, its timeline or the
         ;; animations of the component copies in it (see `dv/board-clock`).
@@ -1072,7 +1090,10 @@
               :section section
               :index index
               :animated (some? clock)
-              :sound board-sound?}]]))]
+              :sound board-sound?
+              ;; turned, its fixed layers are where the screen
+              ;; turned has them (see `dvt/turn-objects`)
+              :fixed-drop (when-not (:turned? shown) (fixed-drop frame device))}]]))]
 
       ;; the island, notch or camera of the device, over its screen
       (when (some? device-layout)
