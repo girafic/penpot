@@ -790,8 +790,10 @@
             :on-pointer-move on-move
             :on-lost-pointer-capture on-up
             :on-double-click on-reset}
-      ;; a click on its buttons moves nothing
+      ;; a click on its buttons moves nothing, and they show their own
+      ;; tooltips, not the one of the bar (an empty title stops it)
       [:div {:class (stl/css :buttons)
+             :title ""
              :on-pointer-down dom/stop-propagation
              :on-double-click dom/stop-propagation}
        [:> icon-button* {:variant "ghost"
@@ -838,6 +840,7 @@
       [:span {:class (stl/css :title)}
        (or (:name board) (tr "workspace.preview.title"))]
       [:div {:class (stl/css :buttons)
+             :title ""
              :on-pointer-down dom/stop-propagation
              :on-double-click dom/stop-propagation}
        (when ^boolean turns?
