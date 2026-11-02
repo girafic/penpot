@@ -24,10 +24,11 @@
    [cuerdas.core :as str]))
 
 (defn way
-  "How `device` (see `dvd/resolve-device`) stands: `:landscape` on its
-  side, else `:portrait`."
-  [device]
-  (if (:landscape? device) :landscape :portrait))
+  "How the screen of `device` (see `dvd/resolve-device`) stands:
+  `:landscape` when wider than high, else `:portrait`. The open iPhone
+  Duo stands wide: on its side, its screen stands up."
+  [{:keys [screen-w screen-h]}]
+  (if (> screen-w screen-h) :landscape :portrait))
 
 (defn- board-way
   "How the board `frame` stands: `:landscape` when wider than high."

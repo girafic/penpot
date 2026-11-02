@@ -10,8 +10,9 @@
   its screen, what is drawn round it and where it goes in the view mode.
   A screen is as wide as the board and the device is scaled as a whole,
   so the zoom of the board is the scale of the device. Sizes are px of
-  the board; a device that turns lies on its side for a board wider than
-  high, the iPhone Duo opens for one."
+  the board; a device that turns lies on its side for a board the other
+  way than it stands: wider than high, or higher than wide for the open
+  iPhone Duo, which stands wide."
   (:require
    [app.common.data :as d]
    [app.common.math :as mth]))
@@ -21,13 +22,13 @@
   before an Android phone of the same size, a browser before an iPad for
   a long page 1024 px wide)."
   [:iphone-island :iphone-notch :iphone-home :browser :ipad :watch :macbook :android
-   :imac :iphone-duo])
+   :imac :iphone-duo-closed :iphone-duo-open])
 
 (def choices
   "What a menu of the view mode picks, in its order: no device, the one
   the size of the board says, or one of `kinds`."
-  ["none" "auto" "iphone-island" "iphone-notch" "iphone-home" "iphone-duo"
-   "android" "ipad" "macbook" "watch" "imac" "browser"])
+  ["none" "auto" "iphone-island" "iphone-notch" "iphone-home" "iphone-duo-closed"
+   "iphone-duo-open" "android" "ipad" "macbook" "watch" "imac" "browser"])
 
 (def finishes
   "The colors of a device."
@@ -54,12 +55,12 @@
 
 (def ^:private specs
   "Each of `kinds`: its screen's height over its width as it stands
-  (`:ratio`), whether it turns for a board wider than high, whether
+  (`:ratio`, below 1 for one that stands wide), whether it turns for a
+  board the other way than it stands (see `on-side?`), whether
   \"auto\" picks it for a board of one of its `:sizes`, whether a taller
   board as wide as one of its sizes, or of its `:pages`, scrolls in it
   then (`:tall`), and the short side of the screen its drawing is
-  measured on (`:ref`). The iPhone Duo opens for a board wider than
-  high, to a screen of `:open-ratio` measured on `:open-ref`. A browser
+  measured on (`:ref`). A browser
   shows a board whole up to as high as wide or `:window` px, a longer
   one in a window at least that high, its toolbar as large at any size
   (no `:ref`). One with a `:touch` screen scrolls when dragged."
@@ -82,10 +83,12 @@
                            [412 892] [412 914] [412 915] [412 917]]}
    :imac          {:ratio (/ 9 16) :turns false :auto false :ref 1260
                    :sizes []}
-   ;; the foldable of the demo: a cover 270 × 396, open 568 × 400
-   :iphone-duo    {:ratio (/ 396 270) :turns false :auto false :ref 270 :touch true
-                   :open-ratio (/ 400 568) :open-ref 400
-                   :sizes []}
+   ;; the foldable, closed (its cover) and open; its drawing measured on
+   ;; a cover 270 wide and an open screen 400 high
+   :iphone-duo-closed {:ratio (/ 678 466) :turns true :auto true :ref 270 :touch true
+                       :sizes [[466 678]]}
+   :iphone-duo-open   {:ratio (/ 626 890) :turns true :auto true :ref 400 :touch true
+                       :sizes [[890 626]]}
    ;; the web presets of the workspace, less the size of a slide
    :browser       {:ratio (/ 800 1280) :turns false :auto true :tall true :window 1024
                    :sizes [[1280 800] [1366 768] [1440 1024]]
@@ -98,9 +101,18 @@
   (true? (get-in specs [kind :touch])))
 
 (defn turns?
-  "Whether the device `kind` turns on its side: a phone or a tablet."
+  "Whether the device `kind` turns on its side: a phone, the iPhone Duo
+  or a tablet."
   [kind]
   (true? (get-in specs [kind :turns])))
+
+(defn- on-side?
+  "Whether the device of `spec` lies on its side for a board `bw` × `bh`:
+  one that turns, for a board the other way than it stands, wider than
+  high for one that stands up, higher than wide for one that stands
+  wide (the open iPhone Duo)."
+  [{:keys [ratio turns]} bw bh]
+  (and (true? turns) (if (< ratio 1) (< bw bh) (> bw bh))))
 
 (defn- pages
   "The sizes a board taller than one as wide scrolls in, of `spec`."
@@ -119,10 +131,10 @@
   tablet or browser as wide as it that it scrolls in, else nil."
   [bw bh]
   (or (some (fn [kind]
-              (let [{:keys [auto turns sizes]} (get specs kind)]
+              (let [{:keys [auto turns sizes] :as spec} (get specs kind)]
                 (when (and auto (some #(size-of? % bw bh turns) sizes))
                   {:kind kind
-                   :landscape? (and turns (> bw bh))
+                   :landscape? (on-side? spec bw bh)
                    :screen-w bw
                    :screen-h bh})))
             kinds)
@@ -134,12 +146,6 @@
                     {:kind kind :landscape? false :screen-w bw :screen-h h})))
               kinds))))
 
-(defn open?
-  "Whether the device `kind` opens for a screen `sw` × `sh`: the iPhone
-  Duo, for one wider than high."
-  [kind sw sh]
-  (and (some? (get-in specs [kind :open-ratio])) (> sw sh)))
-
 (defn- device-of
   "The device `kind` round a board `bw` × `bh`: as high as the board
   when the board is of its proportions (one of its sizes, or within 8 %;
@@ -147,12 +153,9 @@
   it as wide as the board nearest its proportions, else as high as the
   device then is."
   [kind bw bh]
-  (let [{:keys [ratio open-ratio turns sizes window] :as spec} (get specs kind)
-        landscape? (and turns (> bw bh))
-        ratio      (cond
-                     landscape?          (/ 1 ratio)
-                     (open? kind bw bh)  open-ratio
-                     :else               ratio)
+  (let [{:keys [ratio turns sizes window] :as spec} (get specs kind)
+        landscape? (on-side? spec bw bh)
+        ratio      (if landscape? (/ 1 ratio) ratio)
         fits?      (or (some #(size-of? % bw bh turns) sizes)
                        (if (some? window)
                          (<= bh (max bw window))
@@ -171,8 +174,9 @@
 
 (defn resolve-device
   "The device `choice` (one of `choices`) shows a board `bw` × `bh` in:
-  `{:kind :landscape? :screen-w :screen-h}`, a screen as wide as the
-  board; nil for none. The board scrolls in a screen lower than it."
+  `{:kind :landscape? :screen-w :screen-h}`, whether it lies on its side
+  (see `on-side?`) and a screen as wide as the board; nil for none. The
+  board scrolls in a screen lower than it."
   [choice bw bh]
   (let [bw (some-> bw mth/round)
         bh (some-> bh mth/round)]
@@ -217,16 +221,22 @@
 (defn- slab
   "A phone, tablet or watch round a screen `sw` × `sh`: a band of
   `band` round a glass face, the screen `insets` from the band's edge
-  `[top right bottom left]`, buttons out of its sides as `[side at
-  length]` and `margin` round it for them; px of the reference device
-  times `k`."
-  [sw sh k {:keys [insets band radius body-radius face margin buttons]
-            :or {face :glass margin 3}}]
+  `[top right bottom left]`, its corners round by `radius` (each by
+  `screen-radii`, `[top-left top-right bottom-right bottom-left]`), the
+  band's by `body-radius` (each by `body-radii`), buttons out of its
+  sides as `[side at length]` and `margin` round it for them; px of the
+  reference device times `k`."
+  [sw sh k {:keys [insets band radius body-radius screen-radii body-radii face margin buttons]
+            :or {face :glass margin 3 radius 0}}]
   (let [[top right bottom left] (mapv #(* % k) insets)
         m      (* margin k)
         band   (* band k)
         radius (* radius k)
-        body-r (if (some? body-radius) (* body-radius k) (+ radius top))
+        body-r (cond
+                 (some? body-radii)  (mapv #(* % k) body-radii)
+                 (some? body-radius) (* body-radius k)
+                 :else               (+ radius top))
+        face-r (if (vector? body-r) (mapv #(max 0 (- % band)) body-r) (- body-r band))
         bw     (+ sw left right)
         bh     (+ sh top bottom)
         out    (* 3 k)
@@ -240,11 +250,14 @@
     {:w (+ bw (* 2 m))
      :h (+ bh (* 2 m))
      :body {:x m :y m :w bw :h bh}
-     :screen {:x (+ m left) :y (+ m top) :w sw :h sh :radii [radius radius radius radius]}
+     :screen {:x (+ m left) :y (+ m top) :w sw :h sh
+              :radii (if (some? screen-radii)
+                       (mapv #(* % k) screen-radii)
+                       [radius radius radius radius])}
      :parts (-> (mapv button buttons)
                 (conj (rect m m bw bh body-r :band)
                       (rect (+ m band) (+ m band) (- bw (* 2 band)) (- bh (* 2 band))
-                            (- body-r band) face)))
+                            face-r face)))
      :cutouts []}))
 
 (defn- notch
@@ -304,27 +317,45 @@
              (rect 0 r body-w (- front-h r) 0 :front)]
      :cutouts []}))
 
-(defn- foldable
-  "The iPhone Duo round a screen `sw` × `sh`: closed, its cover with the
-  island; open, two halves round one screen with the crease between
-  them and a camera in the right one."
+(defn- duo-closed
+  "The iPhone Duo closed round its cover screen `sw` × `sh`: round at
+  its right, square at its hinge on the left, past which the half
+  behind it shows, a camera at the top right of the screen."
   [sw sh k]
-  (if (> sw sh)
-    (let [g (slab sw sh k {:insets [10 10 10 10] :band 3 :radius 28
-                           :buttons [[:top 287 14] [:bottom 287 14] [:top 470 36]
-                                     [:top 512 36] [:right 104 58]]})
-          {:keys [x y w]} (:screen g)
-          mid (+ x (/ w 2))]
-      (update g :cutouts conj
-              (rect (- mid k) y (* 2 k) sh 0 :crease)
-              (circle (+ x w (* -16 k)) (+ y (* 12 k)) (* 4.5 k) :cutout)))
-    (let [g (slab sw sh k {:insets [12 12 12 12] :band 3 :radius 26
-                           :buttons [[:top 176 36] [:top 218 36] [:right 104 58]]})
-          {:keys [x y w]} (:screen g)
-          iw (* 84 k)
-          ih (* 25 k)]
-      (update g :cutouts conj
-              (rect (+ x (/ (- w iw) 2)) (+ y (* 7 k)) iw ih (/ ih 2) :cutout)))))
+  (let [g (slab sw sh k {:insets [9 9 9 9] :band 3 :margin 7
+                         :screen-radii [2 34 34 2] :body-radii [3 43 43 3]
+                         :buttons [[:top 127 38] [:top 174 38] [:right 116 66]]})
+        {:keys [x y h]} (:body g)
+        {sx :x sy :y sw' :w} (:screen g)]
+    (-> g
+        (update :parts #(into [(rect (- x (* 7 k)) (+ y (* 4 k)) (* 24 k) (- h (* 8 k)) (* 3.5 k) :band)
+                               (rect (- x (* 1.5 k)) (+ y (* 4 k)) (* 1.5 k) (- h (* 8 k)) 0 :glass)]
+                              %))
+        (update :cutouts conj
+                (circle (- (+ sx sw') (* 26 k)) (+ sy (* 28.5 k)) (* 10.5 k) :cutout)))))
+
+(defn- duo-open
+  "The iPhone Duo open round its screen `sw` × `sh`: two halves that
+  meet at the hinge, a notch at its top and its bottom."
+  [sw sh k]
+  (let [g    (slab sw sh k {:insets [13 13 13 13] :band 3 :radius 28 :body-radius 44
+                            :buttons [[:top 431 39] [:top 480 39] [:right 120 68]]})
+        {:keys [x y w h]} (:body g)
+        r    (* 44 k)
+        meet (* 3 k)
+        gap  (* 7 k)
+        dip  (* 2.5 k)
+        half (/ (- w gap) 2)]
+    (update g :parts
+            (fn [parts]
+              (into []
+                    (mapcat (fn [part]
+                              (if (= :band (:role part))
+                                [(rect x y half h [r meet meet r] :band)
+                                 (rect (+ x half gap) y half h [meet r r meet] :band)
+                                 (rect (- (+ x half) k) (+ y dip) (+ gap (* 2 k)) (- h (* 2 dip)) 0 :band)]
+                                [part])))
+                    parts)))))
 
 (defn- window
   "A browser window round a page `sw` × `sh`: its toolbar above with the
@@ -360,8 +391,7 @@
   `:cutouts` over it; each is a `:rect`, a `:circle` or a `:label` with
   a `:role`."
   [kind sw sh]
-  (let [{:keys [ref open-ref]} (get specs kind)
-        ref (if (open? kind sw sh) open-ref ref)
+  (let [{:keys [ref]} (get specs kind)
         k   (if (some? ref) (/ (min sw sh) ref) 1)
         cx  (fn [{:keys [screen]}] (+ (:x screen) (/ (:w screen) 2)))]
     (case kind
@@ -414,7 +444,8 @@
 
       :macbook    (laptop sw sh k)
       :imac       (desktop sw sh k)
-      :iphone-duo (foldable sw sh k)
+      :iphone-duo-closed (duo-closed sw sh k)
+      :iphone-duo-open   (duo-open sw sh k)
       :browser    (window sw sh))))
 
 (defn- standing

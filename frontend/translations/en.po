@@ -6193,8 +6193,12 @@ msgid "viewer.device.ipad"
 msgstr "iPad"
 
 #: src/app/main/ui/viewer/device_menu.cljs
-msgid "viewer.device.iphone-duo"
-msgstr "iPhone Duo (foldable)"
+msgid "viewer.device.iphone-duo-closed"
+msgstr "iPhone Duo, Closed"
+
+#: src/app/main/ui/viewer/device_menu.cljs
+msgid "viewer.device.iphone-duo-open"
+msgstr "iPhone Duo, Open"
 
 #: src/app/main/ui/viewer/device_menu.cljs
 msgid "viewer.device.iphone-home"

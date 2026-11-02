@@ -34,7 +34,6 @@
     :ring      (stl/css :ring)
     :lens      (stl/css :lens)
     :cutout    (stl/css :cutout)
-    :crease    (stl/css :crease)
     :toolbar   (stl/css :toolbar)
     :rule      (stl/css :rule)
     :close     (stl/css :close)
@@ -51,6 +50,17 @@
       (dm/str (subs text 0 (dec n)) "…")
       text)))
 
+(defn- rounded-path
+  "The outline of a box `x` `y` `w` × `h` with its corners round by
+  `[top-left top-right bottom-right bottom-left]`, as an SVG path."
+  [x y w h [tl tr br bl]]
+  (let [right (+ x w) bottom (+ y h)]
+    (dm/str "M" (+ x tl) "," y
+            "H" (- right tr) "A" tr "," tr " 0 0 1 " right "," (+ y tr)
+            "V" (- bottom br) "A" br "," br " 0 0 1 " (- right br) "," bottom
+            "H" (+ x bl) "A" bl "," bl " 0 0 1 " x "," (- bottom bl)
+            "V" (+ y tl) "A" tl "," tl " 0 0 1 " (+ x tl) "," y "Z")))
+
 (defn- shape-element
   [label index {:keys [type role] :as shape}]
   (case type
@@ -62,9 +72,13 @@
                      :x (:x shape) :y (:y shape) :font-size (:size shape)
                      :text-anchor "middle" :dominant-baseline "central"}
               (fit-text (or label "") (:size shape) (:max-w shape))])
-    (mf/html [:rect {:key index :class (role-class role)
-                     :x (:x shape) :y (:y shape) :width (:w shape) :height (:h shape)
-                     :rx (:r shape)}])))
+    ;; a rect with corners each its own way, as a path
+    (if (vector? (:r shape))
+      (mf/html [:path {:key index :class (role-class role)
+                       :d (rounded-path (:x shape) (:y shape) (:w shape) (:h shape) (:r shape))}])
+      (mf/html [:rect {:key index :class (role-class role)
+                       :x (:x shape) :y (:y shape) :width (:w shape) :height (:h shape)
+                       :rx (:r shape)}]))))
 
 (mf/defc device-drawing*
   "The device `kind` of `layout` (see `dvd/layout`) in its `finish`: its

@@ -98,7 +98,8 @@
   (t/is (nil? (dvd/resolve-device "auto" nil nil))))
 
 (t/deftest the-phones-and-tablets-scroll-when-dragged
-  (doseq [kind [:iphone-island :iphone-notch :iphone-home :iphone-duo :android :ipad :watch]]
+  (doseq [kind [:iphone-island :iphone-notch :iphone-home :iphone-duo-closed :iphone-duo-open
+                :android :ipad :watch]]
     (t/is (true? (dvd/touch? kind)) (name kind)))
   (doseq [kind [:macbook :imac :browser :toaster]]
     (t/is (false? (dvd/touch? kind)) (name kind))))
@@ -197,20 +198,32 @@
   (t/is (some #(= :label (:type %)) (:parts (dvd/geometry :browser 1440 900)))
         "the name of the board in its field"))
 
-(t/deftest the-iphone-duo-opens-for-a-wide-board
-  (t/is (= {:kind :iphone-duo :landscape? false :screen-w 270 :screen-h 396}
-           (dvd/resolve-device "iphone-duo" 270 396))
-        "closed, the cover")
-  (t/is (= {:kind :iphone-duo :landscape? false :screen-w 568 :screen-h 400}
-           (dvd/resolve-device "iphone-duo" 568 400))
-        "open")
-  (t/is (= 901 (:screen-h (dvd/resolve-device "iphone-duo" 1280 720))) "open, a slide at its top")
-  (t/is (= 440 (:screen-h (dvd/resolve-device "iphone-duo" 300 2000))) "a long board scrolls")
-  (let [roles   #(set (map :role (:cutouts %)))
-        open    (dvd/geometry :iphone-duo 568 400)
-        closed  (dvd/geometry :iphone-duo 270 396)]
-    (t/is (contains? (roles open) :crease) "the crease over the open screen")
-    (t/is (not (contains? (roles closed) :crease)))
-    (t/is (> (:w open) (* 1.9 (:w closed))) "two halves")
-    (t/is (true? (dvd/open? :iphone-duo 568 400)))
-    (t/is (false? (dvd/open? :ipad 1194 834)))))
+(t/deftest the-iphone-duo-closed-or-open
+  (t/is (= {:kind :iphone-duo-closed :landscape? false :screen-w 466 :screen-h 678}
+           (dvd/resolve-device "auto" 466 678))
+        "closed, the cover of its preset")
+  (t/is (= {:kind :iphone-duo-open :landscape? false :screen-w 890 :screen-h 626}
+           (dvd/resolve-device "auto" 890 626))
+        "open, of its preset")
+  (t/is (= {:kind :iphone-duo-open :landscape? true :screen-w 466 :screen-h 678}
+           (dvd/resolve-device "iphone-duo-open" 466 678))
+        "open, a board higher than wide: on its side, standing up")
+  (t/is (= {:kind :iphone-duo-closed :landscape? true :screen-w 890 :screen-h 626}
+           (dvd/resolve-device "iphone-duo-closed" 890 626))
+        "closed, a wide board: on its side")
+  (t/is (= {:kind :iphone-duo-open :landscape? true :screen-w 626 :screen-h 890}
+           (dvd/resolve-device "auto" 626 890))
+        "its preset turned")
+  (t/is (= {:kind :iphone-duo-open :landscape? false :screen-w 400 :screen-h 281}
+           (dvd/resolve-device "iphone-duo-open" 400 400))
+        "a square board in the open one as it stands: it scrolls")
+  (t/is (and (dvd/turns? :iphone-duo-closed) (dvd/turns? :iphone-duo-open)) "both turn")
+  (let [closed (dvd/geometry :iphone-duo-closed 466 678)
+        open   (dvd/geometry :iphone-duo-open 890 626)
+        bands  #(filter (comp #{:band} :role) (:parts %))
+        [tl tr br bl] (get-in closed [:screen :radii])]
+    (t/is (and (< tl tr) (= tl bl) (= tr br)) "closed, square at its hinge, round at its right")
+    (t/is (some #(= :circle (:type %)) (:cutouts closed)) "a camera over the cover")
+    (t/is (< (:x (first (bands closed))) (get-in closed [:body :x])) "the half behind past the hinge")
+    (t/is (= 3 (count (bands open))) "open, two halves and the hinge between")
+    (t/is (empty? (:cutouts open)) "nothing over the open screen")))

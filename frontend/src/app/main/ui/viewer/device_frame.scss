@@ -104,11 +104,6 @@
   fill: var(--device-lens);
 }
 
-// the fold of an open iPhone Duo, over its screen: seen on dark and light
-.crease {
-  fill: rgb(128 128 128 / 0.18);
-}
-
 .toolbar {
   fill: var(--device-toolbar);
   stroke: var(--device-edge);

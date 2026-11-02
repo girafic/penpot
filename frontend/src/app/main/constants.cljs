@@ -46,6 +46,12 @@
    {:name "iPhone 16 Plus"
     :width 430
     :height 932}
+   {:name "iPhone Duo, Closed"
+    :width 466
+    :height 678}
+   {:name "iPhone Duo, Open"
+    :width 890
+    :height 626}
    {:name "14/15 Pro Max"
     :width 430
     :height 932}

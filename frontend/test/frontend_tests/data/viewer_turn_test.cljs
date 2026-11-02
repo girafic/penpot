@@ -84,6 +84,27 @@
     (t/is (= :portrait (dvt/next-hold wide "iphone-island"
                                       (dvd/resolve-device "iphone-island" 874 402))))))
 
+(t/deftest the-open-iphone-duo-stands-wide
+  (let [open  (board "Open" 890 626)
+        stood (dvd/resolve-device "iphone-duo-open" 890 626)]
+    (t/is (= :landscape (dvt/way stood)) "its screen wider than high, as it stands")
+    (t/is (= :portrait (dvt/next-hold open "iphone-duo-open" stood)))
+    (let [{:keys [device turned?]} (dvt/shown [open] open "iphone-duo-open" :portrait)]
+      (t/is turned?)
+      (t/is (= [true 626 890] ((juxt :landscape? :screen-w :screen-h) device))
+            "on its side, standing up")
+      (t/is (nil? (dvt/next-hold open "iphone-duo-open" device)) "turned back as drawn"))
+    (let [tall (board "Open (portrait)" 626 890)
+          {:keys [frame-id device]} (dvt/shown [open tall] open "auto" :portrait)]
+      (t/is (= (:id tall) frame-id) "the counterpart")
+      (t/is (= [:iphone-duo-open true] ((juxt :kind :landscape?) device)))))
+  (let [closed (board "Cover" 466 678)
+        {:keys [device turned?]} (dvt/shown [closed] closed "auto" :landscape)]
+    (t/is turned?)
+    (t/is (= [:iphone-duo-closed true 678 466]
+             ((juxt :kind :landscape? :screen-w :screen-h) device))
+          "closed, on its side")))
+
 (defn- phone-objects
   "A page with the board Menu 402 × `h`: a card across it, a bar at its
   bottom and, fixed when scrolling, tabs at the bottom of the screen."
