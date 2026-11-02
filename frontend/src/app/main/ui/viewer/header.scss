@@ -6,8 +6,12 @@
 
 @use "refactor/common-refactor.scss" as deprecated;
 
+// Over a device and its screen (see `.device-stage` of the view mode),
+// its menus too, also when it moves in full screen or with the
+// thumbnails (a transform makes it a stacking context of its own).
 .viewer-header {
   position: absolute;
+  z-index: deprecated.$z-index-3;
   top: 0;
   grid-column: 1 / span 1;
   grid-row: 1 / span 1;
