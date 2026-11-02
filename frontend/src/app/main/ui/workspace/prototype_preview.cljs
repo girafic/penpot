@@ -52,6 +52,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.ds.product.loader :refer [loader*]]
+   [app.main.ui.viewer.background :as vbg]
    [app.main.ui.viewer.device-frame :as dfr :refer [device-drawing*]]
    [app.main.ui.viewer.device-menu :refer [device-items*]]
    [app.main.ui.workspace.canvas-window :as cw]
@@ -255,7 +256,7 @@
 
 (def ^:private ref:prototype-background
   "The background of the prototype of the page, round a board shown
-  without a device (see `app.main.ui.viewer/background`)."
+  without a device (see `vbg/background`)."
   (l/derived (l/key :prototype-background) refs/workspace-page))
 
 (def ^:private drawn-wait-ms
@@ -936,8 +937,10 @@
      ;; the background of the prototype round a board without a device,
      ;; as the view mode in it shows it, while it loads
      [:div {:class (stl/css :content)
-            :style (when (and (not framed?) (some? background))
-                     #js {:backgroundColor background})}
+            :style (when-not ^boolean framed?
+                     (vbg/background-style background
+                                           (- (:w frame) (* 2 border))
+                                           (- (:h frame) bar-height (* 2 border))))}
       (when ready?
         [:iframe {:key (deref run*)
                   :ref iframe-ref

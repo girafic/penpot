@@ -18,6 +18,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.file :as ctf]
+   [app.common.types.page :as ctp]
    [app.common.types.shape :as cts]
    [app.common.types.tokens-lib :as ctob]
    [app.common.types.tokens-status :as ctos]
@@ -404,6 +405,17 @@
         (t/is (= "#1e1e1e" (get-in other [:pages-index page-id :prototype-background]))
               "another change of the page leaves it")
         (t/is (not (contains? (get-in clear [:pages-index page-id]) :prototype-background)))))
+
+    (t/testing "sets a gradient as the background of the prototype"
+      (let [gradient {:type :linear :start-x 0.5 :start-y 0 :end-x 0.5 :end-y 1 :width 1
+                      :stops [{:color "#1e1e1e" :opacity 1 :offset 0}
+                              {:color "#31efb8" :opacity 1 :offset 1}]}
+            set      (ch/process-changes data [{:type :mod-page :id page-id
+                                                :prototype-background gradient}])]
+        (t/is (= gradient (get-in set [:pages-index page-id :prototype-background])))
+        (t/is (sm/validate ctp/schema:prototype-background gradient))
+        (t/is (not (sm/validate ctp/schema:prototype-background (assoc gradient :type :conic)))
+              "only the gradients of a fill")))
 
     (t/testing "builder undoes the background of the prototype, set or not before"
       (doseq [before [nil "#ffffff"]]

@@ -87,7 +87,7 @@
     (let [[r g b] (clr/hex->rgb hex)]
       (str "rgba(" (int r) ", " (int g) ", " (int b) ", " (fmt opacity) ")"))))
 
-(defn- css-gradient
+(defn css-gradient
   "The gradient `gradient` of a box `width` by `height` as CSS draws it,
   as the canvas does, in pixels: a linear one `{:type :angle :stops}`, its
   angle (degrees) and each stop `[colour share]`, the share of the line

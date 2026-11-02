@@ -1469,17 +1469,17 @@
          (rx/of (dch/commit-changes changes)))))))
 
 (defn change-prototype-background
-  "Set `color` round the boards of the prototype of the current page that
-  show without a device in the view mode; nil gives the view mode its
-  own color back."
-  [color]
+  "Set `background`, a color or a gradient, round the boards of the
+  prototype of the current page that show without a device in the view
+  mode; nil gives the view mode its own color back."
+  [background]
   (ptk/reify ::change-prototype-background
     ptk/WatchEvent
     (watch [it state _]
       (let [page    (dsh/lookup-page state (:current-page-id state))
             changes (-> (pcb/empty-changes it)
                         (pcb/with-page page)
-                        (pcb/mod-page {:prototype-background color}))]
+                        (pcb/mod-page {:prototype-background background}))]
         (rx/of (dch/commit-changes changes))))))
 
 

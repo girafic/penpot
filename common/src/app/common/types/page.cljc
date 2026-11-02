@@ -51,6 +51,11 @@
    [:frame-id ::sm/uuid]
    [:position ::gpt/point]])
 
+(def schema:prototype-background
+  "The background round the boards of the prototype that show without a
+  device in the view mode (Penpot Motion): a color or a gradient."
+  [:or ctc/schema:hex-color ctc/schema:gradient])
+
 (def schema:page
   [:map {:title "FilePage"}
    [:id ::sm/uuid]
@@ -69,9 +74,10 @@
    ;; unset so existing files render identically to before.
    [:pixel-grid-color {:optional true} ctc/schema:hex-color]
    [:pixel-grid-opacity {:optional true} ::sm/safe-number]
-   ;; The color round the boards of the prototype that show without a
-   ;; device in the view mode (Penpot Motion); its own color when unset.
-   [:prototype-background {:optional true} ctc/schema:hex-color]
+   ;; The color or the gradient round the boards of the prototype that
+   ;; show without a device in the view mode (Penpot Motion); its own
+   ;; color when unset.
+   [:prototype-background {:optional true} schema:prototype-background]
 
    [:comment-thread-positions {:optional true}
     [:map-of ::sm/uuid schema:comment-thread-position]]])

@@ -350,7 +350,7 @@
      [:pixel-grid-color {:optional true} [:maybe ctc/schema:hex-color]]
      [:pixel-grid-opacity {:optional true} [:maybe ::sm/safe-number]]
      ;; nil gives the view mode its own color back
-     [:prototype-background {:optional true} [:maybe ctc/schema:hex-color]]]]
+     [:prototype-background {:optional true} [:maybe ctp/schema:prototype-background]]]]
 
    [:set-plugin-data schema:set-plugin-data-change]
 
@@ -1079,7 +1079,7 @@
                           (and (not= grid-op :not-found) (nil? grid-op))
                           (dissoc :pixel-grid-opacity)
 
-                          (string? proto-bg)
+                          (or (string? proto-bg) (map? proto-bg))
                           (assoc :prototype-background proto-bg)
 
                           (and (not= proto-bg :not-found) (nil? proto-bg))

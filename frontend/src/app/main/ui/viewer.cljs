@@ -37,6 +37,7 @@
    [app.main.ui.hooks :as hooks]
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.modal :refer [modal-container*]]
+   [app.main.ui.viewer.background :as vbg]
    [app.main.ui.viewer.comments :refer [comments-layer comments-sidebar*]]
    [app.main.ui.viewer.device-frame :as dfr :refer [device-drawing*]]
    [app.main.ui.viewer.drag-scroll :as dds]
@@ -121,14 +122,6 @@
     (let [{:keys [width height]} (:selrect frame)
           drop (- (dvd/first-screen-h width height) (:screen-h device))]
       (when (pos? drop) drop))))
-
-(defn background
-  "The color round the board of `page` shown without a device (`device`
-  nil, see `dvt/shown`): the background of its prototype, nil for the
-  own color of the view mode."
-  [page device]
-  (when (nil? device)
-    (:prototype-background page)))
 
 (defn calculate-delta
   "Calculate the displacement we need to apply so that the original selrect appears in the
@@ -1045,8 +1038,9 @@
 
 
      [:div {:class (stl/css :viewer-content)
-            :style (when-let [color (background base-page device)]
-                     #js {:backgroundColor color})}
+            :style (vbg/background-style (vbg/background base-page device)
+                                         (dm/get-in local [:viewport-size :width])
+                                         (dm/get-in local [:viewport-size :height]))}
 
 
       [:button {:on-click on-thumbnails-close
