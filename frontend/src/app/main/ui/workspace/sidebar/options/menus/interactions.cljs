@@ -15,6 +15,7 @@
    [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
    [app.main.data.common :as dcm]
+   [app.main.data.viewer.turn :as dvt]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -756,6 +757,61 @@
         [:> flow-item* {:key (:id flow)
                         :flow flow}]])]))
 
+(mf/defc counterpart*
+  "The board the top board `shape` shows as when a phone or a tablet of
+  the prototype turns (see `dvt/counterpart`): one of the boards of the
+  page that stand the other way, which shows it back, the board itself
+  turned, or, automatically, the one named as it."
+  {::mf/private true}
+  [{:keys [shape]}]
+  (let [objects (mf/deref refs/workspace-page-objects)
+        frames  (mf/with-memo [objects]
+                  (ctt/get-viewer-frames objects {:all-frames? true}))
+        id      (:id shape)
+        way     (if (= :portrait (dvt/board-way shape)) :landscape :portrait)
+        others  (mf/with-memo [frames shape id way]
+                  (filterv #(and (not= id (:id %)) (dvt/stands-way? shape % way)) frames))
+        ;; what it shows without a pick, nor a board that picked it
+        auto    (mf/with-memo [frames shape way]
+                  (dvt/counterpart (mapv #(cond-> % (= id (:counterpart %)) (dissoc :counterpart)) frames)
+                                   (dissoc shape :counterpart)
+                                   way))
+        named   (:counterpart shape)
+        value   (cond
+                  (= named id) "turn"
+                  (some #(= named (:id %)) others) (dm/str named)
+                  :else "auto")
+        options (mf/with-memo [auto others]
+                  (into [{:value "auto"
+                          :label (if (some? auto)
+                                   (tr "workspace.options.counterpart.auto-board" (:name auto))
+                                   (tr "workspace.options.counterpart.auto-turn"))}
+                         {:value "turn"
+                          :label (tr "workspace.options.counterpart.turn")}]
+                        (map #(hash-map :value (dm/str (:id %)) :label (:name %)))
+                        others))
+        on-change
+        (mf/use-fn
+         (mf/deps id)
+         (fn [value]
+           (st/emit! (dwi/set-counterpart id (case value
+                                               "auto" nil
+                                               "turn" id
+                                               (uuid/parse value))))))]
+    [:div {:class (stl/css :section)}
+     [:div {:class (stl/css :title)}
+      [:> title-bar* {:collapsable false
+                      :title (if (= way :landscape)
+                               (tr "workspace.options.counterpart.landscape")
+                               (tr "workspace.options.counterpart.portrait"))
+                      :class (stl/css :title-bar)}]]
+     [:div {:class (stl/css :content)}
+      [:& select {:default-value value
+                  :options options
+                  :on-change on-change}]
+      [:p {:class (stl/css :counterpart-hint)}
+       (tr "workspace.options.counterpart.hint")]]]))
+
 (mf/defc interactions*
   [{:keys [interactions shape]}]
   (let [show-content* (mf/use-state true)
@@ -819,8 +875,11 @@
     [:div {:class (stl/css :wrapper)}
      (if shape
        (when (cfh/frame-shape? shape)
-         [:> shape-flows* {:flows flows
-                           :shape shape}])
+         [:*
+          [:> shape-flows* {:flows flows
+                            :shape shape}]
+          (when (cfh/root-frame? shape)
+            [:> counterpart* {:shape shape}])])
        [:*
         (when flows
           [:> page-flows* {:flows flows}])

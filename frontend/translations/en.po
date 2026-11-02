@@ -8553,6 +8553,30 @@ msgstr "Cancel"
 msgid "workspace.options.canvas-background"
 msgstr "Canvas background"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.counterpart.auto-board"
+msgstr "Automatic: %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.counterpart.auto-turn"
+msgstr "Automatic: turn the board"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.counterpart.hint"
+msgstr "Shown when a phone or a tablet of the prototype turns"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.counterpart.landscape"
+msgstr "Landscape version"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.counterpart.portrait"
+msgstr "Portrait version"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.counterpart.turn"
+msgstr "None: turn the board"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/prototype_background.cljs
 msgid "workspace.options.prototype-background"
 msgstr "Prototype background"

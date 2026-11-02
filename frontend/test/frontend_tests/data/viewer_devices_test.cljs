@@ -198,6 +198,12 @@
   (t/is (some #(= :label (:type %)) (:parts (dvd/geometry :browser 1440 900)))
         "the name of the board in its field"))
 
+(t/deftest a-long-board-on-its-side-scrolls-in-a-phone-on-its-side
+  (t/is (= {:kind :iphone-island :landscape? true :screen-w 874 :screen-h 402}
+           (dvd/resolve-device "auto" 874 1185)))
+  (t/is (= 402 (dvd/first-screen-h 874 1185)) "its first screen")
+  (t/is (= :browser (:kind (dvd/resolve-device "auto" 1024 1500))) "a page as wide as a browser stays in it"))
+
 (t/deftest the-iphone-duo-closed-or-open
   (t/is (= {:kind :iphone-duo-closed :landscape? false :screen-w 466 :screen-h 678}
            (dvd/resolve-device "auto" 466 678))

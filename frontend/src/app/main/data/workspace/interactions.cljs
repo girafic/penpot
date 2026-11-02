@@ -19,6 +19,7 @@
    [app.main.data.changes :as dch]
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
+   [app.main.data.viewer.turn :as dvt]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.streams :as ms]
@@ -85,6 +86,22 @@
                  (-> (pcb/empty-changes it)
                      (pcb/with-page page)
                      (pcb/set-flow flow-id nil)))))))))
+
+(defn set-counterpart
+  "Pick `choice` as the board the board `id` shows as when a phone or a
+  tablet of the prototype turns (see `dvt/counterpart`): a board that
+  stands the other way, which gets the board `id` back, `id` for the
+  board itself turned, nil for the one named as it."
+  [id choice]
+  (ptk/reify ::set-counterpart
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [links (dvt/link-changes (dsh/lookup-page-objects state) id choice)]
+        (rx/of (dwsh/update-shapes (vec (keys links))
+                                   (fn [shape]
+                                     (if-let [counterpart (get links (:id shape))]
+                                       (assoc shape :counterpart counterpart)
+                                       (dissoc shape :counterpart)))))))))
 
 (defn update-flow
   [page-id flow-id update-fn]

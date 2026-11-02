@@ -128,7 +128,8 @@
 
 (defn- auto-device
   "The device a board `bw` × `bh` is the size of, else the phone,
-  tablet or browser as wide as it that it scrolls in, else nil."
+  tablet or browser as wide as it that it scrolls in, else the phone or
+  tablet on its side as wide as it that it scrolls in, else nil."
   [bw bh]
   (or (some (fn [kind]
               (let [{:keys [auto turns sizes] :as spec} (get specs kind)]
@@ -144,6 +145,13 @@
                   (when-let [[_ h] (and (:tall spec)
                                         (d/seek (fn [[w h]] (and (= w bw) (< h bh))) (pages spec)))]
                     {:kind kind :landscape? false :screen-w bw :screen-h h})))
+              kinds))
+      ;; a board as wide as a phone or a tablet on its side and higher than wide: it scrolls in it
+      (when (> bh bw)
+        (some (fn [kind]
+                (let [{:keys [tall turns] :as spec} (get specs kind)]
+                  (when-let [[w] (and tall turns (d/seek (fn [[w h]] (and (= h bw) (< w bh))) (:sizes spec)))]
+                    {:kind kind :landscape? true :screen-w bw :screen-h w})))
               kinds))))
 
 (defn- device-of

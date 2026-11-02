@@ -386,7 +386,12 @@
    [:light {:optional true} schema:light]
    [:depth-fade {:optional true} [::sm/number {:min 0 :max 1}]]
    [:depth-blur {:optional true} [::sm/number {:min 0 :max 100}]]
-   [:depth-focus {:optional true} ::sm/safe-number]])
+   [:depth-focus {:optional true} ::sm/safe-number]
+   ;; The board of the prototype a turned phone or tablet shows in its
+   ;; place (Penpot Motion, see `app.main.data.viewer.turn`): another
+   ;; top board that stands the other way, or its own id for itself
+   ;; turned by its constraints; absent, the board named as it.
+   [:counterpart {:optional true} ::sm/uuid]])
 
 (def ^:private schema:nilable-geom-attrs
   "`schema:shape-geom-attrs`, but nilable.

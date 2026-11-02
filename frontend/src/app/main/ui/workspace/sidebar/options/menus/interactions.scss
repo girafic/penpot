@@ -42,6 +42,14 @@
   gap: var(--sp-l);
 }
 
+// When the board of a pick shows, under its select.
+.counterpart-hint {
+  @include t.use-typography("body-small");
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
+
 .empty {
   display: flex;
   flex-direction: column;

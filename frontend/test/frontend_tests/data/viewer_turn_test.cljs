@@ -41,6 +41,61 @@
     (t/is (nil? (dvt/counterpart frames menu :portrait)) "standing as it does: none")
     (t/is (nil? (dvt/counterpart frames other :portrait)))))
 
+(t/deftest a-board-picked-in-the-prototype-tab-is-its-counterpart
+  (let [menu   (board "Menu" 402 874)
+        wide   (board "Menu (landscape)" 874 402)
+        other  (board "FW wide" 874 402)
+        picked (assoc menu :counterpart (:id other))]
+    (t/is (= other (dvt/counterpart [picked wide other] picked :landscape)) "over the name")
+    (t/is (= picked (dvt/counterpart [picked wide (assoc other :counterpart (:id menu))]
+                                     (assoc other :counterpart (:id menu)) :portrait))
+          "and back")
+    (t/is (= (:id other)
+             (:id (dvt/counterpart [menu wide (assoc other :counterpart (:id menu))] menu :landscape)))
+          "a board that picked it, though it picked none")
+    (t/is (nil? (dvt/counterpart [(assoc menu :counterpart (:id menu)) wide]
+                                 (assoc menu :counterpart (:id menu)) :landscape))
+          "itself: it turns, though one is named as it")
+    (t/is (nil? (dvt/counterpart [menu (assoc wide :counterpart (:id other)) other] menu :landscape))
+          "one named as it that picked another is not its")
+    (let [gone (assoc menu :counterpart (uuid/next))]
+      (t/is (= wide (dvt/counterpart [gone wide] gone :landscape))
+            "a board picked and gone: the one named as it"))
+    (let [{:keys [frame-id turned?]} (dvt/shown [picked wide other] picked "iphone-island" :landscape)]
+      (t/is (= (:id other) frame-id))
+      (t/is (not turned?)))))
+
+(t/deftest a-board-on-its-side-that-scrolls-is-a-counterpart
+  ;; wider than the board standing up, though higher than wide (it scrolls)
+  (let [menu (board "Full menu" 402 1814)
+        wide (board "Full menu (landscape)" 874 1150)
+        {:keys [frame-id device]} (dvt/shown [menu wide] menu "iphone-island" :landscape)]
+    (t/is (= (:id wide) frame-id))
+    (t/is (= [true 874] ((juxt :landscape? :screen-w) device)))
+    (t/is (= menu (dvt/counterpart [menu wide] wide :portrait)) "and back, narrower")))
+
+(t/deftest a-board-on-its-side-that-scrolls-stays-as-it-is
+  ;; held on its side, the counterpart itself is not turned again (it was laid out 1897 wide)
+  (let [file    (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :menu :name "Full menu" :x 0 :y 0 :width 402 :height 1814)
+                    (cthc/add-frame :wide :name "Full menu (landscape)" :x 500 :y 0 :width 874 :height 1185))
+        objects (:objects (cthf/current-page file))
+        frames  [(get objects (cthi/id :menu)) (get objects (cthi/id :wide))]]
+    (t/is (= (get objects (cthi/id :wide))
+             (get (dvt/turn-objects objects frames "iphone-island" :landscape) (cthi/id :wide))))
+    (let [{:keys [frame-id device turned?]} (dvt/shown frames (second frames) "iphone-island" :landscape)]
+      (t/is (= (cthi/id :wide) frame-id))
+      (t/is (not turned?))
+      (t/is (= [true 874 402] ((juxt :landscape? :screen-w :screen-h) device)) "in the phone on its side, scrolling"))))
+
+(t/deftest a-pick-links-both-boards
+  (let [[a b c d] (repeatedly 4 uuid/next)
+        objects   {a {:id a} b {:id b :counterpart d} c {:id c :counterpart a} d {:id d :counterpart b}}]
+    (t/is (= {a b b a c nil d nil} (dvt/link-changes objects a b))
+          "each names the other; those that named either name none")
+    (t/is (= {a nil c nil} (dvt/link-changes objects a nil)) "automatic: by name again")
+    (t/is (= {a a c nil} (dvt/link-changes objects a a)) "itself: it turns")))
+
 (t/deftest held-as-a-board-stands-it-shows-as-it-is
   (let [menu (board "Menu" 402 874)]
     (doseq [hold [nil :portrait]]

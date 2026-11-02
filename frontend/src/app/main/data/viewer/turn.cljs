@@ -10,7 +10,8 @@
   `app.main.data.viewer.devices`). Each board stands as it is drawn, on
   its side when wider than high. Held the other way (a `hold`), the
   device shows the board of the same name that stands that way, its
-  counterpart (\"Menu\" and \"Menu (landscape)\"), else the board itself
+  counterpart (\"Menu\" and \"Menu (landscape)\"), or the one picked
+  for it in the prototype tab (`:counterpart`), else the board itself
   turned: as wide as the turned screen, its layers moved and stretched
   by their constraints, as a resize in the workspace does."
   (:require
@@ -30,7 +31,7 @@
   [{:keys [screen-w screen-h]}]
   (if (> screen-w screen-h) :landscape :portrait))
 
-(defn- board-way
+(defn board-way
   "How the board `frame` stands: `:landscape` when wider than high."
   [frame]
   (if (> (dm/get-in frame [:selrect :width]) (dm/get-in frame [:selrect :height]))
@@ -51,17 +52,78 @@
       (str/trim)
       (str/lower)))
 
+(defn stands-way?
+  "Whether the board `other` stands `way` next to the board `frame`:
+  wider than it for `:landscape`, narrower for `:portrait`. A board on
+  its side that scrolls is higher than wide, yet wider than the board
+  standing up."
+  [frame other way]
+  (let [fw (dm/get-in frame [:selrect :width])
+        ow (dm/get-in other [:selrect :width])]
+    (if (= way :landscape) (> ow fw) (< ow fw))))
+
 (defn counterpart
-  "The board of `frames` that stands `way` (`:portrait` or `:landscape`),
-  named as `frame` but for the words that say how it stands (see
-  `base-name`); nil for none."
+  "The board of `frames` that stands `way` (`:portrait` or `:landscape`)
+  next to `frame` (see `stands-way?`) that `frame` shows as held that
+  way: the one it names (`:counterpart`), none when it names itself (it
+  turns), else one that names it, else one named as it but for the
+  words that say how it stands (see `base-name`) and that names no
+  other; nil for none."
   [frames frame way]
-  (let [base (base-name (:name frame))]
-    (d/seek #(and (not= (:id %) (:id frame))
-                  (cfh/root-frame? %)
-                  (= way (board-way %))
-                  (= base (base-name (:name %))))
-            frames)))
+  (let [id      (:id frame)
+        named   (:counterpart frame)
+        stands? #(and (not= (:id %) id)
+                      (cfh/root-frame? %)
+                      (stands-way? frame % way))
+        picked  (when (some? named)
+                  (d/seek #(and (= named (:id %)) (stands? %)) frames))]
+    (cond
+      (= named id) nil
+      (some? picked) picked
+      :else
+      (or (d/seek #(and (= id (:counterpart %)) (stands? %)) frames)
+          (let [base (base-name (:name frame))]
+            (d/seek #(and (stands? %)
+                          (nil? (:counterpart %))
+                          (= base (base-name (:name %))))
+                    frames))))))
+
+(defn link-changes
+  "What picking `choice` as the counterpart of the board `id` (see
+  `counterpart`) sets on the boards of `objects`: `{board-id
+  counterpart}`, nil to remove it. The board `id` names `choice` (nil
+  for the board named as it, `id` for itself turned); a board picked
+  names it back; the boards that named either of them name none."
+  [objects id choice]
+  (let [other (when (and (some? choice) (not= choice id)) choice)
+        pair  (cond-> #{id} (some? other) (conj other))
+        stale (into {}
+                    (comp (filter #(contains? pair (:counterpart %)))
+                          (remove #(contains? pair (:id %)))
+                          (map #(vector (:id %) nil)))
+                    (vals objects))]
+    (cond-> (assoc stale id choice)
+      (some? other) (assoc other id))))
+
+(defn- device-held
+  "The device `choice` shows a board `w` × `h` in (see
+  `dvd/resolve-device`), on its side or standing up as `held` says (nil:
+  as the board stands): a board on its side that scrolls is higher than
+  wide."
+  [choice w h held]
+  (let [device (dvd/resolve-device choice w h)]
+    (if (or (nil? held) (nil? device) (not (dvd/turns? (:kind device))) (= held (way device)))
+      device
+      (dvd/resolve-device choice w (if (= held :landscape) (min h (dec w)) (max h (inc w)))))))
+
+(defn- pair-way
+  "How the board `frame` stands next to its counterpart among `frames`:
+  `:landscape` when one narrower stands for it, `:portrait` when one
+  wider does, nil without one."
+  [frames frame]
+  (cond
+    (some? (counterpart frames frame :portrait)) :landscape
+    (some? (counterpart frames frame :landscape)) :portrait))
 
 (defn shown
   "How the board `frame` shows in the device `choice` (see
@@ -70,10 +132,11 @@
   among `frames` (the boards of its page), the device it shows in (nil
   for none) and whether the board shows turned (see `turn-objects`).
   Held as the board stands, or without a hold or a device that turns, it
-  shows as it is."
+  shows as it is. A board stands as next to its counterpart, if it has
+  one (see `pair-way`)."
   [frames frame choice hold]
   (let [{:keys [width height]} (:selrect frame)
-        device (dvd/resolve-device choice width height)]
+        device (device-held choice width height (when (some? hold) (pair-way frames frame)))]
     (if (or (nil? hold)
             (nil? device)
             (not (dvd/turns? (:kind device)))
@@ -82,7 +145,7 @@
       (if-let [other (counterpart frames frame hold)]
         (let [{:keys [width height]} (:selrect other)]
           {:frame-id (:id other)
-           :device (dvd/resolve-device (name (:kind device)) width height)})
+           :device (device-held (name (:kind device)) width height hold)})
         {:frame-id (:id frame) :device (dvd/turn device) :turned? true}))))
 
 (defn next-hold
