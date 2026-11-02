@@ -517,11 +517,13 @@
         stage-ref   (mf/use-ref nil)
         cutouts-ref (mf/use-ref nil)
         stage-size (dfr/use-size stage-ref (= section :interactions))
+        ;; in the preview of the workspace, right under its bar
         device-layout
-        (mf/with-memo [device stage-size]
+        (mf/with-memo [device stage-size preview]
           (let [[sw sh] stage-size]
             (when (and (some? device) (pos? sw) (pos? sh))
-              (dvd/layout device sw sh dvd/stage-padding))))
+              (dvd/layout device sw sh dvd/stage-padding
+                          (when (true? preview) dvd/preview-top)))))
         ;; whether a device showed the board last, to fit it again once
         ;; the device goes
         framed-ref (mf/use-ref false)
@@ -675,20 +677,23 @@
     ;; window as it resizes, the screens in a history of their own, and
     ;; what the workspace asks of it (to show what is edited there as it
     ;; is made, or what it saved, to go to the board before or after, to
-    ;; the board selected, a zoom, how the interactions show); it tells
-    ;; the workspace once it listens, which board it shows, and when it
-    ;; could not show what was edited. Shift + Space in it closes it, as
-    ;; in the workspace.
-    (mf/with-effect [preview index (:id frame) (count frames)]
+    ;; the board selected, a zoom, how the interactions show, a device,
+    ;; to turn it); it tells the workspace once it listens, which board
+    ;; it shows, and when it could not show what was edited. Shift +
+    ;; Space in it closes it, as in the workspace.
+    (mf/with-effect [preview index (:id frame) (count frames) (:landscape? device)]
       (when (and preview (some? index))
         (st/emit! (dvp/preview-screen index))
         (when (some? frame)
-          ;; where it is among the boards, for the arrows of the bar
+          ;; where it is among the boards, for the arrows of the bar,
+          ;; and whether its device lies on its side, for the window
+          ;; round it
           (.postMessage (.-parent js/window)
                         #js {:type "penpot:preview-shown"
                              :frameId (dm/str (:id frame))
                              :index index
-                             :count (count frames)}
+                             :count (count frames)
+                             :landscape (when (some? device) (boolean (:landscape? device)))}
                         (.. js/window -location -origin)))))
 
     ;; the bar of the preview plays, pauses and stops the animation of the
@@ -784,6 +789,7 @@
                                                        (st/emit!))
                       "penpot:preview-device"  (st/emit! (dv/set-device (unchecked-get data "device")
                                                                         (unchecked-get data "color")))
+                      "penpot:preview-turn"    (st/emit! dv/turn-device)
                       "penpot:preview-interactions"
                       (let [mode (keyword (unchecked-get data "mode"))]
                         (when (contains? dv/valid-interaction-modes mode)
@@ -811,9 +817,11 @@
          (dom/set-html-title (str "\u25b6 " (tr "title.viewer" name))))))
 
     ;; a phone or a tablet turning on its side or standing up, once its
-    ;; screen shows the board the new way
+    ;; screen shows the board the new way; in the preview, its window
+    ;; turns round it meanwhile
     (dfr/use-turn! stage-ref viewer-section-ref cutouts-ref device-layout (:kind device)
-                   #(rwv/when-rendered (mf/ref-val current-viewport-ref) 400))
+                   #(rwv/when-rendered (mf/ref-val current-viewport-ref) 400)
+                   (true? preview))
 
     ;; the screen of a phone or a tablet scrolls when dragged
     (dds/use-drag-scroll! viewer-section-ref
@@ -985,7 +993,10 @@
               :inspect-layout (= section :inspect))
       :data-fullscreen fullscreen?
       :data-force-visible (:show-thumbnails local)
-      :data-preview (true? preview)}
+      :data-preview (true? preview)
+      ;; the device alone, on the workspace (see `.window.framed` of
+      ;; the preview)
+      :data-device-only (and (true? preview) (some? device-layout))}
 
 
      [:div {:class (stl/css :viewer-content)}

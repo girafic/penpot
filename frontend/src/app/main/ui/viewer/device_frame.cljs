@@ -106,6 +106,16 @@
   drawn the new way, ms: it stands as it stood meanwhile."
   400)
 
+(def ^:private fade-ms
+  "How long a device that turned in the preview of the workspace takes to
+  show again, ms (see `use-turn!`)."
+  200)
+
+(def ^:private settle-ms
+  "How long, at least, a device that turned in the preview of the
+  workspace stays hidden, ms: its window turns with it meanwhile."
+  100)
+
 (defn- turn-steps
   "How a device of `layout` (see `dvd/layout`) that turned shows on its
   way from how it stood, `[[angle scale] ...]` by tenths: turned back a
@@ -143,6 +153,16 @@
     (.pause animation)
     animation))
 
+(defn- fade-node!
+  "The element `node` of the stage of a device that turned, hidden, then
+  showing again. A paused animation."
+  [^js node]
+  (let [^js animation (.animate node
+                                #js [#js {:opacity 0} #js {:opacity 1}]
+                                #js {:duration fade-ms :easing "ease-out"})]
+    (.pause animation)
+    animation))
+
 (defn use-turn!
   "The device `kind` of `layout` (see `dvd/layout`) turning in its stage
   as it comes to lie on its side or stand up: its drawing (in
@@ -150,42 +170,52 @@
   from how it stood, once `ready` (a fn that gives a promise) says the
   screen shows the board the new way, or a while. The screen is
   `data-turning` meanwhile: what it holds fixed in the window (the bar
-  at the bottom, the arrows) would turn with it."
-  [stage-ref screen-ref cutouts-ref layout kind ready]
-  (let [before-ref     (mf/use-ref nil)
-        animations-ref (mf/use-ref nil)]
-    (mf/with-layout-effect [layout kind]
-      (let [before (mf/ref-val before-ref)]
-        (mf/set-ref-val! before-ref (when (some? layout) {:layout layout :kind kind}))
-        (when (and (some? before)
-                   (some? layout)
-                   (= kind (:kind before))
-                   (not= (:landscape? layout) (get-in before [:layout :landscape?])))
-          (let [{:keys [x y w h screen landscape?]} layout
-                cx     (+ x (/ w 2))
-                cy     (+ y (/ h 2))
-                ;; on its side, it turned a quarter to the left
-                steps  (turn-steps layout (if landscape? 90 -90) (/ (get-in before [:layout :w]) h))
-                screen-node (mf/ref-val screen-ref)
-                animations (into []
-                                 (keep (fn [[^js node ox oy]]
-                                         (when (fn? (some-> node .-animate))
-                                           (turn-node! node steps ox oy))))
-                                 [[(mf/ref-val stage-ref) cx cy]
-                                  [(mf/ref-val cutouts-ref) cx cy]
-                                  [screen-node (- cx (:x screen)) (- cy (:y screen))]])
-                wait   (js/Promise. #(js/setTimeout % turn-wait-ms))]
-            (run! #(.cancel ^js %) (mf/ref-val animations-ref))
-            (mf/set-ref-val! animations-ref animations)
-            (dom/set-data! screen-node "turning" true)
-            (-> (js/Promise.race #js [(ready) wait])
-                (.then (fn [_]
-                         ;; unless it turned again meanwhile
-                         (when (identical? animations (mf/ref-val animations-ref))
-                           (run! #(.play ^js %) animations)
-                           (-> (js/Promise.all (into-array (map #(.-finished ^js %) animations)))
-                               (.then #(dom/remove-attribute! screen-node "data-turning"))
-                               (.catch (constantly nil)))))))))))))
+  at the bottom, the arrows) would turn with it. With `fade?` (in the
+  preview of the workspace, its window turning round it), it hides and
+  shows again once its window turned, as it then is."
+  ([stage-ref screen-ref cutouts-ref layout kind ready]
+   (use-turn! stage-ref screen-ref cutouts-ref layout kind ready false))
+  ([stage-ref screen-ref cutouts-ref layout kind ready fade?]
+   (let [before-ref     (mf/use-ref nil)
+         animations-ref (mf/use-ref nil)]
+     (mf/with-layout-effect [layout kind]
+       (let [before (mf/ref-val before-ref)]
+         (mf/set-ref-val! before-ref (when (some? layout) {:layout layout :kind kind}))
+         (when (and (some? before)
+                    (some? layout)
+                    (= kind (:kind before))
+                    (not= (:landscape? layout) (get-in before [:layout :landscape?])))
+           (let [{:keys [x y w h screen landscape?]} layout
+                 cx     (+ x (/ w 2))
+                 cy     (+ y (/ h 2))
+                 ;; on its side, it turned a quarter to the left
+                 steps  (turn-steps layout (if landscape? 90 -90) (/ (get-in before [:layout :w]) h))
+                 screen-node (mf/ref-val screen-ref)
+                 animations (into []
+                                  (keep (fn [[^js node ox oy]]
+                                          (when (fn? (some-> node .-animate))
+                                            (if fade?
+                                              (fade-node! node)
+                                              (turn-node! node steps ox oy)))))
+                                  [[(mf/ref-val stage-ref) cx cy]
+                                   [(mf/ref-val cutouts-ref) cx cy]
+                                   [screen-node (- cx (:x screen)) (- cy (:y screen))]])
+                 wait   (js/Promise. #(js/setTimeout % turn-wait-ms))
+                 shown  (js/Promise.race #js [(ready) wait])
+                 shown  (if fade?
+                          (js/Promise.all #js [shown (js/Promise. #(js/setTimeout % settle-ms))])
+                          shown)]
+             (run! #(.cancel ^js %) (mf/ref-val animations-ref))
+             (mf/set-ref-val! animations-ref animations)
+             (dom/set-data! screen-node "turning" true)
+             (-> shown
+                 (.then (fn [_]
+                          ;; unless it turned again meanwhile
+                          (when (identical? animations (mf/ref-val animations-ref))
+                            (run! #(.play ^js %) animations)
+                            (-> (js/Promise.all (into-array (map #(.-finished ^js %) animations)))
+                                (.then #(dom/remove-attribute! screen-node "data-turning"))
+                                (.catch (constantly nil))))))))))))))
 
 (defn use-size
   "The size `[w h]` of the element of `ref` as it renders, nil before;

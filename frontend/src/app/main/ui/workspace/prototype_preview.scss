@@ -25,6 +25,32 @@
   box-shadow: var(--el-shadow-dark);
 }
 
+// A device alone, on the workspace (see `[data-device-only]` of the view
+// mode): its bar floats right above it.
+.window.framed {
+  overflow: visible;
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+// As wide as the window round the device (see `hugged-frame`), wider
+// about its middle when its buttons need it, the board shown cut then
+// (still some of it, to drag the bar by).
+.framed .bar {
+  align-self: center;
+  inline-size: 100%;
+  min-inline-size: max-content;
+  border: var(--preview-border) solid var(--panel-border-color);
+  border-radius: $br-12;
+  box-shadow: var(--el-shadow-dark);
+}
+
+.framed .title {
+  contain: inline-size;
+  min-inline-size: $sz-48;
+}
+
 // The bar that moves the window: back, forth and start again at its
 // left, the board it shows, and its settings, open in the view mode and
 // close at its right.
@@ -178,6 +204,30 @@
   inset-block-end: 0;
   inset-inline-end: 0;
   cursor: nwse-resize;
+}
+
+// The frame of a device alone, round its screen and a little out of it,
+// which scales it (see `grips`): where it is comes inline.
+.grip {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+
+.grip-across {
+  cursor: ew-resize;
+}
+
+.grip-down {
+  cursor: ns-resize;
+}
+
+.grip-falling {
+  cursor: nwse-resize;
+}
+
+.grip-rising {
+  cursor: nesw-resize;
 }
 
 // Closed, it stays loaded for Shift + Space to show it again at once.

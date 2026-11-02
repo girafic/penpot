@@ -27,6 +27,12 @@
   (t/is (= {:x 1200 :y 726 :w cw/min-width :h cw/min-height} (cw/resized frame :top-left 500 500))
         "no smaller than the smallest window"))
 
+(t/deftest its-sides-resize-it-keeping-the-opposite-one
+  (t/is (= {:x 1000 :y 580 :w 400 :h 272} (cw/resized frame :top 50 -20)))
+  (t/is (= {:x 1000 :y 600 :w 450 :h 252} (cw/resized frame :right 50 -20)))
+  (t/is (= {:x 1000 :y 600 :w 400 :h 272} (cw/resized frame :bottom -50 20)))
+  (t/is (= {:x 950 :y 600 :w 450 :h 252} (cw/resized frame :left -50 20))))
+
 (t/deftest it-stays-in-the-browser-window
   (t/is (= {:x 1200 :y 748 :w 400 :h 252} (cw/clamp-frame (cw/moved frame 400 400) 1600 1000))
         "dragged past the edge")

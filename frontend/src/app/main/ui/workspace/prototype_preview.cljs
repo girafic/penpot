@@ -15,8 +15,11 @@
   bar on top moves the window, with the boards before and after, start
   again, the play buttons of an animated board, the board it shows, a
   device button (the device it shows the board in, see
-  `app.main.data.viewer.devices`), a settings button, open in the view
-  mode and close; the corners at its bottom resize it. The menu of the
+  `app.main.data.viewer.devices`: the device alone then, on the
+  workspace, under the bar, and a button that turns a phone or a
+  tablet), a settings button, open in the view mode and close; the
+  corners at its bottom resize it, the frame of a device alone scales
+  it. The menu of the
   settings button holds the zoom (fit, fill or 100 %; none while a device
   shows the board), how the interactions show, Follow the selection (it
   shows the board selected in the workspace) and two sizes of the
@@ -31,6 +34,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.math :as mth]
    [app.common.transit :as t]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
@@ -106,15 +110,138 @@
       (cw/clamp-frame (assoc frame :w (wide (:h frame))) vw vh)
       frame)))
 
+(defn shown-device
+  "The device `choice` (one of `dvd/choices`) shows a board `bw` × `bh`
+  in (see `dvd/resolve-device`), nil for none: a phone or a tablet on
+  its side or standing up as the view mode says it shows it
+  (`landscape`, nil until it says), whoever looks at it having turned
+  it there (see `dv/turn-device`)."
+  [choice bw bh landscape]
+  (let [device (dvd/resolve-device choice bw bh)]
+    (if (and (some? device)
+             (boolean? landscape)
+             (dvd/turns? (:kind device))
+             (not= landscape (boolean (:landscape? device))))
+      (dvd/turn device)
+      device)))
+
 (defn shown-size
-  "The size `[w h]` the window shows for a board `bw` × `bh` in the
-  device `choice` (one of `dvd/choices`): the device at its own size and
-  the room round it in the view mode, or the board without one."
-  [choice bw bh]
-  (if-let [device (dvd/resolve-device choice bw bh)]
+  "The size `[w h]` the window shows for a board `bw` × `bh` in `device`
+  (see `shown-device`): the device at its own size and the room round it
+  in the view mode, little above it, or the board without one."
+  [device bw bh]
+  (if (some? device)
     (let [[w h] (dvd/outer-size device)]
-      [(+ w (* 2 dvd/stage-padding)) (+ h (* 2 dvd/stage-padding))])
+      [(+ w (* 2 dvd/stage-padding)) (+ h dvd/stage-padding dvd/preview-top)])
     [bw bh]))
+
+(def ^:private room-w
+  "Px the window takes across round a device alone (see `hugged-frame`):
+  the room either side of it in the view mode and the border."
+  (+ (* 2 dvd/stage-padding) (* 2 border)))
+
+(def ^:private room-h
+  "Px the window takes up and down round a device alone: the room above
+  and below it in the view mode, the bar and the border."
+  (+ dvd/stage-padding dvd/preview-top bar-height (* 2 border)))
+
+(defn- device-scale
+  "The scale of the device `dw` × `dh` px at its own size in a window `w`
+  × `h` px, as large as it fits (see `dvd/layout`)."
+  [w h dw dh]
+  (min (/ (max 1 (- w room-w)) dw)
+       (/ (max 1 (- h room-h)) dh)))
+
+(defn- device-room
+  "The size `[w h]` of the window round the device `dw` × `dh` px at its
+  own size, shown at `scale`: whole px, so it fits its height in it, not
+  a px less."
+  [dw dh scale]
+  [(mth/ceil (+ (* dw scale) room-w))
+   (mth/ceil (+ (* dh scale) room-h))])
+
+(defn hugged-frame
+  "`frame` round the device `dw` × `dh` px at its own size (see
+  `shown-device`), which shows alone on the workspace: as high as
+  `frame`, as wide as the device then is, about its middle, so that it
+  covers no more of the workspace than the device, its bar as wide.
+  Lower when a browser window `vw` × `vh` px is not that wide."
+  [{:keys [x y w h]} vw vh [dw dh]]
+  (let [scale   (device-scale (- vw (* 2 cw/margin)) h dw dh)
+        [w' h'] (device-room dw dh scale)
+        w'      (max cw/min-width w')
+        h'      (max cw/min-height h')]
+    (cw/clamp-frame {:x (- (+ x (/ w 2)) (/ w' 2)) :y y :w w' :h h'} vw vh)))
+
+(defn turned-frame
+  "The window round a device turned a quarter, at `frame` round it as it
+  was, `dw` × `dh` px at its own size (see `hugged-frame`): round it
+  turned at the same size, the top and the middle of the window kept."
+  [{:keys [x y w h]} vw vh [dw dh]]
+  (let [[w' h'] (device-room dh dw (device-scale w h dw dh))]
+    (hugged-frame {:x (- (+ x (/ w 2)) (/ w' 2)) :y y :w w' :h h'} vw vh [dh dw])))
+
+(defn scaled-frame
+  "`frame`, which a drag of a corner or a side `mode` of the device
+  resized from `start` (see `cw/resized` and `grips`), round the device
+  `dw` × `dh` px at its own size (see `hugged-frame`): the device scaled
+  as the drag changed the width or the height of the window, the one it
+  changed more from a corner; the corner or the side across kept, the
+  top of the window from its sides, its middle from the top or the
+  bottom. Moved, it is as it is."
+  [{:keys [w h] :as frame} mode start [dw dh]]
+  (if (= mode :move)
+    frame
+    (let [{sx :x sy :y sw :w sh :h} start
+          before  (device-scale sw sh dw dh)
+          across  (/ (- w room-w) dw)
+          down    (/ (- h room-h) dh)
+          scale   (max 0 (case mode
+                           (:left :right) across
+                           (:top :bottom) down
+                           (if (> (mth/abs (- across before)) (mth/abs (- down before))) across down)))
+          [w' h'] (device-room dw dh scale)]
+      {:x (case mode
+            (:top-left :bottom-left :left) (- (+ sx sw) w')
+            (:top :bottom) (- (+ sx (/ sw 2)) (/ w' 2))
+            sx)
+       :y (if (contains? #{:top-left :top-right :top} mode) (- (+ sy sh) h') sy)
+       :w w'
+       :h h'})))
+
+(def ^:private grip-out
+  "Px out of a device alone its frame still scales it from (see `grips`)."
+  8)
+
+(def ^:private grip-corner
+  "Px into a device alone its corners scale it from (see `grips`), past
+  the round of a phone."
+  12)
+
+(defn grips
+  "Where the frame of the device `device` (see `shown-device`) scales it,
+  alone in the window at `frame` (see `scaled-frame`): `[mode {:x :y :w
+  :h}]`, px of the view mode in the window, for each side round its
+  screen, the top and the bottom as wide as the device, then each
+  corner; `grip-out` out of it."
+  [device {:keys [w h]}]
+  (let [{:keys [x y screen] dw :w dh :h}
+        (dvd/layout device (- w (* 2 border)) (- h bar-height (* 2 border))
+                    dvd/stage-padding dvd/preview-top)
+        {sx :x sy :y sw :w sh :h} screen
+        left   (- x grip-out)
+        top    (- y grip-out)
+        right  (+ x dw grip-out)
+        bottom (+ y dh grip-out)
+        side   (+ grip-out grip-corner)]
+    [[:top {:x left :y top :w (- right left) :h (- sy top)}]
+     [:bottom {:x left :y (+ sy sh) :w (- right left) :h (- bottom sy sh)}]
+     [:left {:x left :y sy :w (- sx left) :h sh}]
+     [:right {:x (+ sx sw) :y sy :w (- right sx sw) :h sh}]
+     [:top-left {:x left :y top :w side :h side}]
+     [:top-right {:x (- right side) :y top :w side :h side}]
+     [:bottom-left {:x left :y (- bottom side) :w side :h side}]
+     [:bottom-right {:x (- right side) :y (- bottom side) :w side :h side}]]))
 
 (def zoom-modes
   "The zooms of the preview, as its menu picks them: the board fitted in
@@ -147,7 +274,8 @@
 
 (def ^:private corners
   "The corners that resize the window: those at its bottom, the bar and
-  its buttons at the top."
+  its buttons at the top; round a device alone, its frame does (see
+  `grips`)."
   [["bottom-left" (stl/css :corner :bottom-left)]
    ["bottom-right" (stl/css :corner :bottom-right)]])
 
@@ -165,6 +293,9 @@
         ;; `{:index :count}`, for the arrows
         place*     (mf/use-state nil)
         {:keys [index] boards :count} (deref place*)
+        ;; whether its device lies on its side, as the view mode tells:
+        ;; turned there by whoever looks at it
+        landscape* (mf/use-state nil)
         board      (get objects shown)
         ;; the board the view mode in the frame starts at
         start*     (mf/use-state frame-id)
@@ -207,12 +338,20 @@
         stored*    (mf/use-state #(get storage/user ::frame))
         drag-frame* (mf/use-state nil)
         ;; what the window shows of the board: in its device, if any
-        [shown-w shown-h] (shown-size device (:width board 16) (:height board 9))
-        framed?    (some? (dvd/resolve-device device (:width board) (:height board)))
-        frame      (cw/clamp-frame (or (deref drag-frame*)
-                                       (deref stored*)
-                                       (start-frame vw vh shown-w shown-h))
-                                   vw vh)
+        device-shown (shown-device device (:width board) (:height board) (deref landscape*))
+        [shown-w shown-h] (shown-size device-shown (:width board 16) (:height board 9))
+        ;; the device at its own size, when it shows the board in one
+        outer      (some-> device-shown dvd/outer-size)
+        framed?    (some? outer)
+        turns?     (and framed? (dvd/turns? (:kind device-shown)))
+        frame      (cond-> (cw/clamp-frame (or (deref drag-frame*)
+                                               (deref stored*)
+                                               (start-frame vw vh shown-w shown-h))
+                                           vw vh)
+                     framed? (hugged-frame vw vh outer))
+        ;; the device at its own size and the window round it, as they
+        ;; last showed (see the turn below)
+        last-ref   (mf/use-ref nil)
         iframe-ref (mf/use-ref nil)
         ;; the view mode loads once what is edited is saved
         ready*     (mf/use-state false)
@@ -236,7 +375,16 @@
              (swap! storage/user assoc ::frame frame)
              (reset! drag-frame* nil))))
 
-        {:keys [on-down on-move on-up]} (cw/use-frame-drag frame on-drag on-drop)
+        ;; its frame scales the device alone, as large across as high
+        constrain
+        (mf/use-fn
+         (mf/deps outer)
+         (fn [frame mode start]
+           (if (some? outer)
+             (scaled-frame frame mode start outer)
+             frame)))
+
+        {:keys [on-down on-move on-up]} (cw/use-frame-drag frame on-drag on-drop constrain)
 
         ;; a double click on the bar puts it back where it starts, as
         ;; large as the board then fits
@@ -288,6 +436,7 @@
         on-play    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-play"))
         on-stop    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-stop"))
         on-sound   (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-sound"))
+        on-turn    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-turn"))
         ;; pinned, at the board shown; else where it started
         on-restart (mf/use-fn
                     (mf/deps follow? shown frame-id)
@@ -397,6 +546,19 @@
          ;; there in a tab of its own, in place of this window
          #(st/emit! (dcm/go-to-viewer :page-id page-id :frame-id shown)
                     (dwpp/close-preview)))]
+
+    ;; a device turned keeps its size: the window turns round it, its top
+    ;; and middle kept, as the view mode tells it turned
+    (mf/with-layout-effect [outer frame vw vh]
+      (let [{before :outer before-frame :frame} (mf/ref-val last-ref)]
+        (mf/set-ref-val! last-ref {:outer outer :frame frame})
+        (when (and (some? before)
+                   (some? outer)
+                   (not= before outer)
+                   (= before (vec (rseq outer))))
+          (let [frame (turned-frame before-frame vw vh before)]
+            (reset! stored* frame)
+            (swap! storage/user assoc ::frame frame)))))
 
     ;; what is edited saved first, so it shows
     (mf/with-effect []
@@ -528,9 +690,11 @@
                           (resync!)))
 
                     "penpot:preview-shown"
-                    (do (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))
-                        (reset! place* {:index (unchecked-get data "index")
-                                        :count (unchecked-get data "count")}))
+                    (let [landscape (unchecked-get data "landscape")]
+                      (some->> (unchecked-get data "frameId") uuid/parse* (reset! shown*))
+                      (reset! place* {:index (unchecked-get data "index")
+                                      :count (unchecked-get data "count")})
+                      (reset! landscape* (when (boolean? landscape) landscape)))
 
                     "penpot:preview-playback"
                     (reset! playback* {:animated (true? (unchecked-get data "animated"))
@@ -546,6 +710,7 @@
         #(.removeEventListener js/window "message" on-message)))
 
     [:div {:class (stl/css-case :window true
+                                :framed framed?
                                 :hidden hidden
                                 :dragging (some? (deref drag-frame*)))
            :aria-hidden hidden
@@ -614,6 +779,11 @@
       [:div {:class (stl/css :buttons)
              :on-pointer-down dom/stop-propagation
              :on-double-click dom/stop-propagation}
+       (when ^boolean turns?
+         [:> icon-button* {:variant "ghost"
+                           :aria-label (tr "workspace.preview.turn")
+                           :icon i/turn-device
+                           :on-click on-turn}])
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "viewer.header.device")
                          :aria-haspopup "menu"
@@ -707,15 +877,34 @@
                   :src uri
                   :title (tr "workspace.preview.title")
                   :allow "autoplay"}]
-        [:span {:class (stl/css :saving)} (tr "workspace.preview.saving")])]
-     (for [[corner class] corners]
-       [:div {:key corner
-              :class class
-              :data-mode corner
-              :title (tr "workspace.preview.resize")
-              :on-pointer-down on-down
-              :on-pointer-move on-move
-              :on-lost-pointer-capture on-up}])]))
+        [:span {:class (stl/css :saving)} (tr "workspace.preview.saving")])
+      ;; a device alone scales from anywhere on its frame
+      (when (and ^boolean framed? ^boolean ready?)
+        (for [[mode {:keys [x y w h]}] (grips device-shown frame)]
+          [:div {:key (name mode)
+                 :class (stl/css-case :grip true
+                                      :grip-across (contains? #{:left :right} mode)
+                                      :grip-down (contains? #{:top :bottom} mode)
+                                      :grip-falling (contains? #{:top-left :bottom-right} mode)
+                                      :grip-rising (contains? #{:top-right :bottom-left} mode))
+                 :style #js {"left" (dm/str x "px")
+                             "top" (dm/str y "px")
+                             "width" (dm/str (max 0 w) "px")
+                             "height" (dm/str (max 0 h) "px")}
+                 :data-mode (name mode)
+                 :title (tr "workspace.preview.resize")
+                 :on-pointer-down on-down
+                 :on-pointer-move on-move
+                 :on-lost-pointer-capture on-up}]))]
+     (when-not ^boolean framed?
+       (for [[corner class] corners]
+         [:div {:key corner
+                :class class
+                :data-mode corner
+                :title (tr "workspace.preview.resize")
+                :on-pointer-down on-down
+                :on-pointer-move on-move
+                :on-lost-pointer-capture on-up}]))]))
 
 (def unload-delay
   "Ms a closed preview stays loaded, hidden (see `prototype-preview*`):

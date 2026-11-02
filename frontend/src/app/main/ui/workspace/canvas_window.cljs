@@ -22,7 +22,7 @@
    [goog.events :as events]
    [rumext.v2 :as mf]))
 
-(def ^:private margin
+(def margin
   "Room between the window and the edges of the browser window."
   16)
 
@@ -65,14 +65,18 @@
   (-> frame (update :x + dx) (update :y + dy)))
 
 (defn resized
-  "`frame` resized by dragging its corner `corner` (`:top-left`,
-  `:top-right`, `:bottom-left` or `:bottom-right`) by `dx`, `dy`: the
-  opposite corner stays, and it gets no smaller than the smallest window."
-  [{:keys [x y w h]} corner dx dy]
-  (let [left? (contains? #{:top-left :bottom-left} corner)
-        top?  (contains? #{:top-left :top-right} corner)
-        w'    (max min-width (if left? (- w dx) (+ w dx)))
-        h'    (max min-height (if top? (- h dy) (+ h dy)))]
+  "`frame` resized by dragging its corner `handle` (`:top-left`,
+  `:top-right`, `:bottom-left` or `:bottom-right`) or its side (`:top`,
+  `:right`, `:bottom` or `:left`) by `dx`, `dy`: the opposite corner or
+  side stays, a side changes its width or its height alone, and it gets
+  no smaller than the smallest window."
+  [{:keys [x y w h]} handle dx dy]
+  (let [left?   (contains? #{:top-left :bottom-left :left} handle)
+        right?  (contains? #{:top-right :bottom-right :right} handle)
+        top?    (contains? #{:top-left :top-right :top} handle)
+        bottom? (contains? #{:bottom-left :bottom-right :bottom} handle)
+        w'      (max min-width (cond left? (- w dx) right? (+ w dx) :else w))
+        h'      (max min-height (cond top? (- h dy) bottom? (+ h dy) :else h))]
     {:x (if left? (+ x (- w w')) x)
      :y (if top? (+ y (- h h')) y)
      :w w'
@@ -123,48 +127,52 @@
   on (`move`, `top-left`, ...; see `moved` and `resized`): `on-change`
   with the frame as it drags (nil once it is let go where it started),
   `on-commit` with it once it is let go, and whether its size changed
-  (see `drag-commit`). What the drag went to stays in a ref, not in
-  state: a handler kept from an earlier render reads the state of that
-  render."
-  [frame on-change on-commit]
-  (let [drag-ref (mf/use-ref nil)
+  (see `drag-commit`). With `constrain`, the frame it drags to is
+  `(constrain frame mode start)`, `start` the frame it started at. What
+  the drag went to stays in a ref, not in state: a handler kept from an
+  earlier render reads the state of that render."
+  ([frame on-change on-commit]
+   (use-frame-drag frame on-change on-commit nil))
+  ([frame on-change on-commit constrain]
+   (let [drag-ref (mf/use-ref nil)
 
-        on-down
-        (mf/use-fn
-         (mf/deps frame)
-         (fn [event]
-           (let [target (dom/get-current-target event)]
-             (dom/stop-propagation event)
-             (dom/prevent-default event)
-             (.setPointerCapture target (.-pointerId event))
-             (mf/set-ref-val! drag-ref {:mode (keyword (dom/get-data target "mode"))
-                                        :frame frame
-                                        :last frame
-                                        :x (.-clientX event)
-                                        :y (.-clientY event)}))))
+         on-down
+         (mf/use-fn
+          (mf/deps frame)
+          (fn [event]
+            (let [target (dom/get-current-target event)]
+              (dom/stop-propagation event)
+              (dom/prevent-default event)
+              (.setPointerCapture target (.-pointerId event))
+              (mf/set-ref-val! drag-ref {:mode (keyword (dom/get-data target "mode"))
+                                         :frame frame
+                                         :last frame
+                                         :x (.-clientX event)
+                                         :y (.-clientY event)}))))
 
-        on-move
-        (mf/use-fn
-         (mf/deps on-change)
-         (fn [event]
-           (when-let [{:keys [mode frame x y] :as drag} (mf/ref-val drag-ref)]
-             (let [dx    (- (.-clientX event) x)
-                   dy    (- (.-clientY event) y)
-                   frame (if (= mode :move) (moved frame dx dy) (resized frame mode dx dy))]
-               (mf/set-ref-val! drag-ref (assoc drag :last frame))
-               (on-change frame)))))
+         on-move
+         (mf/use-fn
+          (mf/deps on-change constrain)
+          (fn [event]
+            (when-let [{:keys [mode frame x y] :as drag} (mf/ref-val drag-ref)]
+              (let [dx    (- (.-clientX event) x)
+                    dy    (- (.-clientY event) y)
+                    to    (if (= mode :move) (moved frame dx dy) (resized frame mode dx dy))
+                    frame (if (some? constrain) (constrain to mode frame) to)]
+                (mf/set-ref-val! drag-ref (assoc drag :last frame))
+                (on-change frame)))))
 
-        on-up
-        (mf/use-fn
-         (mf/deps on-change on-commit)
-         (fn [_]
-           (when-let [drag (mf/ref-val drag-ref)]
-             (mf/set-ref-val! drag-ref nil)
-             (if-let [[frame resized?] (drag-commit drag)]
-               (on-commit frame resized?)
-               ;; nothing changed: not even where it showed while dragged
-               (on-change nil)))))]
-    {:on-down on-down :on-move on-move :on-up on-up}))
+         on-up
+         (mf/use-fn
+          (mf/deps on-change on-commit)
+          (fn [_]
+            (when-let [drag (mf/ref-val drag-ref)]
+              (mf/set-ref-val! drag-ref nil)
+              (if-let [[frame resized?] (drag-commit drag)]
+                (on-commit frame resized?)
+                ;; nothing changed: not even where it showed while dragged
+                (on-change nil)))))]
+     {:on-down on-down :on-move on-move :on-up on-up})))
 
 (def ^:private corners
   "Each corner that resizes the window, with its classes."

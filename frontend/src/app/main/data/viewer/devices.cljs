@@ -37,6 +37,11 @@
   "Px the view mode leaves round a device, in its stage (see `layout`)."
   24)
 
+(def preview-top
+  "Px the preview of the workspace leaves above a device, under its bar:
+  the device alone shows there, the bar right over it (see `layout`)."
+  8)
+
 (defn parse-choice
   "`choice` when it is one of `choices`, else \"none\"."
   [choice]
@@ -420,39 +425,43 @@
 
 (defn layout
   "Where `device` (see `resolve-device`) goes in a stage `stage-w` ×
-  `stage-h` px with `padding` round it, as large as fits: `{:x :y :w :h
-  :scale :view-w :view-h :landscape? :geometry :screen}`, the device
-  drawn from `:geometry` as it stands in a box `:view-w` × `:view-h`
-  (turned a quarter to the left when `:landscape?`), and its screen
-  `{:x :y :w :h :radii}` in px of the stage. The screen is a whole
-  number of px wide: the zoom of the board is `:scale`."
-  [{:keys [kind landscape?] :as device} stage-w stage-h padding]
-  (let [[nw nh]  (standing device)
-        g        (geometry kind nw nh)
-        [vw vh]  (if landscape? [(:h g) (:w g)] [(:w g) (:h g)])
-        {:keys [x y w h radii]} (:screen g)
-        ;; turned a quarter to the left, (x, y) goes to (y, width - x)
-        [sx sy sw sh] (if landscape? [y (- (:w g) x w) h w] [x y w h])
-        radii    (if landscape?
-                   (let [[tl tr br bl] radii] [tr br bl tl])
-                   radii)
-        fit      (min (/ (max 1 (- stage-w (* 2 padding))) vw)
-                      (/ (max 1 (- stage-h (* 2 padding))) vh))
-        screen-w (max 1 (mth/floor (* sw fit)))
-        scale    (/ screen-w sw)
-        ox       (/ (- stage-w (* vw scale)) 2)
-        oy       (/ (- stage-h (* vh scale)) 2)]
-    {:x ox
-     :y oy
-     :w (* vw scale)
-     :h (* vh scale)
-     :scale scale
-     :view-w vw
-     :view-h vh
-     :landscape? (boolean landscape?)
-     :geometry g
-     :screen {:x (+ ox (* sx scale))
-              :y (+ oy (* sy scale))
-              :w screen-w
-              :h (* sh scale)
-              :radii (mapv #(* % scale) radii)}}))
+  `stage-h` px with `padding` round it, as large as fits, in the middle;
+  with `top`, that many px from the top of the stage instead, the room
+  left below it: `{:x :y :w :h :scale :view-w :view-h :landscape?
+  :geometry :screen}`, the device drawn from `:geometry` as it stands
+  in a box `:view-w` × `:view-h` (turned a quarter to the left when
+  `:landscape?`), and its screen `{:x :y :w :h :radii}` in px of the
+  stage. The screen is a whole number of px wide: the zoom of the board
+  is `:scale`."
+  ([device stage-w stage-h padding]
+   (layout device stage-w stage-h padding nil))
+  ([{:keys [kind landscape?] :as device} stage-w stage-h padding top]
+   (let [[nw nh]  (standing device)
+         g        (geometry kind nw nh)
+         [vw vh]  (if landscape? [(:h g) (:w g)] [(:w g) (:h g)])
+         {:keys [x y w h radii]} (:screen g)
+         ;; turned a quarter to the left, (x, y) goes to (y, width - x)
+         [sx sy sw sh] (if landscape? [y (- (:w g) x w) h w] [x y w h])
+         radii    (if landscape?
+                    (let [[tl tr br bl] radii] [tr br bl tl])
+                    radii)
+         fit      (min (/ (max 1 (- stage-w (* 2 padding))) vw)
+                       (/ (max 1 (- stage-h padding (or top padding))) vh))
+         screen-w (max 1 (mth/floor (* sw fit)))
+         scale    (/ screen-w sw)
+         ox       (/ (- stage-w (* vw scale)) 2)
+         oy       (if (some? top) top (/ (- stage-h (* vh scale)) 2))]
+     {:x ox
+      :y oy
+      :w (* vw scale)
+      :h (* vh scale)
+      :scale scale
+      :view-w vw
+      :view-h vh
+      :landscape? (boolean landscape?)
+      :geometry g
+      :screen {:x (+ ox (* sx scale))
+               :y (+ oy (* sy scale))
+               :w screen-w
+               :h (* sh scale)
+               :radii (mapv #(* % scale) radii)}})))

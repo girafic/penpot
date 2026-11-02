@@ -324,6 +324,18 @@
   display: none;
 }
 
+// a device alone in the preview: the workspace shows round it, under the
+// shadow it casts
+:global(body:has([data-device-only="true"])),
+:global(#app:has([data-device-only="true"])),
+[data-device-only="true"] .viewer-content {
+  background-color: transparent;
+}
+
+[data-device-only="true"] .device-stage:not(.device-cutouts) {
+  filter: drop-shadow(0 deprecated.$s-4 deprecated.$s-8 rgb(0 0 0 / 0.28));
+}
+
 /** FULLSCREEN */
 [data-fullscreen="true"] .viewer-bottom {
   transform: translateY(deprecated.$s-40);

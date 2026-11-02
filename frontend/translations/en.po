@@ -9663,6 +9663,9 @@ msgstr "Drag to move, double-click to fit it to the board again"
 msgid "workspace.preview.resize"
 msgstr "Drag to resize"
 
+msgid "workspace.preview.turn"
+msgstr "Rotate device"
+
 msgid "workspace.preview.previous-board"
 msgstr "Previous board"
 

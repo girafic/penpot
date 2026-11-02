@@ -145,6 +145,21 @@
     (t/is (mth/close? (* 874 scale) (:h screen)))
     (t/is (inside? screen {:x x :y y :w w :h h}) "the screen in the device")))
 
+(t/deftest a-device-at-the-top-of-its-stage
+  (let [device (dvd/resolve-device "iphone-island" 402 874)
+        middle (dvd/layout device 600 2000 24)
+        top    (dvd/layout device 600 2000 24 8)]
+    (t/is (= 8 (:y top)) "the room left below it")
+    (t/is (= (:scale middle) (:scale top)) "as large where the stage is as narrow")
+    (t/is (= (:x middle) (:x top)) "in the middle across")
+    (t/is (mth/close? (- (get-in top [:screen :y]) 8) (- (get-in middle [:screen :y]) (:y middle)))
+          "its screen with it"))
+  (let [device (dvd/resolve-device "iphone-island" 402 874)
+        {:keys [y h]} (dvd/layout device 2000 600 24 8)]
+    (t/is (= 8 y))
+    (t/is (<= (+ y h) (- 600 24)) "as high as fits above the padding below it")
+    (t/is (< (- 600 24 8 4) h) "nearly")))
+
 (t/deftest a-device-on-its-side
   (let [device (dvd/resolve-device "iphone-island" 874 402)
         {:keys [x y w h scale screen landscape? view-w view-h]} (dvd/layout device 1200 800 24)
