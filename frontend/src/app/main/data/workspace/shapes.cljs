@@ -366,12 +366,8 @@
             changes (-> (pcb/empty-changes it page-id)
                         (pcb/with-objects objects)
                         (pcb/with-library-data data)
-                        (cls/generate-move-shapes-into-frame frame-id shapes objects true))
-
-            ;; Their animation goes with them to their new board.
-            changes (some-> changes
-                            (cltl/generate-move-timelines (dsh/lookup-page state page-id)
-                                                          objects shapes))]
+                        ;; their animation goes with them (see `cls/move-timelines`)
+                        (cls/generate-move-shapes-into-frame frame-id shapes objects true))]
 
         (if (some? changes)
           (rx/of (dch/commit-changes changes))

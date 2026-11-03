@@ -90,7 +90,8 @@
                :title (if ^boolean framed
                         (tr "viewer.device.zoom-locked")
                         (tr "workspace.header.zoom"))
-               :aria-expanded open?}
+               :aria-expanded open?
+               :aria-disabled (boolean framed)}
       [:span {:class (stl/css :label)} (fmt/format-percent zoom)]]
      [:& dropdown {:show open?
                    :on-close close-dropdown}

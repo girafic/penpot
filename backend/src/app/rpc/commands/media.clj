@@ -43,16 +43,16 @@
 
 (declare create-file-media-object)
 
-(defn- validate-content!
+(defn- check-content
   "The upload `content` of a file media object of a file of `team`,
   checked: an image, or an audio file when the team has Penpot Motion
-  (see `media.v/validate-audio!`), with its canonical type. Motion is a
+  (see `media.v/check-audio`), with its canonical type. Motion is a
   frontend feature: only a backend run with `enable-feature-animation`
   has it for its teams, and takes audio."
   [team content]
   (if (contains? cm/audio-types (:mtype content))
     (if (contains? (cfeat/get-team-enabled-features cf/flags team) "animation/v1")
-      (media.v/validate-audio! content)
+      (media.v/check-audio content)
       (ex/raise :type :validation
                 :code :media-type-not-allowed
                 :hint "audio is not enabled on this server"))
@@ -65,7 +65,8 @@
 ;; prod on a 3.5TB DB). Disabled until a cheaper approximation lands; the
 ;; uploads below leave it out until then.
 ;; TODO: re-enable with the new implementation, for images and audio alike,
-;; with a test of an upload over the quote (as the chunked assemble had):
+;; in both uploads (`both-uploads-take-the-same-media-quote` checks they
+;; answer alike):
 ;; (quotes/check! cfg {::quotes/id        ::quotes/media-storage-bytes-per-team
 ;;                     ::quotes/profile-id profile-id
 ;;                     ::quotes/team-id    (:id team)
@@ -91,7 +92,7 @@
   (media.v/check-upload-path content)
 
   (let [team    (teams/get-team-for-file pool file-id)
-        content (validate-content! team content)
+        content (check-content team content)
         params  (assoc params :content content)]
 
     (db/run! cfg (fn [{:keys [::db/conn] :as cfg}]
@@ -198,7 +199,7 @@
 (defn- process-audio
   "An audio file `content` as it is stored: as uploaded, without a
   thumbnail and without a size (browsers decode it, see
-  `media.v/validate-audio!`)."
+  `media.v/check-audio`)."
   [content]
   (let [path (:path content)
         hash (sto/calculate-hash path)]
@@ -613,7 +614,7 @@
                       content (->> (-> content
                                        (assoc :filename (str "upload:" name))
                                        (assoc :mtype mtype))
-                                   (validate-content! team))
+                                   (check-content team))
                       mobj    (create-file-media-object cfg (assoc params
                                                                    :from-chunks? true
                                                                    :content content))]

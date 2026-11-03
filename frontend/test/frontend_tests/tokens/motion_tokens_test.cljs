@@ -12,6 +12,8 @@
    [app.common.test-helpers.compositions :as tho]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.shapes :as ths]
+   [app.common.types.tokens-lib :as ctob]
+   [app.main.data.tokenscript :as ts]
    [app.main.data.workspace.tokens.application :as dwta]
    [app.main.ui.workspace.timeline.easing :as easing]
    [app.main.ui.workspace.tokens.management.context-menu :as wtcm]
@@ -70,3 +72,30 @@
              (map :value (easing/easing-token-options tokens "ease.gone")))
           "a bound token of no active set shows too")
     (t/is (= 3 (count (easing/easing-token-options tokens "ease.out"))))))
+
+(defn- resolved
+  "The resolved values of `tokens` (token params), by name, as tokenscript
+  (the `:tokenscript` flag) resolves them."
+  [& tokens]
+  (-> (into {} (map (fn [token] [(:name token) (ctob/make-token token)])) tokens)
+      (ts/resolve-tokens)
+      (update-vals :resolved-value)))
+
+(t/deftest durations-resolve-to-milliseconds-under-tokenscript
+  (let [values (resolved duration
+                         {:name "motion.ms" :type :duration :value "300ms"}
+                         {:name "motion.s" :type :duration :value "0.2s"}
+                         {:name "motion.ref" :type :duration :value "{motion.fast}"}
+                         {:name "motion.twice" :type :duration :value "{motion.fast} * 2"}
+                         {:name "motion.mixed" :type :duration :value "0.1s + 50ms"})]
+    (t/is (= 150 (get values "motion.fast")))
+    (t/is (= 300 (get values "motion.ms")))
+    (t/is (= 200 (get values "motion.s")))
+    (t/is (= 150 (get values "motion.ref")) "through a reference")
+    (t/is (= 300 (some-> (get values "motion.twice") js/Math.round)) "an expression keeps the unit")
+    (t/is (= 150 (some-> (get values "motion.mixed") js/Math.round)) "seconds and milliseconds together")))
+
+(t/deftest a-cubic-bezier-resolves-to-its-four-numbers-under-tokenscript
+  (let [values (resolved bezier {:name "ease.ui" :type :cubic-bezier :value "{ease.out}"})]
+    (t/is (= [0 0 0.58 1] (get values "ease.out")))
+    (t/is (= [0 0 0.58 1] (get values "ease.ui")) "through a reference")))

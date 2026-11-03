@@ -2880,6 +2880,10 @@ msgstr "Export cancelled"
 msgid "jobs.import-cancelled"
 msgstr "Import cancelled"
 
+#: src/app/main/ui/jobs/progress.cljs:28
+msgid "jobs.progress.stage.animation-styles"
+msgstr "Processing the animation styles"
+
 #: src/app/main/ui/jobs/progress.cljs:26
 msgid "jobs.progress.stage.colors"
 msgstr "Processing the colors"

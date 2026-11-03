@@ -747,7 +747,10 @@
             (clvp/generate-make-shapes-no-variant variant-shapes))
           (cfsh/prepare-move-shapes-into-frame frame-id shapes objects remove-layout-data?)
           (cond-> (seq empty-variant-cont)
-            (#(second (generate-delete-shapes % empty-variant-cont {}))))))))
+            (#(second (generate-delete-shapes % empty-variant-cont {}))))
+
+          ;; Their animation goes with them to their new board
+          (move-timelines objects ids)))))
 
 (defn change-show-in-viewer
   [shape hide?]

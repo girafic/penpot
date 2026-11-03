@@ -25,6 +25,7 @@
     :components      (tr "jobs.progress.stage.components")
     :colors          (tr "jobs.progress.stage.colors")
     :typographies    (tr "jobs.progress.stage.typographies")
+    :animation-styles (tr "jobs.progress.stage.animation-styles")
     :tokens          (tr "jobs.progress.stage.tokens")
     :storage-objects (tr "jobs.progress.stage.storage-objects")
     :relations       (tr "jobs.progress.stage.relations")

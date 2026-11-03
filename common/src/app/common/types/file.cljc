@@ -743,9 +743,8 @@
   "Find all usages of an asset in a file (may be in pages or in the components
   of the local library, deleted ones included, since they keep their shapes
   to be restored and to resolve their remaining copies). The uses of an
-  `:animation-style` are in the
-  timelines of the pages: the containers are pages and the shapes are uses
-  (see `ctas/page-uses`).
+  `:animation-style` are in the timelines of the pages: the containers are
+  pages and the shapes are uses (see `ctas/page-uses`).
 
   Returns a list ((asset ((container shapes) (container shapes)...))...)"
   [file-data library-data asset-type]

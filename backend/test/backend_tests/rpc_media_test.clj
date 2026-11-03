@@ -1261,6 +1261,38 @@
     (t/is (not= (:id one) (:id two)))
     (t/is (= (:media-id one) (:media-id two)))))
 
+(t/deftest both-uploads-take-the-same-media-quote
+  ;; The quote of the media of a team is off upstream for now (see the
+  ;; note in `app.rpc.commands.media`); the direct and the chunked upload
+  ;; of the same file have to answer alike under the same quote, whether
+  ;; it is off or on again, images and audio alike.
+  (with-mocks [_ {:target 'app.config/get
+                  :return (th/config-get-mock {:quotes-media-storage-bytes-per-team 1000})}]
+    (let [prof (th/create-profile* 1)
+          file (audio-file prof)]
+      (doseq [[filename mtype] [["sample.jpg" "image/jpeg"] ["sample.wav" "audio/wav"]]]
+        (t/testing filename
+          (let [direct     (upload-audio prof file filename mtype)
+                data       (java.nio.file.Files/readAllBytes (th/tempfile (str "backend_tests/test_files/" filename)))
+                session-id (create-session! prof 1)
+                _          (th/multipart-command! {::th/type        :upload-chunk
+                                                   ::rpc/profile-id (:id prof)
+                                                   :session-id      session-id
+                                                   :index           0
+                                                   :content         (make-chunk-mfile data mtype)})
+                chunked    (th/command! {::th/type        :assemble-file-media-object
+                                         ::rpc/profile-id (:id prof)
+                                         :session-id      session-id
+                                         :file-id         (:id file)
+                                         :is-local        true
+                                         :name            filename
+                                         :mtype           mtype})]
+            (t/is (= (some-> (:error direct) th/ex-code)
+                     (some-> (:error chunked) th/ex-code)))
+            ;; while the quote is off, both store the file
+            (t/is (nil? (:error direct)))
+            (t/is (nil? (:error chunked)))))))))
+
 (t/deftest upload-file-media-object-rejects-client-id
   (let [prof  (th/create-profile* 1)
         file  (th/create-file* 1 {:profile-id (:id prof)

@@ -23,6 +23,14 @@
       (t/is (= "TR:jobs.progress.stage.pages 3"
                (jp/milestone-text {:stage :pages :counters {:pages {:current 3}}}))))))
 
+(t/deftest the-animation-styles-milestone-writes-its-stage
+  ;; the stage binfile imports report for the animation styles of a file
+  ;; (Penpot Motion, see `app.binfile.jobs/stage-of`)
+  (with-redefs [i18n/tr stub-tr]
+    (t/is (= "TR:jobs.progress.stage.animation-styles 1/2"
+             (jp/milestone-text {:stage :animation-styles
+                                 :counters {:animation-styles {:current 1 :total 2}}})))))
+
 (t/deftest the-upload-milestone-writes-the-percentage-of-the-file
   (with-redefs [i18n/tr stub-tr]
     (t/testing "the chunks sent become a whole percentage"

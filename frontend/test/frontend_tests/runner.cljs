@@ -212,6 +212,7 @@
    [frontend-tests.util-zip-test]
    [frontend-tests.util.audio-test]
    [frontend-tests.util.code-gen-markup-svg-wasm-test]
+   [frontend-tests.util.code-gen-motion-svg-test]
    [frontend-tests.util.code-gen-trim-test]
    [frontend-tests.util.dom.dnd-test]
    [frontend-tests.viewer-backdrop-test]
@@ -221,6 +222,7 @@
    [frontend-tests.viewer-turn-test]
    [frontend-tests.worker-snap-test]
    [frontend-tests.worker.exports-test]
+   [frontend-tests.worker.index-preview-test]
    [frontend-tests.worker.index-test]
    [goog.object :as gobj]))
 
@@ -272,6 +274,7 @@
    'frontend-tests.data.imports-test
    'frontend-tests.data.jobs-test
    'frontend-tests.worker.exports-test
+   'frontend-tests.worker.index-preview-test
    'frontend-tests.worker.index-test
    'frontend-tests.data.svg-upload-test
    'frontend-tests.data.svg-vectors-test
@@ -445,6 +448,7 @@
    'frontend-tests.util-webapi-test
    'frontend-tests.util.audio-test
    'frontend-tests.util.code-gen-markup-svg-wasm-test
+   'frontend-tests.util.code-gen-motion-svg-test
    'frontend-tests.util.code-gen-trim-test
    'frontend-tests.util.dom.dnd-test
    'frontend-tests.util-zip-test

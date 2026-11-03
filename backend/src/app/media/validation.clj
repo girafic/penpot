@@ -138,7 +138,7 @@
   [path]
   (sniff-audio-head (read-head path audio-head-size)))
 
-(defn validate-audio!
+(defn check-audio
   "The audio `upload` with its canonical type: its declared type one of
   `cm/audio-types`, its bytes of that type (see `sniff-audio-type`, so
   that no HTML or SVG is stored as audio) and its size up to

@@ -22,6 +22,7 @@
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
+   [app.common.test-helpers.variants :as thv]
    [app.common.types.animation :as cta]
    [app.common.types.animation-code :as ctac]
    [app.common.types.animation-follow :as ctaf]
@@ -96,6 +97,19 @@
   [file label parent-label]
   (thf/apply-changes file (relocate-changes file label parent-label)))
 
+(defn- move-into-frame
+  "Move the shapes of `labels` into the board `frame-label`, as the
+  workspace does when they are dropped on it."
+  [file frame-label & labels]
+  (let [page    (thf/current-page file)
+        objects (:objects page)]
+    (thf/apply-changes file (-> (pcb/empty-changes nil (:id page))
+                                (pcb/with-objects objects)
+                                (pcb/with-library-data (:data file))
+                                (cls/generate-move-shapes-into-frame (thi/id frame-label)
+                                                                     (mapv thi/id labels)
+                                                                     objects true)))))
+
 (t/deftest duplicated-layer-gets-the-animation
   (let [[file copy] (duplicate (animated-file) :rect (gpt/point 10 20))
         rect        (thi/id :rect)
@@ -143,6 +157,51 @@
     ;; 100 and 200 on the canvas, 1000 further left in board B
     (t/is (= [-900 -800] (x-values b (thi/id :board-a))))
     (t/is (= [-850 -750] (x-values b (thi/id :rect))))))
+
+(t/deftest layer-moved-into-a-board-takes-its-animation-along
+  (let [file (move-into-frame (animated-file) :board-b :rect)
+        a    (get (timelines file) (thi/id :board-a))
+        b    (get (timelines file) (thi/id :board-b))
+        rect (thi/id :rect)]
+    (t/is (nil? (cta/get-track a rect)))
+    ;; same place on the canvas, 900 further left in its new board
+    (t/is (= [-850 -750] (x-values b rect)))
+    (t/is (= 1 (count (:animations (cta/get-track b rect)))))
+    (t/is (cta/valid-timeline? b))))
+
+(t/deftest board-moved-into-a-board-gives-its-tracks-away
+  (let [file (move-into-frame (animated-file) :board-b :board-a)
+        tls  (timelines file)
+        b    (get tls (thi/id :board-b))]
+    (t/is (not (contains? tls (thi/id :board-a))))
+    (t/is (= [-900 -800] (x-values b (thi/id :board-a))))
+    (t/is (= [-850 -750] (x-values b (thi/id :rect))))))
+
+(t/deftest variant-moved-out-of-its-container-takes-its-animation-along
+  ;; the last main leaving its container deletes the container
+  (let [file  (-> (thf/sample-file :file1)
+                  (thv/add-variant :v01 :c01 :m01 :c02 :m02
+                                   :variant1-params {:x 50 :y 50 :width 100 :height 100})
+                  (tho/add-frame :board1 :x 1000 :y 0 :width 400 :height 300))
+        v01   (thi/id :v01)
+        m01   (thi/id :m01)
+        tl    (-> (cta/make-timeline {:board-id v01 :duration 1000})
+                  (cta/add-keyframe m01 {:time 0 :property :x :value 50})
+                  (cta/add-keyframe m01 {:time 1000 :property :x :value 150}))
+        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page (thf/current-page file))
+                                          (pcb/set-timeline v01 tl)))
+        file' (-> file
+                  (move-into-frame :board1 :m01)
+                  (move-into-frame :board1 :m02))
+        b     (get (timelines file') (thi/id :board1))]
+    (t/is (nil? (ths/get-shape file' :v01)) "the emptied container is gone")
+    (t/is (nil? (:variant-id (ths/get-shape file' :m01))))
+    ;; same place on the canvas, 1000 further left in board 1
+    (t/is (= [-950 -850] (x-values b m01)))
+    (t/is (not (contains? (timelines file') v01)))
+    (t/is (cta/valid-timeline? b))
+    (thf/validate-file! file')))
 
 (t/deftest pasted-layer-brings-its-animation
   (let [file    (animated-file)

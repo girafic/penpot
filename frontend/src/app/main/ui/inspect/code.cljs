@@ -121,7 +121,8 @@
         collapsed-css?    (contains? @collapsed* :css)
         collapsed-markup? (contains? @collapsed* :markup)
 
-        ;; With render-wasm active, never use classic SVG codegen for SVG markup.
+        ;; With render-wasm active, the SVG markup comes from WASM, but for
+        ;; animated boards (see `cgm/svg-by-wasm?`).
         wasm-svg-markup? (features/use-feature "render-wasm/v1")
 
         page-objects   (use-objects from page-id)
@@ -135,9 +136,6 @@
           (if motion?
             (cgm/without-guides page libraries page-objects shapes)
             [page-objects shapes]))
-
-        ;; the export of WASM draws the layers as they are, guides too
-        guides?        (not (identical? objects page-objects))
 
         shapes
         (mf/with-memo [shapes frame]
@@ -208,13 +206,10 @@
 
         markup-code
         (mf/use-memo
-         (mf/deps markup-type shapes images-data objects code-units code-trims wasm-svg-markup? guides?)
+         (mf/deps markup-type shapes images-data objects codes code-units code-trims wasm-svg-markup?)
          (fn []
            (cond
-             ;; an animation that marks or leaves out some layers takes
-             ;; the code generation, which does that
-             (and (= markup-type "svg") wasm-svg-markup? (not guides?)
-                  (empty? code-units) (empty? code-trims))
+             (cgm/svg-by-wasm? markup-type wasm-svg-markup? codes)
              (svg.wasm/get-formatted-svg-markup (mapv :id shapes))
 
              (or (seq code-units) (seq code-trims))
