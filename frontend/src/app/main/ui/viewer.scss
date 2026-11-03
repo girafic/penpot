@@ -92,6 +92,20 @@
   z-index: 2;
 }
 
+// on the black screen of a device until the first board is drawn (where it
+// is comes inline, as the screen is); the loader sets its color on itself,
+// so this names it with two classes
+.device-loading {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  overflow: hidden;
+}
+
+.device-loading .device-loader {
+  --loader-color-foreground: var(--color-static-white);
+}
+
 .viewer-section.in-device {
   z-index: 1;
   place-self: start start;

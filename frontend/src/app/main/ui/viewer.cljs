@@ -14,6 +14,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes.bounds :as gsb]
    [app.common.logic.timelines :as cltl]
+   [app.common.math :as mth]
    [app.common.transit :as t]
    [app.common.types.animation :as cta]
    [app.common.types.shape.interactions :as ctsi]
@@ -539,6 +540,10 @@
         ;; what the background of the prototype covers (see `vbg/background`)
         content-ref (mf/use-ref nil)
         content-size (dfr/use-size content-ref true)
+        ;; whether the first board is drawn: a device shows a loader on its
+        ;; screen until then (see below)
+        drawn*      (mf/use-state false)
+        drawn?      (deref drawn*)
         ;; in the preview of the workspace, right under its bar; turned, as
         ;; large as it stands (the window of the preview hugs it, see
         ;; `hugged-frame` there)
@@ -722,23 +727,25 @@
                         (.. js/window -location -origin)))))
 
     ;; the preview shows a loader of its own until the first board is
-    ;; drawn: WASM draws it once it, the fonts and the images of the page
-    ;; load. A page without boards shows as it is.
+    ;; drawn, a device here one on its screen: WASM draws it once it, the
+    ;; fonts and the images of the page load. A page without boards shows
+    ;; as it is.
     (mf/with-effect [preview (some? frame) (empty? frames)]
-      (when preview
-        (let [alive? (volatile! true)
-              drawn  #(when @alive?
+      (let [alive? (volatile! true)
+            drawn  #(when @alive?
+                      (reset! drawn* true)
+                      (when preview
                         (.postMessage (.-parent js/window) #js {:type "penpot:preview-drawn"}
-                                      (.. js/window -location -origin)))]
-          (cond
-            (and (some? frame) wasm?)
-            (.then (rwv/when-frame-rendered (mf/ref-val current-viewport-ref) (:id frame)
-                                            wasm-first-draw-wait-ms)
-                   drawn)
+                                      (.. js/window -location -origin))))]
+        (cond
+          (and (some? frame) wasm?)
+          (.then (rwv/when-frame-rendered (mf/ref-val current-viewport-ref) (:id frame)
+                                          wasm-first-draw-wait-ms)
+                 drawn)
 
-            (or (some? frame) (empty? frames))
-            (drawn))
-          #(vreset! alive? false))))
+          (or (some? frame) (empty? frames))
+          (drawn))
+        #(vreset! alive? false)))
 
     ;; the bar of the preview plays, pauses and stops the animation of the
     ;; board it shows, and turns its sound on and off: it is told whether
@@ -1125,10 +1132,19 @@
               ;; turned has them (see `dvt/turn-objects`)
               :fixed-drop (when-not (:turned? shown) (fixed-drop frame device))}]]))]
 
-      ;; the island, notch or camera of the device, over its screen
+      ;; the island, notch or camera of the device, over its screen, and
+      ;; a loader on it until the first board is drawn (the preview has
+      ;; its own)
       (when (some? device-layout)
         [:div {:ref cutouts-ref
                :class (stl/css :device-stage :device-cutouts)}
+         (when-not (or (true? preview) drawn?)
+           [:div {:class (stl/css :device-loading)
+                  :style (dfr/screen-style device-layout)}
+            [:> loader* {:class (stl/css :device-loader)
+                         :title (tr "labels.loading")
+                         :overlay true
+                         :width (mth/clamp (mth/round (* 0.4 (dm/get-in device-layout [:screen :w]))) 32 100)}]])
          [:> device-drawing* {:layout device-layout
                               :kind (:kind device)
                               :finish device-finish
