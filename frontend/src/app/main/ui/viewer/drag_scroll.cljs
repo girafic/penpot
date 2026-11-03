@@ -108,16 +108,23 @@
     (> top max) {:scroll max :offset (- (rubber (- top max) size))}
     :else       {:scroll top :offset 0}))
 
+(def ^:private wheel-reach
+  "How far, as a share of its height, a wheel or a trackpad pushes a
+  screen past an end at most, as a finger drags it no further than across
+  it: the swing of a trackpad goes on long after it is let go."
+  0.3)
+
 (defn wheel-past
   "How far, px, a wheel or a trackpad has pushed a screen scrolled `top`
-  px of `limit` past an end, `past` before and `dy` more now: less than 0
-  past the top, more past the bottom, 0 between the ends."
-  [past top limit dy]
+  px of `limit` past an end, `past` before and `dy` more now, `reach` px
+  at most: less than 0 past the top, more past the bottom, 0 between the
+  ends."
+  [past top limit dy reach]
   (cond
-    (neg? past) (min 0 (+ past dy))
-    (pos? past) (max 0 (+ past dy))
-    (and (<= top 0) (neg? dy)) dy
-    (and (>= top limit) (pos? dy)) dy
+    (neg? past) (mth/clamp (+ past dy) (- reach) 0)
+    (pos? past) (mth/clamp (+ past dy) 0 reach)
+    (and (<= top 0) (neg? dy)) (max (- reach) dy)
+    (and (>= top limit) (pos? dy)) (min reach dy)
     :else 0))
 
 (defn past-offset
@@ -319,9 +326,11 @@
               (fn [event]
                 (stop!)
                 (some-> @rest* js/clearTimeout)
-                (let [past (wheel-past @past* (.-scrollTop section) (max-scroll) (.-deltaY event))]
+                (let [size (.-clientHeight section)
+                      past (wheel-past @past* (.-scrollTop section) (max-scroll) (.-deltaY event)
+                                       (* wheel-reach size))]
                   (vreset! past* past)
-                  (offset! (past-offset past (.-clientHeight section)))
+                  (offset! (past-offset past size))
                   (when-not (zero? past)
                     ;; the screen can scroll no further
                     (.preventDefault event)
