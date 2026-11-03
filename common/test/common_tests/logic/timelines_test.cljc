@@ -97,18 +97,22 @@
   [file label parent-label]
   (thf/apply-changes file (relocate-changes file label parent-label)))
 
-(defn- move-into-frame
-  "Move the shapes of `labels` into the board `frame-label`, as the
-  workspace does when they are dropped on it."
-  [file frame-label & labels]
+(defn- move-into-frame-changes
+  "The changes moving the shapes of `labels` into the board
+  `frame-label`, as the workspace makes them when they are dropped on it."
+  [file frame-label labels]
   (let [page    (thf/current-page file)
         objects (:objects page)]
-    (thf/apply-changes file (-> (pcb/empty-changes nil (:id page))
-                                (pcb/with-objects objects)
-                                (pcb/with-library-data (:data file))
-                                (cls/generate-move-shapes-into-frame (thi/id frame-label)
-                                                                     (mapv thi/id labels)
-                                                                     objects true)))))
+    (-> (pcb/empty-changes nil (:id page))
+        (pcb/with-objects objects)
+        (pcb/with-library-data (:data file))
+        (cls/generate-move-shapes-into-frame (thi/id frame-label)
+                                             (mapv thi/id labels)
+                                             objects true))))
+
+(defn- move-into-frame
+  [file frame-label & labels]
+  (thf/apply-changes file (move-into-frame-changes file frame-label labels)))
 
 (t/deftest duplicated-layer-gets-the-animation
   (let [[file copy] (duplicate (animated-file) :rect (gpt/point 10 20))
@@ -177,20 +181,29 @@
     (t/is (= [-900 -800] (x-values b (thi/id :board-a))))
     (t/is (= [-850 -750] (x-values b (thi/id :rect))))))
 
+(defn- animated-variant-file
+  "The variant container :v01 with the mains :m01, moving right (50 to
+  150 in it), and :m02, and an empty board 1 at 1000,0."
+  []
+  (let [file (-> (thf/sample-file :file1)
+                 (thv/add-variant :v01 :c01 :m01 :c02 :m02
+                                  :variant1-params {:x 50 :y 50 :width 100 :height 100})
+                 (tho/add-frame :board1 :x 1000 :y 0 :width 400 :height 300))
+        v01  (thi/id :v01)
+        m01  (thi/id :m01)
+        tl   (-> (cta/make-timeline {:board-id v01 :duration 1000})
+                 (cta/add-keyframe m01 {:time 0 :property :x :value 50})
+                 (cta/add-keyframe m01 {:time 1000 :property :x :value 150}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline v01 tl)))))
+
 (t/deftest variant-moved-out-of-its-container-takes-its-animation-along
-  ;; the last main leaving its container deletes the container
-  (let [file  (-> (thf/sample-file :file1)
-                  (thv/add-variant :v01 :c01 :m01 :c02 :m02
-                                   :variant1-params {:x 50 :y 50 :width 100 :height 100})
-                  (tho/add-frame :board1 :x 1000 :y 0 :width 400 :height 300))
+  ;; the animated main leaves first; the second, unanimated one empties
+  ;; the container, which the move deletes
+  (let [file  (animated-variant-file)
         v01   (thi/id :v01)
         m01   (thi/id :m01)
-        tl    (-> (cta/make-timeline {:board-id v01 :duration 1000})
-                  (cta/add-keyframe m01 {:time 0 :property :x :value 50})
-                  (cta/add-keyframe m01 {:time 1000 :property :x :value 150}))
-        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
-                                          (pcb/with-page (thf/current-page file))
-                                          (pcb/set-timeline v01 tl)))
         file' (-> file
                   (move-into-frame :board1 :m01)
                   (move-into-frame :board1 :m02))
@@ -202,6 +215,34 @@
     (t/is (not (contains? (timelines file') v01)))
     (t/is (cta/valid-timeline? b))
     (thf/validate-file! file')))
+
+(t/deftest the-last-animated-variant-leaving-deletes-its-container-in-one-step
+  ;; the container goes in the same changes that move the track out of
+  ;; its timeline, which one undo gives back
+  (let [file    (animated-variant-file)
+        v01     (thi/id :v01)
+        board1  (thi/id :board1)
+        changes (move-into-frame-changes file :board1 [:m01 :m02])
+        moved   (thf/apply-changes file changes)
+        b       (get (timelines moved) board1)
+        undone  (thf/apply-undo-changes moved changes)]
+    (t/is (nil? (ths/get-shape moved :v01)) "the emptied container is gone")
+    (t/is (not (contains? (timelines moved) v01)))
+    ;; same place on the canvas, 1000 further left in board 1
+    (t/is (= [-950 -850] (x-values b (thi/id :m01))))
+    (t/is (cta/valid-timeline? b))
+    (thf/validate-file! moved)
+    (t/is (= [:set-timeline]
+             (into [] (comp (filter #(and (= board1 (:id %))
+                                          (contains? #{:set-timeline :set-timeline-track
+                                                       :set-timeline-track-animations
+                                                       :set-timeline-audio-clip :update-timeline}
+                                                     (:type %))))
+                            (map :type))
+                   (:redo-changes changes)))
+          "board 1 gets its timeline once")
+    (t/is (some? (ths/get-shape undone :v01)))
+    (t/is (= (timelines file) (timelines undone)) "one undo")))
 
 (t/deftest pasted-layer-brings-its-animation
   (let [file    (animated-file)

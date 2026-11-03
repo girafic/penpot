@@ -728,8 +728,10 @@
 
 (defn generate-move-shapes-into-frame
   "Reparent `shapes` into `frame-id`, stripping variant records when a
-   variant main leaves its container. The builder must already have
-   objects and library data."
+   variant main leaves its container, and move their animation to the
+   timeline of their new board (see `move-timelines`). The builder must
+   already have objects and library data, and the page or its id:
+   without them the timelines stay as they are."
   [changes frame-id shapes objects remove-layout-data?]
   (let [parent-id          (dm/get-in objects [frame-id :parent-id])
         ids                (remove #(= % parent-id) shapes)
