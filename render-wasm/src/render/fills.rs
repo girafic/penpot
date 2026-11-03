@@ -220,7 +220,7 @@ pub fn render(
     }
 
     let scale = render_state.get_scale().max(1e-6);
-    let inset = if shape.has_inner_stroke() {
+    let inset = if shape.has_inner_stroke_all_round() {
         Some(1.0 / scale)
     } else {
         None

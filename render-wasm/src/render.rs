@@ -4735,7 +4735,7 @@ impl RenderState {
                 // stroke band drawn later in `render_shape_exit`.
                 let clip_inset_for_children = (matches!(element.shape_type, Type::Frame(_))
                     && element.clip()
-                    && element.has_inner_stroke())
+                    && element.has_inner_stroke_all_round())
                 .then_some(1.0 / scale);
                 let children_clip_bounds = node_render_state.get_children_clip_bounds(
                     element,

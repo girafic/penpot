@@ -2507,6 +2507,20 @@ impl Shape {
             .any(|s| s.render_kind(is_open) == StrokeKind::Inner)
     }
 
+    /// Whether an inner stroke runs round all of its sides: what its fill and
+    /// the clip of its children shrink under by a device pixel, so that no
+    /// seam shows at the stroke (see `fills::render`). An inner stroke on some
+    /// sides only, a border at the top, leaves the others bare: shrunk there,
+    /// they would show a gap.
+    pub fn has_inner_stroke_all_round(&self) -> bool {
+        let is_open = self.is_open();
+        self.visible_strokes().any(|s| {
+            s.render_kind(is_open) == StrokeKind::Inner
+                && s.widths
+                    .is_none_or(|widths| widths.iter().all(|w| *w > MIN_STROKE_WIDTH))
+        })
+    }
+
     /// When true, the frame drop shadow can use the direct geometry path
     /// (`render_direct_frame_drop_shadow`) instead of filter surfaces and
     /// descendant silhouettes.
@@ -2633,6 +2647,34 @@ mod tests {
 
     fn any_shape() -> Shape {
         Shape::new(Uuid::nil())
+    }
+
+    #[test]
+    fn only_an_inner_stroke_all_round_shrinks_the_fill() {
+        let inner = |widths: Option<[f32; 4]>| {
+            let mut stroke =
+                Stroke::new_inner_stroke(1.0, StrokeStyle::Solid, None, None, None, None);
+            stroke.widths = widths;
+            let mut shape = any_shape();
+            shape.set_selrect(0.0, 0.0, 402.0, 86.0);
+            shape.add_stroke(stroke);
+            shape
+        };
+
+        assert!(inner(None).has_inner_stroke_all_round(), "uniform");
+        assert!(
+            inner(Some([1.0, 2.0, 1.0, 2.0])).has_inner_stroke_all_round(),
+            "every side, unequal"
+        );
+        let border_top = inner(Some([1.0, 0.0, 0.0, 0.0]));
+        assert!(
+            border_top.has_inner_stroke(),
+            "a border at the top is an inner stroke"
+        );
+        assert!(
+            !border_top.has_inner_stroke_all_round(),
+            "but leaves three sides bare"
+        );
     }
 
     #[test]
