@@ -198,6 +198,7 @@
    [frontend-tests.ui.timeline-lanes-test]
    [frontend-tests.ui.timeline-recording-test]
    [frontend-tests.ui.timeline-selection-test]
+   [frontend-tests.ui.viewer-zoom-widget-test]
    [frontend-tests.ui.viewport-outlines-test]
    [frontend-tests.ui.workspace-libraries-test]
    [frontend-tests.util-clipboard-test]
@@ -436,6 +437,7 @@
    'frontend-tests.ui.timeline-lanes-test
    'frontend-tests.ui.timeline-recording-test
    'frontend-tests.ui.timeline-selection-test
+   'frontend-tests.ui.viewer-zoom-widget-test
    'frontend-tests.ui.viewport-outlines-test
    'frontend-tests.ui.workspace-libraries-test
    'frontend-tests.util-clipboard-test

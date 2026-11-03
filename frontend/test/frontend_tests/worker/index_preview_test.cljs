@@ -70,8 +70,17 @@
     (set-preview! page)
     (t/is (some? (preview-of page)))
     (impl/handler {:cmd :index/finalize :page-id (:id page)})
-    (t/is (nil? (preview-of page)))
-    (t/is (empty? (::idx/preview @idx/state)) "nor of any other")))
+    (t/is (nil? (preview-of page)))))
+
+(t/deftest finalize-drops-only-the-preview-of-that-page
+  (let [page-a (make-page)
+        page-b (make-page)]
+    (doseq [page [page-a page-b]]
+      (impl/handler {:cmd :index/initialize :page page})
+      (set-preview! page))
+    (impl/handler {:cmd :index/finalize :page-id (:id page-a)})
+    (t/is (nil? (preview-of page-a)))
+    (t/is (some? (preview-of page-b)) "the other page keeps its preview")))
 
 (t/deftest deleting-the-page-drops-its-preview
   (let [page    (make-page)

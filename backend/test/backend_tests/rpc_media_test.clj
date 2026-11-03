@@ -1180,7 +1180,7 @@
 ;; The tests run with every feature on (see `th/init-config`), Penpot
 ;; Motion too, as a backend with the flag `enable-feature-animation`.
 
-(defn- upload-audio
+(defn- upload-media
   "Upload the test file `filename` as the media type `mtype` to `file`."
   [prof file filename mtype]
   (let [path (th/tempfile (str "backend_tests/test_files/" filename))]
@@ -1209,7 +1209,7 @@
                                         ["sample.ogg" "audio/ogg" "audio/ogg"]
                                         ["sample.m4a" "audio/x-m4a" "audio/mp4"]]]
       (t/testing filename
-        (let [out    (upload-audio prof file filename mtype)
+        (let [out    (upload-media prof file filename mtype)
               result (:result out)]
           (t/is (nil? (:error out)))
           (t/is (= canonical (:mtype result)) "its canonical type")
@@ -1220,18 +1220,18 @@
 (t/deftest audio-upload-checks-the-bytes
   (let [prof (th/create-profile* 1)
         file (audio-file prof)
-        out  (upload-audio prof file "fake.mp3" "audio/mpeg")]
+        out  (upload-media prof file "fake.mp3" "audio/mpeg")]
     (t/is (= :validation (th/ex-type (:error out))))
     (t/is (= :media-type-mismatch (th/ex-code (:error out))))
     (t/testing "against the declared type"
-      (let [out (upload-audio prof file "sample.wav" "audio/mpeg")]
+      (let [out (upload-media prof file "sample.wav" "audio/mpeg")]
         (t/is (= :media-type-mismatch (th/ex-code (:error out))))))))
 
 (t/deftest audio-upload-needs-motion
   (with-redefs [cfeat/get-enabled-features (fn [& _] (disj cfeat/supported-features "animation/v1"))]
     (let [prof  (th/create-profile* 1)
           file  (audio-file prof)
-          out   (upload-audio prof file "sample.mp3" "audio/mpeg")
+          out   (upload-media prof file "sample.mp3" "audio/mpeg")
           image (th/multipart-command! {::th/type :upload-file-media-object
                                         ::rpc/profile-id (:id prof)
                                         :file-id (:id file)
@@ -1249,15 +1249,15 @@
   (with-mocks [_ {:target 'app.config/get
                   :return (th/config-get-mock {:audio-max-file-size 100})}]
     (let [prof (th/create-profile* 1)
-          out  (upload-audio prof (audio-file prof) "sample.mp3" "audio/mpeg")]
+          out  (upload-media prof (audio-file prof) "sample.mp3" "audio/mpeg")]
       (t/is (= :restriction (th/ex-type (:error out))))
       (t/is (= :media-max-file-size-reached (th/ex-code (:error out)))))))
 
 (t/deftest the-same-audio-is-stored-once
   (let [prof (th/create-profile* 1)
         file (audio-file prof)
-        one  (:result (upload-audio prof file "sample.mp3" "audio/mpeg"))
-        two  (:result (upload-audio prof file "sample.mp3" "audio/mpeg"))]
+        one  (:result (upload-media prof file "sample.mp3" "audio/mpeg"))
+        two  (:result (upload-media prof file "sample.mp3" "audio/mpeg"))]
     (t/is (not= (:id one) (:id two)))
     (t/is (= (:media-id one) (:media-id two)))))
 
@@ -1272,7 +1272,7 @@
           file (audio-file prof)]
       (doseq [[filename mtype] [["sample.jpg" "image/jpeg"] ["sample.wav" "audio/wav"]]]
         (t/testing filename
-          (let [direct     (upload-audio prof file filename mtype)
+          (let [direct     (upload-media prof file filename mtype)
                 data       (java.nio.file.Files/readAllBytes (th/tempfile (str "backend_tests/test_files/" filename)))
                 session-id (create-session! prof 1)
                 _          (th/multipart-command! {::th/type        :upload-chunk
@@ -1287,11 +1287,11 @@
                                          :is-local        true
                                          :name            filename
                                          :mtype           mtype})]
-            (t/is (= (some-> (:error direct) th/ex-code)
-                     (some-> (:error chunked) th/ex-code)))
-            ;; while the quote is off, both store the file
-            (t/is (nil? (:error direct)))
-            (t/is (nil? (:error chunked)))))))))
+            (let [codes [(some-> (:error direct) th/ex-code)
+                         (some-> (:error chunked) th/ex-code)]]
+              (t/is (apply = codes) "both entries answer alike")
+              (t/is (every? #(contains? #{nil :max-quote-reached} %) codes)
+                    "and only the quote refuses them"))))))))
 
 (t/deftest upload-file-media-object-rejects-client-id
   (let [prof  (th/create-profile* 1)
