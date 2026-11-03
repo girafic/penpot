@@ -20,6 +20,7 @@
    [frontend-tests.data.animation-wiggle-test]
    [frontend-tests.data.comments-filters-test]
    [frontend-tests.data.comments-moments-test]
+   [frontend-tests.data.copy-svg-motion-test]
    [frontend-tests.data.dashboard-test]
    [frontend-tests.data.event-test]
    [frontend-tests.data.export-animation-job-test]
@@ -244,6 +245,7 @@
    'frontend-tests.copy-as-svg-test
    'frontend-tests.data.comments-filters-test
    'frontend-tests.data.comments-moments-test
+   'frontend-tests.data.copy-svg-motion-test
    'frontend-tests.data.dashboard-test
    'frontend-tests.data.event-test
    'frontend-tests.data.fix-deleted-fonts-test

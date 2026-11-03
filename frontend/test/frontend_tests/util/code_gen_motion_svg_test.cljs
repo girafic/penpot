@@ -10,6 +10,8 @@
   layers of an animated board."
   (:require
    [app.common.files.changes-builder :as pcb]
+   [app.common.test-helpers.components :as cthc]
+   [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.test-helpers.shapes :as cthsh]
@@ -36,6 +38,24 @@
                                                              (cta/add-keyframe (cthi/id :box) {:time 800 :property :x :value 220}))))))]
     {:page (cthf/current-page file) :files {(:id file) file}}))
 
+(defn- copy-scene
+  "Board :board-b, without a timeline of its own, holding a copy of a
+  component whose main board animates its rect: `{:page :files}`."
+  []
+  (let [file (-> (cthf/sample-file :file1)
+                 (ctho/add-simple-component :anim :main :main-rect
+                                            :root-params {:x 0 :y 0 :width 200 :height 200}
+                                            :child-params {:x 10 :y 20 :width 50 :height 50})
+                 (ctho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                 (cthc/instantiate-component :anim :copy :parent-label :board-b))
+        file (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page (cthf/current-page file))
+                                          (pcb/set-timeline (cthi/id :main)
+                                                            (-> (cta/make-timeline {:board-id (cthi/id :main) :duration 1000})
+                                                                (cta/add-keyframe (cthi/id :main-rect) {:time 0 :property :x :value 10})
+                                                                (cta/add-keyframe (cthi/id :main-rect) {:time 1000 :property :x :value 60})))))]
+    {:page (cthf/current-page file) :files {(:id file) file}}))
+
 (defn- codes
   [{:keys [page files]} & labels]
   (cgm/code-of-boards page files (map cthi/id labels)))
@@ -50,6 +70,12 @@
     (t/is (false? (cgm/svg-by-wasm? "svg" true (codes moving :card))))
     (t/is (false? (cgm/svg-by-wasm? "svg" true (codes moving :box)))
           "a layer of it too: WASM draws it where the preview moved it")))
+
+(t/deftest a-board-with-an-animated-copy-takes-the-code-generation
+  (let [copies (copy-scene)]
+    (t/is (nil? (get-in copies [:page :timelines (cthi/id :board-b)])) "no timeline of its own")
+    (t/is (false? (cgm/svg-by-wasm? "svg" true (codes copies :board-b)))
+          "the copy plays on the clock of its main")))
 
 (t/deftest only-svg-with-wasm-takes-the-svg-of-wasm
   (let [still (scene false)]

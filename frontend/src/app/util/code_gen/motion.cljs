@@ -49,13 +49,14 @@
   (cltl/code-timelines page files board-id :units? code-units?))
 
 (defn svg-by-wasm?
-  "Whether the Inspect writes the SVG `markup-type` of a selection with
-  the export of WASM (`wasm?`, the render-wasm feature): only while the
-  boards of the selection play nothing (`codes`, see `code-of-boards`).
-  WASM draws the shapes as the canvas shows them, the animation preview
-  included, and cannot mark or leave out layers (see `mark-shape`,
-  `without-guides`): an animated selection takes the code generation,
-  at rest."
+  "Whether the Inspect and Copy as SVG write the SVG `markup-type` of a
+  selection with the export of WASM (`wasm?`, the render-wasm feature):
+  only while the boards of the selection play nothing (`codes`, see
+  `code-of-boards`). WASM draws the shapes as the canvas shows them, the
+  animation preview included, and cannot mark or leave out layers (see
+  `mark-shape`, `without-guides`): an animated selection takes the code
+  generation, at rest, unlike what `app.util.code-gen.markup-svg-wasm`
+  asks of its callers."
   [markup-type wasm? codes]
   (and (= "svg" markup-type)
        (boolean wasm?)
