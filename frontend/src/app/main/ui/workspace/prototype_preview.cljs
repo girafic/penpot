@@ -178,6 +178,15 @@
         h'      (max cw/min-height h')]
     (cw/clamp-frame {:x (- (+ x (/ w 2)) (/ w' 2)) :y y :w w' :h h'} vw vh)))
 
+(defn turned?
+  "Whether a device `before` px at its own size (see `dvd/outer-size`)
+  turned a quarter to show as `outer`."
+  [before outer]
+  (and (some? before)
+       (some? outer)
+       (not= before outer)
+       (= (vec before) (vec (rseq outer)))))
+
 (defn turned-frame
   "The window round a device turned a quarter, at `frame` round it as it
   was, `dw` × `dh` px at its own size (see `hugged-frame`): round it
@@ -396,14 +405,21 @@
         outer      (some-> device-shown dvd/outer-size)
         framed?    (some? outer)
         turns?     (and framed? (dvd/turns? (:kind device-shown)))
+        ;; the device at its own size and the window round it, as they
+        ;; last showed (see the turn below)
+        last-ref   (mf/use-ref nil)
+        ;; a device that turned: the window round it turned in the same
+        ;; render, else it would show once round the device turned in the
+        ;; window as it was, as wide as the browser
+        turned     (let [{before :outer before-frame :frame} (mf/ref-val last-ref)]
+                     (when (and (nil? (deref drag-frame*)) (turned? before outer))
+                       (turned-frame before-frame vw vh before)))
         frame      (cond-> (cw/clamp-frame (or (deref drag-frame*)
+                                               turned
                                                (deref stored*)
                                                (start-frame vw vh shown-w shown-h))
                                            vw vh)
                      framed? (hugged-frame vw vh outer))
-        ;; the device at its own size and the window round it, as they
-        ;; last showed (see the turn below)
-        last-ref   (mf/use-ref nil)
         iframe-ref (mf/use-ref nil)
         ;; the view mode loads once what is edited is saved, and shows
         ;; once it draws its first board
@@ -603,17 +619,14 @@
                     (dwpp/close-preview)))]
 
     ;; a device turned keeps its size: the window turns round it, its top
-    ;; and middle kept, as the view mode tells it turned
+    ;; and middle kept, as the view mode tells it turned (see `turned`
+    ;; above), and stays so
     (mf/with-layout-effect [outer frame vw vh]
-      (let [{before :outer before-frame :frame} (mf/ref-val last-ref)]
+      (let [{before :outer} (mf/ref-val last-ref)]
         (mf/set-ref-val! last-ref {:outer outer :frame frame})
-        (when (and (some? before)
-                   (some? outer)
-                   (not= before outer)
-                   (= before (vec (rseq outer))))
-          (let [frame (turned-frame before-frame vw vh before)]
-            (reset! stored* frame)
-            (swap! storage/user assoc ::frame frame)))))
+        (when (turned? before outer)
+          (reset! stored* frame)
+          (swap! storage/user assoc ::frame frame))))
 
     ;; what is edited saved first, so it shows
     (mf/with-effect []

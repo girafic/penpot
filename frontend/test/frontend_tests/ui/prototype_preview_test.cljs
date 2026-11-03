@@ -97,7 +97,12 @@
     (t/is (mth/close? (scale iphone before) (scale (dvd/turn iphone) after) 0.01) "the device as large")
     (t/is (hugs? (dvd/turn iphone) after) "the room round it on its side")
     (let [back (pp/turned-frame after 2000 1200 (dvd/outer-size (dvd/turn iphone)))]
-      (t/is (mth/close? (:h before) (:h back) 2) "standing up again, as high"))))
+      (t/is (mth/close? (:h before) (:h back) 2) "standing up again, as high"))
+    (t/is (pp/turned? outer (dvd/outer-size (dvd/turn iphone))) "on its side")
+    (t/is (pp/turned? (dvd/outer-size (dvd/turn iphone)) outer) "and up again")
+    (t/is (not (pp/turned? outer outer)) "as it stood")
+    (t/is (not (pp/turned? nil outer)) "the first it shows")
+    (t/is (not (pp/turned? outer nil)) "without a device")))
 
 (t/deftest a-corner-scales-the-device
   (let [outer (dvd/outer-size iphone)
