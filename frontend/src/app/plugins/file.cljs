@@ -11,14 +11,12 @@
    [app.common.files.validate :as cfv]
    [app.common.time :as ct]
    [app.common.uuid :as uuid]
-   [app.config :as cf]
    [app.main.data.exports.files :as exports.files]
    [app.main.data.plugins :as dp]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.versions :as dwv]
    [app.main.repo :as rp]
    [app.main.store :as st]
-   [app.main.worker :as mw]
    [app.plugins.format :as format]
    [app.plugins.page :as page]
    [app.plugins.parser :as parser]
@@ -267,47 +265,42 @@
                       :detach :detach-libraries
                       type)]
            (cond
-             (and (some? format) (not (contains? #{"penpot" "zip"} format)))
+             ;; the zip of SVG files is gone with the export of the worker
+             (= "zip" format)
+             (u/reject-not-valid reject :format "The zip export is no longer available: export as \"penpot\"")
+
+             (and (some? format) (not= "penpot" format))
              (u/reject-not-valid reject :format (dm/str "Invalid format: " format))
 
              (not (contains? (set exports.files/valid-types) type))
              (u/reject-not-valid reject :format (dm/str "Invalid type: " type))
 
              :else
-             (let [file       (u/locate-file id)
-                   features   (:features @st/state)
-                   team-id    (:current-team-id @st/state)
-                   format     (case format
-                                "zip"    :legacy-zip
-
-                                (if (contains? cf/flags :export-file-v3)
-                                  :binfile-v3
-                                  :binfile-v1))]
-               (->> (mw/ask-many!
-                     {:cmd :export-files
-                      :format format
-                      :type type
-                      :team-id team-id
-                      :features features
-                      :files [file]})
+             ;; a job of the backend, as the export of the dashboard runs
+             (let [file (-> (u/locate-file id)
+                            (select-keys [:id :name :project-id :is-shared])
+                            (update :is-shared boolean))]
+               (->> (exports.files/export-files :type type :files [file])
                     (rx/mapcat
-                     (fn [msg]
-                       (.log js/console msg)
-                       (case (:type msg)
-                         :error
-                         (rx/throw (ex-info "cannot export file" {:type :export-file}))
+                     (fn [{:keys [uri error cancelled]}]
+                       (cond
+                         (some? error)
+                         (rx/throw (ex-info "cannot export file" {:type :export-file :cause error}))
 
-                         :progress
-                         (rx/empty)
+                         (true? cancelled)
+                         (rx/throw (ex-info "the export of the file was cancelled" {:type :export-file}))
 
-                         :finish
+                         (some? uri)
                          (http/send! {:method :get
-                                      :uri (:uri msg)
+                                      :uri uri
                                       :mode :no-cors
-                                      :response-type :buffer}))))
+                                      :response-type :buffer})
+
+                         :else
+                         (rx/empty))))
                     (rx/take 1)
                     (rx/map #(js/Uint8Array. (:body %)))
-                    (rx/tap #(st/emit! (se/event plugin-id "export-binary-files" :format format :type type)))
+                    (rx/tap #(st/emit! (se/event plugin-id "export-binary-files" :format "binfile-v3" :type type)))
                     (rx/subs! resolve reject))))))))
     :findVersions
     (fn [criteria]
