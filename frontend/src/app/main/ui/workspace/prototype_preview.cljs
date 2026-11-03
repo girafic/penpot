@@ -282,14 +282,16 @@
                            :label label}]
       [:div {:class (stl/css :loading-screen)
              :style (dfr/screen-style layout)}
-       [:> loader* {:title title
+       [:> loader* {:class (stl/css :loader)
+                    :title title
                     :overlay true
                     :width (mth/clamp (mth/round (* 0.4 (get-in layout [:screen :w]))) 32 100)}]]
       [:> device-drawing* {:layout layout
                            :kind (:kind device)
                            :finish finish
                            :cutouts true}]]
-     [:> loader* {:title title
+     [:> loader* {:class (stl/css :loader)
+                  :title title
                   :overlay true}])])
 
 (def zoom-modes

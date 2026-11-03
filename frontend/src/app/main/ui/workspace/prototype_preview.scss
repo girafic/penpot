@@ -184,16 +184,19 @@
   opacity: 0;
 }
 
-// Until the view mode draws its first board: the device alone, a loader
-// on its black screen (where they are comes inline, as the view mode
-// lays them out), or the loader alone, on the background of the
-// prototype: a gray that shows on black and on white.
+// Until the view mode draws its first board: the device alone, a white
+// loader on its black screen (where they are comes inline, as the view
+// mode lays them out), or the loader alone, on the background of the
+// prototype: a gray that shows on black and on white. The loader sets
+// its color on itself, so these name it with two classes.
 .loading {
-  --loader-color-foreground: color-mix(in srgb, var(--color-static-white) 50%, var(--color-static-black));
-
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+.loading .loader {
+  --loader-color-foreground: color-mix(in srgb, var(--color-static-white) 50%, var(--color-static-black));
 }
 
 .loading-screen {
@@ -202,6 +205,10 @@
   inset-inline-start: 0;
   overflow: hidden;
   background-color: var(--color-static-black);
+}
+
+.loading-screen .loader {
+  --loader-color-foreground: var(--color-static-white);
 }
 
 // The corners at its bottom, which resize it.
