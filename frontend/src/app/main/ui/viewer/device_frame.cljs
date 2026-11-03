@@ -120,16 +120,6 @@
   drawn the new way, ms: it stands as it stood meanwhile."
   400)
 
-(def ^:private fade-ms
-  "How long a device that turned in the preview of the workspace takes to
-  show again, ms (see `use-turn!`)."
-  200)
-
-(def ^:private settle-ms
-  "How long, at least, a device that turned in the preview of the
-  workspace stays hidden, ms: its window turns with it meanwhile."
-  100)
-
 (defn- turn-steps
   "How a device of `layout` (see `dvd/layout`) that turned shows on its
   way from how it stood, `[[angle scale] ...]` by tenths: turned back a
@@ -167,16 +157,6 @@
     (.pause animation)
     animation))
 
-(defn- fade-node!
-  "The element `node` of the stage of a device that turned, hidden, then
-  showing again. A paused animation."
-  [^js node]
-  (let [^js animation (.animate node
-                                #js [#js {:opacity 0} #js {:opacity 1}]
-                                #js {:duration fade-ms :easing "ease-out"})]
-    (.pause animation)
-    animation))
-
 (defn use-turn!
   "The device `kind` of `layout` (see `dvd/layout`) turning in its stage
   as it comes to lie on its side or stand up: its drawing (in
@@ -184,12 +164,12 @@
   from how it stood, once `ready` (a fn that gives a promise) says the
   screen shows the board the new way, or a while. The screen is
   `data-turning` meanwhile: what it holds fixed in the window (the bar
-  at the bottom, the arrows) would turn with it. With `fade?` (in the
-  preview of the workspace, its window turning round it), it hides and
-  shows again once its window turned, as it then is."
+  at the bottom, the arrows) would turn with it. `on-turned`, if any, is
+  called once it turned (the preview of the workspace cuts its frame to
+  its window again then)."
   ([stage-ref screen-ref cutouts-ref layout kind ready]
-   (use-turn! stage-ref screen-ref cutouts-ref layout kind ready false))
-  ([stage-ref screen-ref cutouts-ref layout kind ready fade?]
+   (use-turn! stage-ref screen-ref cutouts-ref layout kind ready nil))
+  ([stage-ref screen-ref cutouts-ref layout kind ready on-turned]
    (let [before-ref     (mf/use-ref nil)
          animations-ref (mf/use-ref nil)]
      (mf/with-layout-effect [layout kind]
@@ -208,17 +188,12 @@
                  animations (into []
                                   (keep (fn [[^js node ox oy]]
                                           (when (fn? (some-> node .-animate))
-                                            (if fade?
-                                              (fade-node! node)
-                                              (turn-node! node steps ox oy)))))
+                                            (turn-node! node steps ox oy))))
                                   [[(mf/ref-val stage-ref) cx cy]
                                    [(mf/ref-val cutouts-ref) cx cy]
                                    [screen-node (- cx (:x screen)) (- cy (:y screen))]])
                  wait   (js/Promise. #(js/setTimeout % turn-wait-ms))
-                 shown  (js/Promise.race #js [(ready) wait])
-                 shown  (if fade?
-                          (js/Promise.all #js [shown (js/Promise. #(js/setTimeout % settle-ms))])
-                          shown)]
+                 shown  (js/Promise.race #js [(ready) wait])]
              (run! #(.cancel ^js %) (mf/ref-val animations-ref))
              (mf/set-ref-val! animations-ref animations)
              (dom/set-data! screen-node "turning" true)
@@ -228,7 +203,9 @@
                           (when (identical? animations (mf/ref-val animations-ref))
                             (run! #(.play ^js %) animations)
                             (-> (js/Promise.all (into-array (map #(.-finished ^js %) animations)))
-                                (.then #(dom/remove-attribute! screen-node "data-turning"))
+                                (.then (fn [_]
+                                         (dom/remove-attribute! screen-node "data-turning")
+                                         (when (fn? on-turned) (on-turned))))
                                 (.catch (constantly nil))))))))))))))
 
 (defn use-size

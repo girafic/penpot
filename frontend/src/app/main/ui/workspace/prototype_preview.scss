@@ -36,8 +36,11 @@
 
 // As wide as the window round the device (see `hugged-frame`), wider
 // about its middle when its buttons need it, the board shown cut then
-// (still some of it, to drag the bar by).
+// (still some of it, to drag the bar by); over the frame of the view mode,
+// which a device that turns leaves (see `frame-box`).
 .framed .bar {
+  position: relative;
+  z-index: 1;
   align-self: center;
   inline-size: 100%;
   min-inline-size: max-content;

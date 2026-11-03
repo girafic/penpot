@@ -30,8 +30,10 @@
   then, which board it shows and where among the boards
   (`penpot:preview-shown`), once it draws its first board
   (`penpot:preview-drawn`: the window shows a loader, on the screen of
-  the device, until then) and how its animation plays
-  (`penpot:preview-playback`)."
+  the device, until then), how its animation plays
+  (`penpot:preview-playback`) and once its device turned
+  (`penpot:preview-turned`: it turns in a frame of the view mode as large
+  as it takes, see `frame-box`)."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
@@ -190,10 +192,19 @@
 (defn turned-frame
   "The window round a device turned a quarter, at `frame` round it as it
   was, `dw` × `dh` px at its own size (see `hugged-frame`): round it
-  turned at the same size, the top and the middle of the window kept."
+  turned at the same size, about the middle of the device, which turns
+  about it in the frame of the view mode (see `frame-box`)."
   [{:keys [x y w h]} vw vh [dw dh]]
-  (let [[w' h'] (device-room dh dw (device-scale w h dw dh))]
-    (hugged-frame {:x (- (+ x (/ w 2)) (/ w' 2)) :y y :w w' :h h'} vw vh [dh dw])))
+  (let [scale   (device-scale w h dw dh)
+        [w' h'] (device-room dh dw scale)
+        ;; the device hangs right under the bar, as high as it is
+        above   (+ border bar-height dvd/preview-top)
+        middle  (+ y above (/ (* dh scale) 2))]
+    (hugged-frame {:x (- (+ x (/ w 2)) (/ w' 2))
+                   :y (- middle above (/ (* dw scale) 2))
+                   :w w'
+                   :h h'}
+                  vw vh [dh dw])))
 
 (defn scaled-frame
   "`frame`, which a drag of a corner or a side `mode` of the device
@@ -239,6 +250,65 @@
   [device {:keys [w h]}]
   (dvd/layout device (- w (* 2 border)) (- h bar-height (* 2 border))
               dvd/stage-padding dvd/preview-top))
+
+(defn frame-box
+  "Where the frame of the view mode goes in the window at `frame` round
+  the device `device` alone (see `shown-device`): a square about the
+  middle of the device, as large as it is long and the room round it, so
+  that it turns in it as in the view mode (see `dfr/use-turn!`) and the
+  frame keeps its size and its place as the window turns round it (see
+  `turned-frame`). `{:x :y :size :clip}`, px of the window under its bar,
+  `:clip` the insets `[top right bottom left]` that cut it to the window."
+  [device {:keys [w h] :as frame}]
+  (let [{dx :x dy :y dw :w dh :h} (device-layout device frame)
+        size (+ (max dw dh) (* 2 dvd/stage-padding))
+        x    (- (+ dx (/ dw 2)) (/ size 2))
+        y    (- (+ dy (/ dh 2)) (/ size 2))
+        cw   (- w (* 2 border))
+        ch   (- h bar-height (* 2 border))]
+    {:x x
+     :y y
+     :size size
+     :clip (mapv #(max 0 %) [(- y) (- (+ x size) cw) (- (+ y size) ch) (- x)])}))
+
+(defn- box->page
+  "`box` of the window at `frame` (see `frame-box`) in px of the browser
+  window."
+  [{:keys [x y size]} frame]
+  {:x (+ (:x frame) border x) :y (+ (:y frame) border bar-height y) :size size})
+
+(defn- page->box
+  "The box `{:x :y :size}` in px of the browser window (see `box->page`)
+  in the window at `frame`, cut to it."
+  [{:keys [x y size]} {:keys [w h] :as frame}]
+  (let [x  (- x (:x frame) border)
+        y  (- y (:y frame) border bar-height)
+        cw (- w (* 2 border))
+        ch (- h bar-height (* 2 border))]
+    {:x x
+     :y y
+     :size size
+     :clip (mapv #(max 0 %) [(- y) (- (+ x size) cw) (- (+ y size) ch) (- x)])}))
+
+(defn- frame-style
+  "The style of the frame of the view mode at `box` (see `frame-box`), cut
+  to the window unless its device turns (`turning?`)."
+  [{:keys [x y size clip]} turning?]
+  (let [[top right bottom left] clip]
+    #js {:position "absolute"
+         :left (dm/str x "px")
+         :top (dm/str y "px")
+         :width (dm/str size "px")
+         :height (dm/str size "px")
+         :clipPath (if turning?
+                     "none"
+                     (dm/str "inset(" top "px " right "px " bottom "px " left "px)"))}))
+
+(def ^:private turn-wait-ms
+  "How long, at most, the frame of the view mode stays uncut for its
+  device to turn (see `frame-style`), ms: the view mode tells once it
+  turned (`penpot:preview-turned`)."
+  2000)
 
 (defn grips
   "Where the frame of the device `device` (see `shown-device`) scales it,
@@ -357,6 +427,10 @@
         ;; whether its device lies on its side, as the view mode tells:
         ;; turned there by whoever looks at it
         landscape* (mf/use-state nil)
+        ;; whether its device turns, the frame of the view mode uncut
+        ;; meanwhile (see `frame-style`)
+        turning*   (mf/use-state false)
+        turning?   (deref turning*)
         board      (get objects shown)
         ;; the board the view mode in the frame starts at
         start*     (mf/use-state frame-id)
@@ -420,6 +494,16 @@
                                                (start-frame vw vh shown-w shown-h))
                                            vw vh)
                      framed? (hugged-frame vw vh outer))
+        ;; the frame of the view mode round a device alone (see
+        ;; `frame-box`): while it turns, where it was, as large, in px of
+        ;; the browser window, so that the view mode in it lays nothing
+        ;; out again (the device is as long on its side but for a px)
+        box-ref    (mf/use-ref nil)
+        box        (when ^boolean framed?
+                     (let [held (mf/ref-val box-ref)]
+                       (if (and (some? held) (or turning? (some? turned)))
+                         (page->box held frame)
+                         (frame-box device-shown frame))))
         iframe-ref (mf/use-ref nil)
         ;; the view mode loads once what is edited is saved, and shows
         ;; once it draws its first board
@@ -507,7 +591,9 @@
         on-play    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-play"))
         on-stop    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-stop"))
         on-sound   (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-sound"))
-        on-turn    (mf/use-fn #(post! (mf/ref-val iframe-ref) "penpot:preview-turn"))
+        on-turn    (mf/use-fn (fn []
+                                (reset! turning* true)
+                                (post! (mf/ref-val iframe-ref) "penpot:preview-turn")))
         ;; pinned, at the board shown; else where it started
         on-restart (mf/use-fn
                     (mf/deps follow? shown frame-id)
@@ -618,15 +704,27 @@
          #(st/emit! (dcm/go-to-viewer :page-id page-id :frame-id shown)
                     (dwpp/close-preview)))]
 
-    ;; a device turned keeps its size: the window turns round it, its top
-    ;; and middle kept, as the view mode tells it turned (see `turned`
-    ;; above), and stays so
+    ;; a device turned keeps its size: the window turns round it, about
+    ;; its middle, as the view mode tells it turned (see `turned` above),
+    ;; and stays so; the device turns meanwhile in the frame of the view
+    ;; mode, uncut (see `frame-box`), until it tells it turned
     (mf/with-layout-effect [outer frame vw vh]
       (let [{before :outer} (mf/ref-val last-ref)]
         (mf/set-ref-val! last-ref {:outer outer :frame frame})
         (when (turned? before outer)
+          (reset! turning* true)
           (reset! stored* frame)
           (swap! storage/user assoc ::frame frame))))
+
+    (mf/with-effect [turning?]
+      (when turning?
+        (let [timer (js/setTimeout #(reset! turning* false) turn-wait-ms)]
+          #(js/clearTimeout timer))))
+
+    ;; the frame of the view mode as it shows, held while its device turns
+    (mf/with-layout-effect [box frame turning?]
+      (when-not ^boolean turning?
+        (mf/set-ref-val! box-ref (some-> box (box->page frame)))))
 
     ;; what is edited saved first, so it shows
     (mf/with-effect []
@@ -772,6 +870,10 @@
                       (reset! place* {:index (unchecked-get data "index")
                                       :count (unchecked-get data "count")})
                       (reset! landscape* (when (boolean? landscape) landscape)))
+
+                    ;; its device turned (see `frame-style`)
+                    "penpot:preview-turned"
+                    (reset! turning* false)
 
                     "penpot:preview-playback"
                     (reset! playback* {:animated (true? (unchecked-get data "animated"))
@@ -961,6 +1063,9 @@
                   :ref iframe-ref
                   :class (stl/css-case :frame true
                                        :frame-loading (not drawn?))
+                  ;; round a device alone, a square about it (see `frame-box`)
+                  :style (when (some? box)
+                           (frame-style box turning?))
                   :src uri
                   :title (tr "workspace.preview.title")
                   :allow "autoplay"}])

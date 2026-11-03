@@ -544,16 +544,14 @@
         ;; screen until then (see below)
         drawn*      (mf/use-state false)
         drawn?      (deref drawn*)
-        ;; in the preview of the workspace, right under its bar; turned, as
-        ;; large as it stands (the window of the preview hugs it, see
-        ;; `hugged-frame` there)
+        ;; in the middle of its stage, turned as large as it stands: in the
+        ;; preview of the workspace, its stage is a square about it, as
+        ;; large as it takes to turn (see `frame-box` there)
         device-layout
-        (mf/with-memo [device stage-size preview]
+        (mf/with-memo [device stage-size]
           (let [[sw sh] stage-size]
             (when (and (some? device) (pos? sw) (pos? sh))
-              (dvd/layout device sw sh dvd/stage-padding
-                          (when (true? preview) dvd/preview-top)
-                          (not (true? preview))))))
+              (dvd/layout device sw sh dvd/stage-padding nil true))))
         ;; whether a device showed the board last, to fit it again once
         ;; the device goes
         framed-ref (mf/use-ref false)
@@ -869,10 +867,12 @@
 
     ;; a phone or a tablet turning on its side or standing up, once its
     ;; screen shows the board the new way; in the preview, its window
-    ;; turns round it meanwhile
+    ;; turns round it meanwhile, and is told once it turned
     (dfr/use-turn! stage-ref viewer-section-ref cutouts-ref device-layout (:kind device)
                    #(rwv/when-rendered (mf/ref-val current-viewport-ref) 400)
-                   (true? preview))
+                   (when (true? preview)
+                     #(.postMessage (.-parent js/window) #js {:type "penpot:preview-turned"}
+                                    (.. js/window -location -origin))))
 
     ;; the screen of a phone or a tablet scrolls when dragged
     (dds/use-drag-scroll! viewer-section-ref

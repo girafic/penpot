@@ -85,19 +85,45 @@
              (pp/hugged-frame {:x 0 :y 0 :w 200 :h 126} 2000 1200 outer))
           "no smaller than the smallest window")))
 
+(t/deftest the-device-turns-in-a-square-frame
+  (let [frame  (pp/hugged-frame {:x 400 :y 50 :w 600 :h 900} 2000 1200 (dvd/outer-size iphone))
+        layout (layout-in iphone frame)
+        {:keys [x y size clip]} (pp/frame-box iphone frame)
+        inside (dvd/layout iphone size size dvd/stage-padding nil true)]
+    (t/is (mth/close? (+ (max (:w layout) (:h layout)) 48) size)
+          "as large as the device is long and the room round it")
+    (t/is (mth/close? (+ x (/ size 2)) (+ (:x layout) (/ (:w layout) 2)) 0.01) "about the middle of the device")
+    (t/is (mth/close? (+ y (/ size 2)) (+ (:y layout) (/ (:h layout) 2)) 0.01))
+    (t/is (mth/close? (:scale layout) (:scale inside) 0.001) "the view mode shows the device in it as large")
+    (t/is (mth/close? (+ x (:x inside)) (:x layout) 0.5) "where the window has it")
+    (t/is (mth/close? (+ y (:y inside)) (:y layout) 0.5))
+    (t/is (neg? x) "wider than the window round a standing phone")
+    (t/is (every? #(>= % 0) clip))
+    (t/is (mth/close? (- x) (nth clip 3) 0.01) "cut to the window at its left")
+    (t/is (pos? (nth clip 1)) "and its right")))
+
 (t/deftest the-window-turns-with-its-device
   (let [outer  (dvd/outer-size iphone)
         before (pp/hugged-frame {:x 400 :y 50 :w 600 :h 900} 2000 1200 outer)
         after  (pp/turned-frame before 2000 1200 outer)
-        scale  #(:scale (layout-in %1 %2))]
+        scale  #(:scale (layout-in %1 %2))
+        ;; the middle of the frame of the view mode, px of the browser
+        ;; window, and its size (as long on its side but for a px or two:
+        ;; the window holds it while it turns)
+        box    (fn [device f]
+                 (let [{:keys [x y size]} (pp/frame-box device f)]
+                   [(+ (:x f) 1 x (/ size 2)) (+ (:y f) pp/bar-height 1 y (/ size 2)) size]))]
     (t/is (> (:w after) (:h after)) "wider than high")
-    (t/is (= (:y before) (:y after)) "its top kept")
+    (t/is (< (:y before) (:y after)) "lower, its bar right above the device on its side")
     (t/is (mth/close? (+ (:x before) (/ (:w before) 2)) (+ (:x after) (/ (:w after) 2)) 1)
           "its middle kept")
+    (t/is (every? true? (map #(mth/close? %1 %2 %3) (box iphone before) (box (dvd/turn iphone) after) [1 1 3]))
+          "the frame of the view mode where it was: the device turns in it about its middle")
     (t/is (mth/close? (scale iphone before) (scale (dvd/turn iphone) after) 0.01) "the device as large")
     (t/is (hugs? (dvd/turn iphone) after) "the room round it on its side")
     (let [back (pp/turned-frame after 2000 1200 (dvd/outer-size (dvd/turn iphone)))]
-      (t/is (mth/close? (:h before) (:h back) 2) "standing up again, as high"))
+      (t/is (mth/close? (:h before) (:h back) 2) "standing up again, as high")
+      (t/is (mth/close? (:y before) (:y back) 2) "where it was"))
     (t/is (pp/turned? outer (dvd/outer-size (dvd/turn iphone))) "on its side")
     (t/is (pp/turned? (dvd/outer-size (dvd/turn iphone)) outer) "and up again")
     (t/is (not (pp/turned? outer outer)) "as it stood")
