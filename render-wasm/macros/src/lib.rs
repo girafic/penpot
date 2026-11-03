@@ -16,9 +16,13 @@ type Result<T> = std::result::Result<T, String>;
 /// `std::error::Error` and `Into<u8>`. The macro:
 /// - Clears the error code at entry.
 /// - Runs the body in `std::panic::catch_unwind`.
-/// - Unwraps the Result: `Ok(x)` → return x; `Err(e)` → set error code in memory and panic
-///   (so ClojureScript can catch the exception and read the code via `read_error_code`).
-/// - On panic from the body: sets critical error code (0x02) and resumes unwind.
+/// - Unwraps the Result: `Ok(x)` → return x; `Err(e)` → set error code in memory and throw a JS
+///   exception (`wapi::throw_error`, so ClojureScript can catch it and read the code via
+///   `read_error_code`).
+/// - On panic from the body: sets critical error code (0x02) and throws the same way.
+/// - Makes the function `extern "C-unwind"`, for the exception to leave it. No Rust panic leaves
+///   it: one cannot leave an `extern "C"` function (the module aborts), and one that leaves is
+///   never caught by Rust, which then aborts on the next panic, as one within a panic.
 #[proc_macro_attribute]
 pub fn wasm_error(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as ItemFn);
@@ -59,22 +63,31 @@ pub fn wasm_error(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     Ok(__val) => __val,
                     Err(__e) => {
                         let _: &dyn std::error::Error = &__e;
-                        let __msg = __e.to_string();
+                        let __msg = format!("WASM error: {}", __e);
                         crate::mem::set_error_code(__e.into());
                         crate::mem::free_bytes().expect("Failed to free bytes");
-                        panic!("WASM error: {}",__msg);
+                        crate::wapi::throw_error(&__msg)
                     }
                 },
                 Err(__payload) => {
+                    let __msg = __payload
+                        .downcast_ref::<&str>()
+                        .map(|__s| __s.to_string())
+                        .or_else(|| __payload.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "a panic".to_string());
                     crate::mem::set_error_code(0x02); // critical, same as Error::Critical
                     crate::mem::free_bytes().expect("Failed to free bytes");
-                    std::panic::resume_unwind(__payload);
+                    crate::wapi::throw_error(&format!("WASM panic: {}", __msg))
                 }
             }
         }
     })
     .expect("block parse");
 
+    // the exception of an error leaves the function (see `wapi::throw_error`)
+    if input.sig.abi.is_some() {
+        input.sig.abi = Some(syn::parse_quote!(extern "C-unwind"));
+    }
     input.sig.output = ReturnType::Type(attrs.clone(), Box::new(inner_ty.clone()));
     input.block = Box::new(block);
     quote! { #input }.into()
