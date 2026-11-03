@@ -539,13 +539,16 @@
         ;; what the background of the prototype covers (see `vbg/background`)
         content-ref (mf/use-ref nil)
         content-size (dfr/use-size content-ref true)
-        ;; in the preview of the workspace, right under its bar
+        ;; in the preview of the workspace, right under its bar; turned, as
+        ;; large as it stands (the window of the preview hugs it, see
+        ;; `hugged-frame` there)
         device-layout
         (mf/with-memo [device stage-size preview]
           (let [[sw sh] stage-size]
             (when (and (some? device) (pos? sw) (pos? sh))
               (dvd/layout device sw sh dvd/stage-padding
-                          (when (true? preview) dvd/preview-top)))))
+                          (when (true? preview) dvd/preview-top)
+                          (not (true? preview))))))
         ;; whether a device showed the board last, to fit it again once
         ;; the device goes
         framed-ref (mf/use-ref false)

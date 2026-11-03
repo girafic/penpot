@@ -172,6 +172,19 @@
     (t/is (mth/close? (* 402 scale) (:h screen)))
     (t/is (inside? screen {:x x :y y :w w :h h}))))
 
+(t/deftest a-device-turned-keeps-its-size-in-the-view-mode
+  (let [standing (dvd/layout (dvd/resolve-device "iphone-island" 402 874) 2000 930 24 nil true)
+        turned   (dvd/layout (dvd/resolve-device "iphone-island" 874 402) 2000 930 24 nil true)
+        free     (dvd/layout (dvd/resolve-device "iphone-island" 874 402) 2000 930 24)]
+    (t/is (true? (:landscape? turned)))
+    (t/is (mth/close? (:h standing) (:w turned) 1) "as long on its side as it stands")
+    (t/is (mth/close? (:scale standing) (:scale turned) 0.01) "the board at the same zoom")
+    (t/is (> (:w free) (* 1.5 (:w turned))) "else as large as the wide stage fits"))
+  (let [standing (dvd/layout (dvd/resolve-device "iphone-island" 402 874) 600 2000 24 nil true)
+        turned   (dvd/layout (dvd/resolve-device "iphone-island" 874 402) 600 2000 24 nil true)]
+    (t/is (<= (:w turned) (- 600 48)) "still no wider than the stage")
+    (t/is (< (:w turned) (:h standing)) "shorter than it stands where it does not fit")))
+
 (t/deftest the-corners-turn-with-the-device
   (let [device (dvd/resolve-device "macbook" 1512 982)
         radii  (get-in (dvd/layout device 1600 1100 0) [:screen :radii])]

@@ -473,15 +473,18 @@
   "Where `device` (see `resolve-device`) goes in a stage `stage-w` ×
   `stage-h` px with `padding` round it, as large as fits, in the middle;
   with `top`, that many px from the top of the stage instead, the room
-  left below it: `{:x :y :w :h :scale :view-w :view-h :landscape?
-  :geometry :screen}`, the device drawn from `:geometry` as it stands
-  in a box `:view-w` × `:view-h` (turned a quarter to the left when
-  `:landscape?`), and its screen `{:x :y :w :h :radii}` in px of the
-  stage. The screen is a whole number of px wide: the zoom of the board
-  is `:scale`."
+  left below it; with `as-it-stands?`, on its side no larger than it
+  fits standing, as a phone turned in a hand keeps its size: `{:x :y :w
+  :h :scale :view-w :view-h :landscape? :geometry :screen}`, the device
+  drawn from `:geometry` as it stands in a box `:view-w` × `:view-h`
+  (turned a quarter to the left when `:landscape?`), and its screen `{:x
+  :y :w :h :radii}` in px of the stage. The screen is a whole number of
+  px wide: the zoom of the board is `:scale`."
   ([device stage-w stage-h padding]
    (layout device stage-w stage-h padding nil))
-  ([{:keys [kind landscape?] :as device} stage-w stage-h padding top]
+  ([device stage-w stage-h padding top]
+   (layout device stage-w stage-h padding top false))
+  ([{:keys [kind landscape?] :as device} stage-w stage-h padding top as-it-stands?]
    (let [[nw nh]  (standing device)
          g        (geometry kind nw nh)
          [vw vh]  (if landscape? [(:h g) (:w g)] [(:w g) (:h g)])
@@ -491,8 +494,11 @@
          radii    (if landscape?
                     (let [[tl tr br bl] radii] [tr br bl tl])
                     radii)
-         fit      (min (/ (max 1 (- stage-w (* 2 padding))) vw)
-                       (/ (max 1 (- stage-h padding (or top padding))) vh))
+         fit-in   (fn [w h]
+                    (min (/ (max 1 (- stage-w (* 2 padding))) w)
+                         (/ (max 1 (- stage-h padding (or top padding))) h)))
+         fit      (cond-> (fit-in vw vh)
+                    (and landscape? as-it-stands?) (min (fit-in (:w g) (:h g))))
          screen-w (max 1 (mth/floor (* sw fit)))
          scale    (/ screen-w sw)
          ox       (/ (- stage-w (* vw scale)) 2)
