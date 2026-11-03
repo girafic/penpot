@@ -5,10 +5,9 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns frontend-tests.viewer-background-test
-  "The background of the prototype of a page, round its boards shown
-  without a device in the view mode (Penpot Motion)."
+  "The background of the prototype of a page, round its boards in the
+  view mode (Penpot Motion)."
   (:require
-   [app.main.data.viewer.devices :as dvd]
    [app.main.ui.viewer.background :as vbg]
    [cljs.test :as t :include-macros true]))
 
@@ -17,13 +16,13 @@
    :stops [{:color "#000000" :opacity 1 :offset 0}
            {:color "#ffffff" :opacity 1 :offset 1}]})
 
-(t/deftest the-background-of-the-prototype-shows-without-a-device
+(t/deftest the-background-of-the-prototype-shows-round-a-device-too
   (let [page {:prototype-background "#ffffff"}]
-    (t/is (= "#ffffff" (vbg/background page nil)))
-    (t/is (nil? (vbg/background page (dvd/resolve-device "iphone-island" 402 874)))
-          "round a device, the view mode keeps its own")
-    (t/is (nil? (vbg/background {} nil)) "unset, its own")
-    (t/is (= top-to-bottom (vbg/background {:prototype-background top-to-bottom} nil))
+    (t/is (= "#ffffff" (vbg/background page false)) "round a board, with or without a device")
+    (t/is (nil? (vbg/background page true))
+          "round a device alone in the preview, the workspace shows")
+    (t/is (nil? (vbg/background {} false)) "unset, its own")
+    (t/is (= top-to-bottom (vbg/background {:prototype-background top-to-bottom} false))
           "a gradient as well")))
 
 (t/deftest a-color-fills-the-box

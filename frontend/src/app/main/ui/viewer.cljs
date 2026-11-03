@@ -536,6 +536,9 @@
         stage-ref   (mf/use-ref nil)
         cutouts-ref (mf/use-ref nil)
         stage-size (dfr/use-size stage-ref (= section :interactions))
+        ;; what the background of the prototype covers (see `vbg/background`)
+        content-ref (mf/use-ref nil)
+        content-size (dfr/use-size content-ref true)
         ;; in the preview of the workspace, right under its bar
         device-layout
         (mf/with-memo [device stage-size preview]
@@ -1037,10 +1040,11 @@
       :data-device-only (and (true? preview) (some? device-layout))}
 
 
-     [:div {:class (stl/css :viewer-content)
-            :style (vbg/background-style (vbg/background base-page device)
-                                         (dm/get-in local [:viewport-size :width])
-                                         (dm/get-in local [:viewport-size :height]))}
+     [:div {:ref content-ref
+            :class (stl/css :viewer-content)
+            :style (vbg/background-style (vbg/background base-page (and (true? preview) (some? device-layout)))
+                                         (first content-size)
+                                         (second content-size))}
 
 
       [:button {:on-click on-thumbnails-close
