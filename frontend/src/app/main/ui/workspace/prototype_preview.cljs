@@ -699,9 +699,10 @@
 
         on-open
         (mf/use-fn
-         (mf/deps page-id shown)
-         ;; there in a tab of its own, in place of this window
-         #(st/emit! (dcm/go-to-viewer :page-id page-id :frame-id shown)
+         (mf/deps page-id shown device color)
+         ;; there in a tab of its own, in place of this window, in its device
+         #(st/emit! (dcm/go-to-viewer :page-id page-id :frame-id shown
+                                      :device device :device-color color)
                     (dwpp/close-preview)))]
 
     ;; a device turned keeps its size: the window turns round it, about

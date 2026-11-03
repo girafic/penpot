@@ -521,7 +521,10 @@
         (rx/of (rt/nav :workspace params options))))))
 
 (defn go-to-viewer
-  [& {:keys [file-id page-id section frame-id index] :as options}]
+  "Opens the view mode in a window of its own; with `device` and
+  `device-color`, the board in that device (see
+  `app.main.data.viewer.devices`)."
+  [& {:keys [file-id page-id section frame-id index device device-color] :as options}]
   (ptk/reify ::go-to-viewer
     ptk/WatchEvent
     (watch [_ state _]
@@ -543,12 +546,14 @@
                      :page-id page-id
                      :section section
                      :frame-id frame-id
-                     :index index}
+                     :index index
+                     :device device
+                     :device-color device-color}
             params  (d/without-nils params)
             name    (dm/str "viewer-" file-id)
             options (merge {::rt/new-window true
                             ::rt/window-name name}
-                           options)]
+                           (dissoc options :device :device-color))]
         (rx/of ::dps/force-persist
                (rt/nav :viewer params options))))))
 
