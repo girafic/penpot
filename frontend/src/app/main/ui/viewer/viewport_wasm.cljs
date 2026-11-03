@@ -7,6 +7,7 @@
 (ns app.main.ui.viewer.viewport-wasm
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.modifiers :as gm]
    [app.common.geom.point :as gpt]
@@ -93,6 +94,31 @@
        :all-objects prepared-all
        :frame prepared-frame
        :shape-filter shape-filter}]]))
+
+(mf/defc wasm-backdrops*
+  "Under the layers fixed when scrolling (`fixed-mask-set`), boxes that
+  blur the layers that scroll where a fixed one has a background blur:
+  the fixed layers draw on a canvas of their own, over the one of the
+  others, so their background blur there finds nothing under it (see
+  `vpc/backdrop-style`). The layers of `pins` that far up (see
+  `vpc/fixed-pins`)."
+  [{:keys [prepared fixed-mask-set size scale pins]}]
+  (let [shapes (mf/with-memo [prepared fixed-mask-set pins]
+                 (let [objects (cond-> prepared (seq pins) (vpc/pin-objects pins))]
+                   (into []
+                         (comp (keep #(get objects %))
+                               (filter vpc/background-blur?))
+                         fixed-mask-set)))]
+    (when (seq shapes)
+      [:div {:style {:position "absolute"
+                     :top 0
+                     :left 0
+                     :width (:width size)
+                     :height (:height size)
+                     :pointer-events "none"}}
+       (for [shape shapes]
+         [:div {:key (dm/str (:id shape))
+                :style (vpc/backdrop-style shape scale)}])])))
 
 (mf/defc wasm-layer*
   "The WASM picture of the layers of `shape-filter` and their hotspots,
@@ -253,4 +279,9 @@
                         :width 0
                         :height 0
                         :pointer-events "none"}}
+          [:> wasm-backdrops* {:prepared prepared
+                               :fixed-mask-set fixed-mask-set
+                               :size size
+                               :scale scale
+                               :pins pins}]
           [:> wasm-layer* fixed-props]])]]]))

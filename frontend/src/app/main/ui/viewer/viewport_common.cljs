@@ -10,8 +10,10 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
+   [app.common.math :as mth]
    [app.common.types.modifiers :as ctm]
    [app.common.uuid :as uuid]))
 
@@ -107,3 +109,46 @@
   (if (and (:base-width size) (pos? (:base-width size)))
     (/ (:width size) (:base-width size))
     1))
+
+(def ^:private blur-sigma-scale
+  "Skia's scale from a blur radius to its sigma (`radius_to_sigma` in
+  render-wasm)."
+  0.57735027)
+
+(defn background-blur?
+  "Whether `shape` shows a background blur."
+  [shape]
+  (let [blur (:background-blur shape)]
+    (and (some? blur)
+         (not (:hidden blur))
+         (not (:hidden shape))
+         (pos? (:value blur 0)))))
+
+(defn backdrop-style
+  "The style of a box that blurs what shows under `shape` (in the space
+  of the view box, see `prepare-objects`) as its background blur does on
+  the canvas, at `scale` CSS px to a px of the board: over its box, turned
+  as it is, round at its corners or oval, as blurred."
+  [shape scale]
+  (let [{:keys [x y width height]} (:selrect shape)
+        px     (fn [v] (dm/str (* (or v 0) scale) "px"))
+        sigma  (+ (* blur-sigma-scale (dm/get-in shape [:background-blur :value])) 0.5)
+        blur   (dm/str "blur(" (mth/precision (* sigma scale) 2) "px)")
+        radius (cond
+                 (cfh/circle-shape? shape) "50%"
+                 (some? (:r1 shape))
+                 (dm/str (px (:r1 shape)) " " (px (:r2 shape)) " " (px (:r3 shape)) " " (px (:r4 shape))))
+        mtx    (:transform shape)]
+    (clj->js
+     (cond-> {:position "absolute"
+              :left (px x)
+              :top (px y)
+              :width (px width)
+              :height (px height)
+              :backdropFilter blur
+              :WebkitBackdropFilter blur}
+       (some? radius)
+       (assoc :borderRadius radius)
+
+       (and (some? mtx) (not (gmt/unit? mtx)))
+       (assoc :transform (dm/str "matrix(" (:a mtx) ", " (:b mtx) ", " (:c mtx) ", " (:d mtx) ", 0, 0)"))))))
