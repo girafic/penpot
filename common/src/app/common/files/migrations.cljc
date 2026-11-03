@@ -21,21 +21,24 @@
    [app.common.geom.shapes.text :as gsht]
    [app.common.logging :as l]
    [app.common.math :as mth]
+   [app.common.path-names :as cpn]
    [app.common.schema :as sm]
    [app.common.svg :as csvg]
    [app.common.types.color :as types.color]
    [app.common.types.component :as ctk]
+   [app.common.types.components-list :as ctkl]
    [app.common.types.container :as ctn]
    [app.common.types.file :as ctf]
    [app.common.types.fills :as types.fills]
    [app.common.types.path :as path]
    [app.common.types.path.segment :as path.segment]
    [app.common.types.shape :as cts]
+   [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.types.shape.shadow :as ctss]
    [app.common.types.shape.text :as ctst]
    [app.common.types.text :as types.text]
-   [app.common.types.token :as ctt]
+   [app.common.types.token :as cto]
    [app.common.types.tokens-lib :as ctob]
    [app.common.types.variant :as ctv]
    [app.common.uuid :as uuid]
@@ -85,7 +88,9 @@
 
     (-> file
         (assoc :data data)
-        (update :migrations set/union diff)
+        ;; `:migrations` is an ordered set everywhere; keep it that way
+        ;; even if a caller hands a plain set.
+        (update :migrations #(into (d/ordered-set) (set/union % diff)))
         (vary-meta assoc ::migrated (not-empty diff)))))
 
 (defn generate-migrations-from-version
@@ -223,9 +228,14 @@
   [data _]
   (letfn [(fix-line-paths [shape]
             (if (= (:type shape) :path)
-              (let [{:keys [width height]} (grc/points->rect (:points shape))]
-                (if (or (mth/almost-zero? width) (mth/almost-zero? height))
-                  (let [selrect (path.segment/content->selrect (:content shape))
+              ;; A path with missing or empty points has no rect; rebuild
+              ;; its geometry from the content as for line-like paths.
+              (let [{:keys [width height] :as rect} (grc/points->rect (:points shape))]
+                (if (or (nil? rect) (mth/almost-zero? width) (mth/almost-zero? height))
+                  ;; Content whose points are not numbers gives no rect
+                  ;; either; fall back to the empty rect.
+                  (let [selrect (or (path.segment/content->selrect (:content shape))
+                                    (grc/make-rect))
                         points (grc/rect->points selrect)
                         transform (gmt/matrix)
                         transform-inv (gmt/matrix)]
@@ -1334,6 +1344,16 @@
   (let [decode-segments
         (sm/decoder path/schema:segments sm/json-transformer)
 
+        ;; Old files may have segments with missing coordinates, which
+        ;; the binary path data can not store; drop them.
+        valid-segment?
+        (fn [{:keys [command params]}]
+          (case command
+            :close-path true
+            (:move-to :line-to) (and (number? (:x params)) (number? (:y params)))
+            :curve-to (every? #(number? (get params %)) [:x :y :c1x :c1y :c2x :c2y])
+            false))
+
         update-object
         (fn [object]
           (if (or (cfh/bool-shape? object)
@@ -1347,9 +1367,10 @@
                             (path/content [])
 
                             :else
-                            (-> content
-                                (decode-segments)
-                                (path/content)))]
+                            (->> content
+                                 (decode-segments)
+                                 (filterv valid-segment?)
+                                 (path/content)))]
               (assoc object :content content))
             object))
 
@@ -2167,7 +2188,7 @@
               (if (some? token)
                 (update shape :applied-tokens
                         (fn [applied]
-                          (-> (zipmap ctt/per-side-stroke-width-keys (repeat token))
+                          (-> (zipmap cto/per-side-stroke-width-keys (repeat token))
                               (merge applied)
                               (dissoc :stroke-width))))
                 shape)))
@@ -2216,6 +2237,105 @@
     (-> data
         (update :pages-index d/update-vals update-container)
         (d/update-when :components d/update-vals update-container))))
+
+(defmethod migrate-data "0033-normalize-main-instance-names"
+  [data _]
+  ;; In penpot shape names always have "/" characters normalized with one space between and after,
+  ;; to form paths. But this is not enforced and may be places that still admit names like
+  ;; "Group/Name" or "Group   /   Name". With normal shapes this is not a problem. But for main
+  ;; instances, the name of the root shape must match exactly the path+name of the component.
+  ;; Here we normalize the names of all main instances, and a new file integrity validation has
+  ;; been added to enforce this from now on.
+  ;; Main instances in variants are a special case because they need to match the variant name.
+  (letfn [(update-shape [container shape-id]
+            (let [shape (ctn/get-shape container shape-id)
+
+                  shape (cond
+                          ;; Variant container must have a normalized name
+                          (ctk/is-variant-container? shape)
+                          (let [name       (:name shape)
+                                clean-name (cpn/clean-path name)
+                                clean-name (if (str/blank? clean-name)
+                                             "(empty)" ;; this may occur if the name contains only separators
+                                             clean-name)]
+                            (if (= name clean-name)
+                              shape
+                              (assoc shape :name clean-name)))
+
+                          ;; Main instance inside a variant must have the same name as the container
+                          (ctk/main-instance? shape)
+                          (if (ctk/is-variant? shape)
+                            (let [variant-container (ctn/get-shape container (:parent-id shape))]
+                              (if (or (= (:name shape) (:name variant-container))
+                                      (nil? variant-container))
+                                shape
+                                (assoc shape :name (:name variant-container))))
+
+                            ;; Other main instances must have the same name as the path+name of the component
+                            (let [component     (ctkl/get-component data (:component-id shape) true)
+                                  expected-name (when component
+                                                  (cpn/merge-path-item (:path component) (:name component)))]
+                              (if (or (= expected-name (:name shape))
+                                      (nil? expected-name))
+                                shape
+                                (assoc shape :name expected-name))))
+
+                          ;; Any other shape does not need processing
+                          :else shape)]
+
+              (reduce update-shape
+                      (ctt/set-shape container shape)
+                      (:shapes shape))))
+
+          (update-container
+            [container]
+            (let [root (ctn/get-container-root container)]
+              (if root
+                (update-shape container (:id root))
+                container)))]
+
+    (-> data
+        (update :pages-index d/update-vals update-container)
+        (d/update-when :components d/update-vals update-container))))
+
+(defmethod migrate-data "0034-fix-path-content-offset"
+  [data _]
+  ;; A path stores its geometry twice: the box (:selrect and :points) and the
+  ;; drawing (:content), and the box is always derived from the drawing. Some
+  ;; files have component copies whose drawing and box were moved apart, so
+  ;; the drawing renders away from where the sidebar, the layouts and the
+  ;; syncs place the shape. We move the content back onto the box. A path whose drawing
+  ;; has another size than its box is not a displaced drawing, and is left as
+  ;; it is.
+  (let [tolerance 0.1]
+    (letfn [(fix-path [shape]
+              (when (and (cfh/path-shape? shape)
+                         (some? (:selrect shape))
+                         (some? (path.segment/content->selrect (:content shape))))
+                (let [selrect  (:selrect shape)
+                      derived  (:selrect (path/update-geometry shape))
+                      offset   (gpt/subtract (grc/rect->center selrect)
+                                             (grc/rect->center derived))]
+                  (when (and (mth/close? (:width selrect) (:width derived) tolerance)
+                             (mth/close? (:height selrect) (:height derived) tolerance)
+                             (or (> (abs (:x offset)) tolerance)
+                                 (> (abs (:y offset)) tolerance)))
+                    (update shape :content path/move-content offset)))))
+
+            (fix-objects [objects]
+              (reduce-kv (fn [objects id shape]
+                           (if-let [shape (fix-path shape)]
+                             (assoc objects id shape)
+                             objects))
+                         objects
+                         objects))
+
+            (update-container [container]
+              (d/update-when container :objects fix-objects))]
+
+      (-> data
+          (update :pages-index d/update-vals update-container)
+          (d/update-when :components d/update-vals update-container)))))
 
 (def available-migrations
   (into (d/ordered-set)
@@ -2306,4 +2426,6 @@
          "0029-move-background-blur-out-of-blur"
          "0030-remove-stroke-per-side-attr"
          "0031-migrate-stroke-width-token-attr"
-         "0032-fix-children-not-in-parent"]))
+         "0032-fix-children-not-in-parent"
+         "0033-normalize-main-instance-names"
+         "0034-fix-path-content-offset"]))

@@ -149,6 +149,7 @@
                            :app.notifications/handler
                            :app.loggers.mattermost/reporter
                            :app.loggers.database/reporter
+                           :app.loggers.metrics/reporter
                            :app.worker/cron
                            :app.worker/dispatcher)
                    (remove-job-runners))
@@ -251,6 +252,30 @@
                                                      :name (str "file" i)
                                                      :features features}
                                                     params)))))))
+
+(defn create-job*
+  "A job row in the state a worker finds it: running, in the `binfile` queue,
+  owned by `profile-id` and holding `resource-id` when it consumes one.
+  `job-name` is the kind of the job (a keyword like the `::jobs/name` a caller
+  would pass, or the text the row holds) and it is what resolves the job-def
+  of the row when its result is read or checked."
+  [job-name {:keys [profile-id resource-id]}]
+  (let [id (uuid/next)]
+    (db/insert! *pool* :job {:id           id
+                             :name         (name job-name)
+                             :tenant       (cf/get :tenant)
+                             :queue        "binfile"
+                             :params       (db/json {})
+                             :priority     100
+                             :max-retries  0
+                             :retry-num    0
+                             :status       "running"
+                             :profile-id   profile-id
+                             :resource-id  resource-id
+                             :scheduled-at (ct/now)
+                             :created-at   (ct/now)
+                             :modified-at  (ct/now)})
+    id))
 
 (defn mark-file-deleted*
   ([params]
@@ -487,6 +512,13 @@
 
     (-> params
         (assoc :app.rpc/request-at (ct/now))
+        ;; Mirror of the production flag in `app.rpc/make-rpc-handler`:
+        ;; upload maps are only trusted over multipart. Tests declare it
+        ;; with a content-type header on the supplied request map.
+        (assoc ::rpc/is-multipart
+               (str/starts-with?
+                (str (yreq/get-header request "content-type"))
+                "multipart/"))
         (with-meta {:app.http/request request}))))
 
 (defn command!
@@ -500,15 +532,81 @@
     (let [params (prepare-rpc-params data)]
       (try-on! (method-fn params)))))
 
-(defn management-command!
+(defn command-raw!
+  "Like `command!`, but returns the raw result without unwrapping it, so a test
+  can read the result metadata (for example the audit props a command sets on a
+  nil result). The HTTP layer unwraps it the same way in production."
   [{:keys [::type] :as data}]
-  (let [[_ method-fn] (get-in *system* [:app.rpc/management-methods type])]
+  (let [[_ method-fn] (get-in *system* [:app.rpc/methods type])]
+    (when-not method-fn
+      (ex/raise :type :assertion
+                :code :rpc-method-not-found
+                :hint (str/ffmt "rpc method '%' not found" (name type))))
+
+    (let [params (prepare-rpc-params data)]
+      (method-fn params))))
+
+(defn management-command!
+  "Invokes a management RPC method.
+
+  Resolves the shared-key id from an explicit `::rpc/auth-key-id`, from
+  `:app.http/auth-key-id` on the data or on the supplied request, and falls
+  back to the first id the method declares. The fallback lets the existing
+  tests exercise the allowed path without repeating the key; a test that
+  checks a rejection declares the key explicitly, including `nil`."
+  [{:keys [::type] :as data}]
+  (let [[mdata method-fn] (get-in *system* [:app.rpc/management-methods type])]
     (when-not method-fn
       (ex/raise :type :assertion
                 :code :rpc-method-not-found
                 :hint (str/ffmt "management rpc method '%' not found" (name type))))
-    (let [params (prepare-rpc-params data)]
+    (let [request (-> data meta :app.http/request)
+          key-id  (cond
+                    (contains? data ::rpc/auth-key-id)
+                    (::rpc/auth-key-id data)
+
+                    (contains? data :app.http/auth-key-id)
+                    (:app.http/auth-key-id data)
+
+                    (and (map? request)
+                         (contains? request :app.http/auth-key-id))
+                    (:app.http/auth-key-id request)
+
+                    :else
+                    (first (::rpc/allowed-shared-keys mdata)))
+          data    (if (or (contains? data ::rpc/auth-key-id)
+                          (nil? key-id))
+                    data
+                    (assoc data ::rpc/auth-key-id key-id))
+          params  (prepare-rpc-params data)]
       (try-on! (method-fn params)))))
+
+(def multipart-headers
+  {"content-type" "multipart/form-data; boundary=test"})
+
+(defn with-multipart
+  "Attach a multipart content-type to RPC test params, declaring that the
+  upload maps they carry arrived over multipart (as the production
+  multipart parser would deliver them). Preserves any request metadata
+  already present on the data."
+  [data]
+  (let [request (-> data meta :app.http/request)]
+    (vary-meta data assoc :app.http/request
+               (assoc (if (map? request) request {})
+                      :headers (merge multipart-headers
+                                      (when (map? request)
+                                        (:headers request)))))))
+
+(defn multipart-command!
+  "Like `command!` but declares the request as multipart, for calls that
+  carry upload maps (`:file`, `:content`, `:media`)."
+  [data]
+  (command! (with-multipart data)))
+
+(defn multipart-management-command!
+  "Like `management-command!` but declares the request as multipart."
+  [data]
+  (management-command! (with-multipart data)))
 
 (defn run-task!
   "Execute a job handler directly (in-process, no row): the handler gets a
@@ -554,13 +652,19 @@
 (defn init-climit
   "Build a concurrency limiter component from an inline config map. The
   optional second argument is the metrics instance to publish to (a
-  `metrics-stub` by default, where every `run!` is a no-op)."
+  `metrics-stub` by default, where every `run!` is a no-op).
+
+  The root limiters are added with permits that no test reaches: every
+  request goes through them, and a test that does not list them would log a
+  warning per request."
   ([config]
    (init-climit config (metrics-stub)))
   ([config metrics]
    (let [file (doto (java.io.File/createTempFile "climit" ".edn")
                 (.deleteOnExit))]
-     (spit file (pr-str config))
+     (spit file (pr-str (merge {:root/global {:permits 1000 :timeout 3000}
+                                :root/by-profile {:permits 1000 :timeout 3000}}
+                               config)))
      (ig/init-key ::rpc/climit
                   {::climit/enabled true
                    ::climit/config (.getAbsolutePath file)

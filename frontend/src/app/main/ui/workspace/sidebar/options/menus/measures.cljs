@@ -195,6 +195,8 @@
                      (get n-values :depth-focus))
          (identical? (get o-values :hide-in-viewer)
                      (get n-values :hide-in-viewer))
+         (identical? (get o-values :show-content)
+                     (get n-values :show-content))
          (identical? (get o-values :width)
                      (get n-values :width))
          (identical? (get o-values :height)

@@ -153,10 +153,12 @@
         (cond-> state
           exit? (dissoc :workspace-drawing))))
 
-    ;; the sound of a timeline playing on it stops with it, and the
-    ;; decoded files of its clips go
     ptk/EffectEvent
     (effect [_ _ _]
+      ;; Free the worker's copy of the page and its indexes
+      (mw/emit! {:cmd :index/finalize :page-id page-id})
+      ;; the sound of a timeline playing on it stops with it, and the
+      ;; decoded files of its clips go
       (audio/forget-all!))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

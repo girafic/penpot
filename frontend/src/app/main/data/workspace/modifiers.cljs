@@ -751,8 +751,9 @@
   which renders in full quality instead of fast with `full-quality?`."
   [modif-tree & {:keys [ignore-constraints ignore-snap-pixel snap-ignore-axis
                         subtree-ids-by-id selection-rect-cache skip-selrect?
-                        animation-preview? full-quality?]
-                 :or {ignore-constraints false ignore-snap-pixel false snap-ignore-axis nil}
+                        animation-preview? full-quality? interactive?]
+                 :or {ignore-constraints false ignore-snap-pixel false snap-ignore-axis nil
+                      interactive? true}
                  :as params}]
   (let [edit-tree  (without-nil-ids modif-tree)
         shown-tree (volatile! nil)
@@ -778,8 +779,10 @@
         ;; the renderer into fast + atlas-backdrop mode so the live
         ;; preview is cheap, tiles never appear sequentially and the main
         ;; thread is not blocked. The pair is closed in
-        ;; `clear-local-transform`.
-        (ensure-interactive-transform-start!)
+        ;; `clear-local-transform`. Previews outside a gesture pass
+        ;; `:interactive? false` to keep full quality rendering.
+        (when interactive?
+          (ensure-interactive-transform-start!))
         (when animation-preview?
           (wasm.api/set-modifiers-full-quality full-quality?))
         (let [modif-tree   (shown state)

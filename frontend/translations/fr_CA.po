@@ -1122,7 +1122,7 @@ msgstr "Le projet a été déplacé avec succès"
 #: src/app/main/data/common.cljs:266
 #, backend
 msgid "dashboard.team-belong-organization"
-msgstr "Cette équipe appartient maintenant à l'organisation %s"
+msgstr "%s appartient maintenant à %s"
 
 #: src/app/main/ui/dashboard/team.cljs:1669
 msgid "dashboard.team-info"
@@ -1135,7 +1135,7 @@ msgstr "Membres de l'équipe"
 #: src/app/main/data/common.cljs:267
 #, backend
 msgid "dashboard.team-no-longer-belong-organization"
-msgstr "Cette équipe n'appartient plus à l'organisation %s"
+msgstr "%s n'appartient plus à %s"
 
 #: src/app/main/ui/dashboard/team.cljs:1676
 msgid "dashboard.team-organization"
@@ -4508,10 +4508,6 @@ msgstr "Sélectionner les éléments avec ce style"
 #: src/app/main/data/workspace/shortcuts.cljs:431
 msgid "shortcuts.add-comment"
 msgstr "Commentaires"
-
-#: src/app/main/data/workspace/path/shortcuts.cljs:61
-msgid "shortcuts.add-node"
-msgstr "Ajouter un nœud"
 
 #: src/app/main/data/workspace/shortcuts.cljs:532
 msgid "shortcuts.align-bottom"

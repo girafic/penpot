@@ -40,7 +40,6 @@
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [prototype-pill*]]
    [app.main.ui.workspace.timeline.easing :as easing :refer [easing-menu* easing-curve-editor*]]
-   [app.main.ui.workspace.tokens.motion :as motion-tokens]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -390,7 +389,7 @@
     (let [tokens (if (delay? tokens) @tokens tokens)]
       (reduce (fn [acc type]
                 (if-let [items (seq (get tokens type))]
-                  (assoc acc type (map #(update % :resolved-value motion-tokens/plain-value) items))
+                  (assoc acc type items)
                   acc))
               (array-map)
               types))))

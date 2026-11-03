@@ -170,6 +170,89 @@
                    (db/get-update-count)
                    (pos?)))))))
 
+(defn update-profile-email!
+  "Support helper: change a profile's email address.
+
+  Looks up the profile by its current email. Rejects with
+  `:email-already-exists` when the new address is already used by
+  another non-deleted profile. Does not clear bounce/complaint
+  reports; call `clear-email-complaint-reports!` for that."
+  [& {:keys [email new-email]}]
+  (assert (string? email) "expected email")
+  (assert (string? new-email) "expected new-email")
+
+  (let [email     (profile/clean-email email)
+        new-email (profile/clean-email new-email)]
+    (db/tx-run! sys/system
+                (fn [{:keys [::db/conn] :as system}]
+                  (let [profile (profile/get-profile-by-email conn email)]
+                    (when-not profile
+                      (ex/raise :type :not-found
+                                :code :profile-not-found
+                                :hint "profile not found for email"
+                                :email email))
+
+                    (if (= email new-email)
+                      :unchanged
+                      (do
+                        (when (profile/get-profile-by-email conn new-email)
+                          (ex/raise :type :validation
+                                    :code :email-already-exists))
+
+                        (db/update! conn :profile
+                                    {:email new-email}
+                                    {:id (:id profile)}
+                                    {::db/return-keys false})
+
+                        (audit/insert system
+                                      {:name "update-profile-email"
+                                       :type "action"
+                                       :props {:id (:id profile)
+                                               :email email
+                                               :new-email new-email}
+                                       :context {:triggered-by "srepl"
+                                                 :cause "explicit call to update-profile-email!"}})
+                        :updated)))))))
+
+(defn clear-email-complaint-reports!
+  "Support helper: delete bounce and complaint reports for an email
+  from `global_complaint_report` and, when a profile owns that email,
+  from `profile_complaint_report`. Also unmutes that profile so mail
+  can be sent again after a false-positive bounce or complaint."
+  [email]
+  (assert (string? email) "expected email")
+
+  (let [email (profile/clean-email email)]
+    (db/tx-run! sys/system
+                (fn [{:keys [::db/conn] :as system}]
+                  (let [profile (db/get* conn :profile {:email email})
+                        global-deleted
+                        (-> (db/delete! conn :global-complaint-report {:email email})
+                            (db/get-update-count))
+                        profile-deleted
+                        (if profile
+                          (-> (db/delete! conn :profile-complaint-report
+                                          {:profile-id (:id profile)})
+                              (db/get-update-count))
+                          0)]
+                    (when profile
+                      (db/update! conn :profile
+                                  {:is-muted false}
+                                  {:id (:id profile)}
+                                  {::db/return-keys false}))
+
+                    (when (or profile (pos? global-deleted))
+                      (audit/insert system
+                                    {:name "clear-email-complaint-reports"
+                                     :type "action"
+                                     :props (cond-> {:email email
+                                                     :global-deleted global-deleted
+                                                     :profile-deleted profile-deleted}
+                                              profile (assoc :id (:id profile)))
+                                     :context {:triggered-by "srepl"
+                                               :cause "explicit call to clear-email-complaint-reports!"}})
+                      :cleared))))))
+
 (defn parse-emails
   "Parse the emails into a seq of cleaned emails. Accepts a single
   email, a comma separated list of emails or a coll of emails.
@@ -783,7 +866,7 @@
                    :type "action"
                    :props {:id team-id}
                    :context {:triggered-by "srepl"
-                             :cause "explicit call to delete-profile!"}
+                             :cause "explicit call to delete-team!"}
                    :tracked-at tnow})
 
     (jobs/invoke (-> sys/system
@@ -852,6 +935,7 @@
     (audit/insert sys/system
                   {:name "delete-profile"
                    :type "action"
+                   :props {:id profile-id}
                    :context {:triggered-by "srepl"
                              :cause "explicit call to delete-profile!"}
                    :tracked-at tnow})
@@ -1040,4 +1124,4 @@
                       (let [params (-> rel
                                        (assoc :id (uuid/next))
                                        (assoc :team-id (:id team)))]
-                        (teams/add-profile-to-team! cfg params {::db/return-keys false}))))))))
+                        (teams/add-profile-to-team! cfg params))))))))

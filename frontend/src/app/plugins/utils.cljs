@@ -18,6 +18,7 @@
    [app.common.types.file :as ctf]
    [app.common.types.tokens-lib :as ctob]
    [app.main.data.helpers :as dsh]
+   [app.main.data.workspace.tokens.library-edit :as dwtl]
    [app.main.store :as st]
    [app.util.object :as obj]
    [cuerdas.core :as str]))
@@ -293,9 +294,8 @@
 
 (defn check-editable-tokens
   [file-id]
-  (let [file (locate-file file-id)]
-    (when-not (cfo/editable-tokens? (ctf/file-data file))
-      (throw (js/Error. (dm/str "[PENPOT PLUGIN] Cannot modify tokens in an external library"))))))
+  (when-not (dwtl/editable-tokens? @st/state file-id)
+    (throw (js/Error. (dm/str "[PENPOT PLUGIN] Cannot modify tokens in an external library")))))
 
 (defn throw-validation-errors?
   [plugin-id]
@@ -609,3 +609,10 @@
   [p]
   (when-let [shape (proxy->shape p)]
     (ctk/main-instance? shape)))
+
+(defn non-main-into-variant-container?
+  "True when `parent` is a variant container and `child` (a shape proxy)
+   is not a main instance."
+  [parent child]
+  (and (ctk/is-variant-container? parent)
+       (not (is-main-component-proxy? child))))

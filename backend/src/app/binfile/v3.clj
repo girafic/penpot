@@ -285,6 +285,7 @@
   (let [detach? (= export-type :detach-libraries)
         embed?  (= export-type :merge-libraries)]
     (db/tx-run! cfg (fn [cfg]
+                      (bfc/set-transaction-idle-timeout cfg)
                       (cond-> (bfc/get-file cfg file-id
                                             {:realize? true
                                              :include-deleted? true
@@ -295,6 +296,10 @@
 
                         embed?
                         (update :data #(bfc/embed-assets cfg % file-id))
+
+                        (not (or detach? embed?))
+                        (update :data #(bfc/absorb-unlinked-tokens-source
+                                        cfg % (bfc/get-libraries cfg [file-id])))
 
                         :always
                         (bfc/clean-file-features))))))
@@ -468,14 +473,15 @@
         (write-entry! output path encoded-status)))))
 
 (defn- export-files
-  [{:keys [::bfc/ids ::bfc/export-type ::output] :as cfg}]
+  [{:keys [::bfc/file-ids ::bfc/export-type ::output] :as cfg}]
 
-  (let [original-ids ids
-        ids  (into ids (when (= export-type :include-libraries) (bfc/get-libraries cfg ids)))
-        rels (if (= export-type :include-libraries)
-               (->> (bfc/get-files-rels cfg ids)
-                    (mapv (juxt :file-id :library-file-id)))
-               [])
+  (let [original-ids file-ids
+        file-ids     (into file-ids (when (= export-type :include-libraries)
+                                      (bfc/get-libraries cfg file-ids)))
+        rels         (if (= export-type :include-libraries)
+                       (->> (bfc/get-files-rels cfg file-ids)
+                            (mapv (juxt :file-id :library-file-id)))
+                       [])
 
         ;; Compute external libraries: referenced by original files but
         ;; not included in the export set. Only relevant for :link-later.
@@ -500,11 +506,11 @@
     (vswap! bfc/*state* assoc :files (d/ordered-map))
 
     ;; Write all the exporting files
-    (doseq [[index file-id] (d/enumerate ids)]
+    (doseq [[index file-id] (d/enumerate file-ids)]
       (-> cfg
           (assoc ::file-id file-id)
           (with-outer-counter :files {:current (inc index)
-                                      :total (count ids)})
+                                      :total (count file-ids)})
           (export-file)))
 
     ;; Write manifest file
@@ -878,13 +884,26 @@
                  {})
          (not-empty))))
 
-(defn- read-file-tokens-lib
+(defn- read-file-tokens-lib*
   [{:keys [::bfc/input ::entries-index] :as cfg} file-id]
   (when-let [{:keys [entry]} (first (get-in entries-index [:tokens (str file-id)]))]
     (tap-progress cfg {:section :tokens-lib :file-id file-id})
     (->> (read-entry cfg input entry nil)
          (decode-tokens-lib)
          (validate-tokens-lib))))
+
+(defn- read-file-tokens-lib
+  "Read the tokens lib of a file once per import. Decoding generates new
+  set ids, so the tokens lib of a library must be the same instance when
+  it is imported and when it resolves the tokens status of a file that
+  uses it as tokens source."
+  [cfg file-id]
+  (let [cache (:tokens-libs @bfc/*state*)]
+    (if (contains? cache file-id)
+      (get cache file-id)
+      (let [tokens-lib (read-file-tokens-lib* cfg file-id)]
+        (vswap! bfc/*state* assoc-in [:tokens-libs file-id] tokens-lib)
+        tokens-lib))))
 
 (defn- read-file-tokens-status
   [{:keys [::bfc/input ::entries-index] :as cfg} file-id tokens-lib]
@@ -1285,7 +1304,7 @@
 
 (defn- import-files*
   [{:keys [::manifest] :as cfg}]
-  (bfc/configure-database-timeouts! cfg)
+  (bfc/configure-import-transaction cfg)
 
   (vswap! bfc/*state* update :index bfc/update-index (:files manifest) :id)
 
@@ -1356,7 +1375,7 @@
               :hint "unable to perform in-place update with binfile containing more than 1 file"
               :manifest manifest))
 
-  (bfc/configure-database-timeouts! cfg)
+  (bfc/configure-import-transaction cfg)
 
   (let [ref-file (bfc/get-minimal-file cfg file-id ::db/for-update true)
         file     (first (get manifest :files))
@@ -1434,23 +1453,25 @@
 
 (defn export-files!
   "Do the exportation of a specified file in custom penpot binary
-  format. There are some options available for customize the output:
+  format. The cfg carries what `bfc/export-cfg` froze: `::bfc/file-ids`
+  (the files to export), `::bfc/export-type` (how linked libraries are
+  handled) and `::bfc/output` (where the package is written).
 
-  `::bfc/export-type`: determines how linked libraries are handled.
+  `::bfc/export-type` determines how linked libraries are handled.
   Valid values: `:include-libraries` (include linked libraries),
   `:merge-libraries` (embed library assets in the file),
   `:detach-libraries` (treat assets as basic objects),
   `:link-later` (preserve component metadata for relinking on import)."
 
-  [{:keys [::bfc/ids] :as cfg} output]
+  [{:keys [::bfc/file-ids ::bfc/output] :as cfg}]
 
   (assert
-   (and (set? ids) (every? uuid? ids))
-   "expected a set of uuid's for `::bfc/ids` parameter")
+   (and (set? file-ids) (every? uuid? file-ids))
+   "expected a set of uuid's for `::bfc/file-ids` parameter")
 
   (assert
    (satisfies? jio/IOFactory output)
-   "expected instance of jio/IOFactory for `input`")
+   "expected instance of jio/IOFactory for `::bfc/output`")
 
   (let [id (uuid/next)
         tp (ct/tpoint)

@@ -12,20 +12,21 @@
    [app.binfile.v3 :as v3]
    [app.common.data :as d]
    [app.common.features :as cfeat]
+   [app.common.files.changes-builder :as pcb]
+   [app.common.files.tokens :as cfo]
    [app.common.files.validate :as cfv]
-   [app.common.pprint :as pp]
    [app.common.thumbnails :as thc]
    [app.common.time :as ct]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.shape :as cts]
+   [app.common.types.token :as cto]
    [app.common.types.tokens-lib :as ctob]
+   [app.common.types.tokens-status :as ctos]
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.db :as db]
-   [app.db.sql :as sql]
-   [app.http :as http]
    [app.rpc :as-alias rpc]
    [app.rpc.commands.binfile :as binfile]
    [app.storage :as sto]
@@ -39,7 +40,6 @@
    [datoteka.io :as io])
   (:import
    java.io.ByteArrayInputStream
-   java.io.DataInputStream
    java.io.OutputStreamWriter
    java.io.Writer
    java.util.zip.Deflater
@@ -107,6 +107,117 @@
                :type :rect})}])
 
      (dissoc file :data))))
+
+(defn- prepare-file-with-tokens-lib
+  "A shared library and a linked file with different active token sets.
+  The file has a rect with two applied tokens. Returns the created files,
+  and the ids and tokens needed to check them."
+  [profile]
+  (let [lib-page-id    (uuid/custom 5 1)
+        file-page-id   (uuid/custom 5 2)
+        shape-id       (uuid/custom 5 3)
+        set-id         (uuid/custom 5 4)
+        theme-id       (uuid/custom 5 5)
+        other-set-id   (uuid/custom 5 8)
+        other-theme-id (uuid/custom 5 9)
+
+        token-radius  (ctob/make-token :id (uuid/custom 5 6)
+                                       :name "token-radius"
+                                       :type :border-radius
+                                       :value 10)
+
+        token-opacity (ctob/make-token :id (uuid/custom 5 7)
+                                       :name "token-opacity"
+                                       :type :opacity
+                                       :value 0.7)
+
+        tokens-lib    (-> (ctob/make-tokens-lib)
+                          (ctob/add-set (ctob/make-token-set :id set-id
+                                                             :name "test-token-set"))
+                          (ctob/add-theme (ctob/make-token-theme :id theme-id
+                                                                 :name "test-theme"
+                                                                 :sets #{"test-token-set"}))
+                          (ctob/add-set (ctob/make-token-set :id other-set-id
+                                                             :name "other-token-set"))
+                          (ctob/add-theme (ctob/make-token-theme :id other-theme-id
+                                                                 :name "other-theme"
+                                                                 :sets #{"other-token-set"}))
+                          (ctob/add-token other-set-id (ctob/make-token :id (uuid/custom 5 10)
+                                                                        :name "other-token"
+                                                                        :type :opacity
+                                                                        :value 0.4))
+                          (ctob/add-token set-id token-radius)
+                          (ctob/add-token set-id token-opacity))
+
+        library       (th/create-file* 1 {:profile-id (:id profile)
+                                          :project-id (:default-project-id profile)
+                                          :is-shared true
+                                          :name "Tokens Library"})
+
+        file          (th/create-file* 2 {:profile-id (:id profile)
+                                          :project-id (:default-project-id profile)
+                                          :is-shared false})]
+
+    (th/link-file-to-library* {:file-id (:id file)
+                               :library-id (:id library)})
+
+    (update-file!
+     :file-id (:id library)
+     :profile-id (:id profile)
+     :revn 0
+     :changes
+     (-> (pcb/empty-changes nil)
+         (pcb/with-library-data (:data library))
+         (pcb/add-empty-page lib-page-id "library page")
+         (pcb/set-tokens-lib tokens-lib)
+         (pcb/set-tokens-status (ctos/make-tokens-status :active-theme-ids #{other-theme-id}
+                                                         :active-set-ids #{other-set-id}))
+         (:redo-changes)))
+
+    (update-file!
+     :file-id (:id file)
+     :profile-id (:id profile)
+     :revn 0
+     :changes
+     (-> (pcb/empty-changes nil)
+         (pcb/with-library-data (:data file))
+         (pcb/add-empty-page file-page-id "file page")
+         (pcb/set-tokens-source (:id library))
+         (pcb/set-tokens-status (ctos/make-tokens-status :active-theme-ids #{theme-id}
+                                                         :active-set-ids #{set-id}))
+         (:redo-changes)))
+
+    (let [page  (-> (bfc/get-file th/*system* (:id file) {:realize? true})
+                    (get-in [:data :pages-index file-page-id]))
+          shape (as-> (cts/setup-shape
+                       {:id shape-id
+                        :name "rect"
+                        :frame-id uuid/zero
+                        :parent-id uuid/zero
+                        :type :rect}) $
+                  (cto/apply-token-to-shape {:shape $
+                                             :token token-radius
+                                             :attributes [:r1 :r2 :r3 :r4]})
+                  (cto/apply-token-to-shape {:shape $
+                                             :token token-opacity
+                                             :attributes [:opacity]}))]
+      (update-file!
+       :file-id (:id file)
+       :profile-id (:id profile)
+       :revn 0
+       :changes
+       (-> (pcb/empty-changes nil)
+           (pcb/with-page page)
+           (pcb/with-objects (:objects page))
+           (pcb/add-object shape)
+           (:redo-changes))))
+
+    {:library library
+     :file file
+     :page-id file-page-id
+     :shape-id shape-id
+     :token-radius token-radius
+     :token-opacity token-opacity}))
 
 (def ^:private svg-raw-page-id (uuid/custom 1 1))
 (def ^:private svg-raw-root-id (uuid/custom 3 1))
@@ -176,9 +287,9 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
-         (assoc ::bfc/export-type :detach-libraries))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{(:id file)})
+         (assoc ::bfc/export-type :detach-libraries)
+         (assoc ::bfc/output (io/output-stream output))))
 
     (let [result (-> th/*system*
                      (assoc ::bfc/project-id (:default-project-id profile))
@@ -265,9 +376,9 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
-         (assoc ::bfc/export-type :detach-libraries))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{(:id file)})
+         (assoc ::bfc/export-type :detach-libraries)
+         (assoc ::bfc/output (io/output-stream output))))
 
     (let [result (-> th/*system*
                      (assoc ::bfc/project-id (:default-project-id profile))
@@ -299,9 +410,9 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
-         (assoc ::bfc/export-type :detach-libraries))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{(:id file)})
+         (assoc ::bfc/export-type :detach-libraries)
+         (assoc ::bfc/output (io/output-stream output))))
 
     (let [result   (-> th/*system*
                        (assoc ::bfc/project-id (:default-project-id profile))
@@ -365,9 +476,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Read the manifest and check external-libraries
       (let [manifest (v3/get-manifest th/*system* output)]
@@ -378,6 +489,299 @@
           (t/is (= "Icons Library" (:name ext-lib)))
           (t/is (= "icons-library" (:slug ext-lib)))
           (t/is (= [(:id file)] (:used-by ext-lib))))))))
+
+(defn- zip-entry-names
+  [path]
+  (with-open [zin (ZipFile. (fs/file path))]
+    (into #{} (map #(.getName ^ZipEntry %)) (iterator-seq (.entries zin)))))
+
+(t/deftest export-detach-libraries-removes-tokens-library-although-keeps-applied-tokens
+  (let [profile (th/create-profile* 1)
+        {:keys [library file page-id shape-id token-radius token-opacity]}
+        (prepare-file-with-tokens-lib profile)]
+
+    ;; Precondition: before the export, the file really depends on the
+    ;; tokens of the library
+    (let [file-data (:data (bfc/get-file th/*system* (:id file)))]
+      (t/is (= (:id library) (cfo/get-tokens-source file-data)))
+      (t/is (some? (cfo/get-tokens-status file-data)))
+      (t/is (nil? (cfo/get-tokens-lib file-data))))
+
+    ;; Do the export, with type :detach-libraries
+    (let [output (tmp/tempfile :suffix ".zip")]
+      (v3/export-files!
+       (-> th/*system*
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :detach-libraries)
+           (assoc ::bfc/output (io/output-stream output))))
+
+      ;; Only the file is exported, not the library
+      (let [manifest (v3/get-manifest th/*system* output)
+            names    (zip-entry-names output)]
+        (t/is (= [(:id file)] (mapv :id (:files manifest))))
+        (t/is (empty? (:relations manifest)))
+        (t/is (empty? (:external-libraries manifest)))
+        (t/is (contains? names (str "files/" (:id file) ".json")))
+        (t/is (not-any? #(str/includes? % (str (:id library))) names)))
+
+      ;; The exported file has neither tokens library nor tokens status
+      (let [names (zip-entry-names output)]
+        (t/is (not (contains? names (str "files/" (:id file) "/tokens.json"))))
+        (t/is (not (contains? names (str "files/" (:id file) "/tokens-status.json")))))
+
+      ;; Import the file again
+      (let [result    (-> th/*system*
+                          (assoc ::bfc/project-id (:default-project-id profile))
+                          (assoc ::bfc/team-id (:default-team-id profile))
+                          (assoc ::bfc/profile-id (:id profile))
+                          (assoc ::bfc/input output)
+                          (v3/import-files!))
+            imported  (bfc/get-file th/*system* (first (:file-ids result)))
+            file-data (:data imported)
+            shape     (get-in file-data [:pages-index page-id :objects shape-id])]
+
+        (t/is (= 1 (count (:file-ids result))))
+
+        ;; ...so the imported file has no tokens source, status or library
+        (t/is (nil? (cfo/get-tokens-source file-data)))
+        (t/is (nil? (cfo/get-tokens-status file-data)))
+        (t/is (nil? (cfo/get-tokens-lib file-data)))
+
+        ;; The shape keeps the applied tokens
+        (t/is (some? shape))
+        (t/is (cfo/token-applied? token-radius shape [:r1 :r2 :r3 :r4]))
+        (t/is (cfo/token-applied? token-opacity shape [:opacity]))))))
+
+(t/deftest export-merge-libraries-embeds-tokens-library-and-keeps-applied-tokens
+  (let [profile (th/create-profile* 1)
+        {:keys [library file page-id shape-id token-radius token-opacity]}
+        (prepare-file-with-tokens-lib profile)]
+
+    ;; Precondition: before the export, the file depends on the tokens
+    ;; of the library and has no tokens library of its own
+    (let [file-data (:data (bfc/get-file th/*system* (:id file)))]
+      (t/is (= (:id library) (cfo/get-tokens-source file-data)))
+      (t/is (nil? (cfo/get-tokens-lib file-data))))
+
+    (let [library-tokens-lib (-> (bfc/get-file th/*system* (:id library))
+                                 (:data)
+                                 (cfo/get-tokens-lib))
+          output             (tmp/tempfile :suffix ".zip")]
+
+      (t/is (some? library-tokens-lib))
+
+      (v3/export-files!
+       (-> th/*system*
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :merge-libraries)
+           (assoc ::bfc/output (io/output-stream output))))
+
+      ;; Only the file is exported, not the library
+      (let [manifest (v3/get-manifest th/*system* output)
+            names    (zip-entry-names output)]
+        (t/is (= [(:id file)] (mapv :id (:files manifest))))
+        (t/is (empty? (:relations manifest)))
+        (t/is (empty? (:external-libraries manifest)))
+        (t/is (contains? names (str "files/" (:id file) ".json")))
+        (t/is (not-any? #(str/includes? % (str (:id library))) names)))
+
+      ;; The exported file carries its own tokens library
+      (t/is (contains? (zip-entry-names output)
+                       (str "files/" (:id file) "/tokens.json")))
+
+      (let [result    (-> th/*system*
+                          (assoc ::bfc/project-id (:default-project-id profile))
+                          (assoc ::bfc/team-id (:default-team-id profile))
+                          (assoc ::bfc/profile-id (:id profile))
+                          (assoc ::bfc/input output)
+                          (v3/import-files!))
+            imported  (bfc/get-file th/*system* (first (:file-ids result)))
+            file-data (:data imported)
+            shape     (get-in file-data [:pages-index page-id :objects shape-id])]
+
+        (t/is (= 1 (count (:file-ids result))))
+
+        ;; The tokens library of the library file is now in the file...
+        ;; (the import gives new ids to the sets and tokens, so compare
+        ;; their content)
+        (t/is (some? (cfo/get-tokens-lib file-data)))
+        (t/is (= (ctob/export-dtcg-json library-tokens-lib)
+                 (ctob/export-dtcg-json (cfo/get-tokens-lib file-data))))
+
+        ;; ...so the file is its own tokens source
+        (t/is (nil? (cfo/get-tokens-source file-data)))
+
+        ;; Activation follows the consuming file, using the imported ids.
+        (t/is (= {:active-themes #{"/test-theme"}
+                  :active-sets #{"test-token-set"}}
+                 (cfo/ids->names (cfo/get-tokens-status file-data)
+                                 (cfo/get-tokens-lib file-data))))
+        (t/is (= #{"token-radius" "token-opacity"}
+                 (set (keys (cfo/get-tokens-in-active-sets
+                             (cfo/get-tokens-status file-data)
+                             (cfo/get-tokens-lib file-data))))))
+
+        ;; The shape keeps the applied tokens
+        (t/is (some? shape))
+        (t/is (cfo/token-applied? token-radius shape [:r1 :r2 :r3 :r4]))
+        (t/is (cfo/token-applied? token-opacity shape [:opacity]))))))
+
+(t/deftest export-detach-libraries-preserves-own-tokens-and-status
+  (let [profile (th/create-profile* 1)
+        {:keys [library file page-id shape-id token-radius token-opacity]}
+        (prepare-file-with-tokens-lib profile)
+        file-data    (:data (bfc/get-file th/*system* (:id file)))
+        library-data (:data (bfc/get-file th/*system* (:id library)))
+        tokens-lib   (cfo/get-tokens-lib library-data)
+        output       (tmp/tempfile :suffix ".zip")]
+
+    ;; Keep the linked library, but use the file's own tokens.
+    (update-file!
+     :file-id (:id file)
+     :profile-id (:id profile)
+     :changes
+     (-> (pcb/empty-changes nil)
+         (pcb/with-library-data file-data)
+         (pcb/set-tokens-source nil)
+         (pcb/set-tokens-lib tokens-lib)
+         (:redo-changes)))
+
+    (v3/export-files!
+     (assoc th/*system*
+            ::bfc/file-ids #{(:id file)}
+            ::bfc/export-type :detach-libraries
+            ::bfc/output (io/output-stream output)))
+
+    (let [names (zip-entry-names output)]
+      (t/is (contains? names (str "files/" (:id file) "/tokens.json")))
+      (t/is (contains? names (str "files/" (:id file) "/tokens-status.json"))))
+
+    (let [result    (v3/import-files!
+                     (assoc th/*system*
+                            ::bfc/project-id (:default-project-id profile)
+                            ::bfc/team-id (:default-team-id profile)
+                            ::bfc/profile-id (:id profile)
+                            ::bfc/input output))
+          imported  (bfc/get-file th/*system* (first (:file-ids result)))
+          file-data (:data imported)
+          shape     (get-in file-data [:pages-index page-id :objects shape-id])]
+      (t/is (nil? (cfo/get-tokens-source file-data)))
+      (t/is (= (ctob/export-dtcg-json tokens-lib)
+               (ctob/export-dtcg-json (cfo/get-tokens-lib file-data))))
+      (t/is (some? (cfo/get-tokens-status file-data)))
+      (when-let [status (cfo/get-tokens-status file-data)]
+        (t/is (= {:active-themes #{"/test-theme"}
+                  :active-sets #{"test-token-set"}}
+                 (cfo/ids->names status (cfo/get-tokens-lib file-data)))))
+      (t/is (cfo/token-applied? token-radius shape [:r1 :r2 :r3 :r4]))
+      (t/is (cfo/token-applied? token-opacity shape [:opacity])))))
+
+(defn- import-output
+  "Import the exported output in the default project of the profile and
+  return the imported files, indexed by name."
+  [profile output]
+  (let [result (v3/import-files!
+                (assoc th/*system*
+                       ::bfc/project-id (:default-project-id profile)
+                       ::bfc/team-id (:default-team-id profile)
+                       ::bfc/profile-id (:id profile)
+                       ::bfc/input output))]
+    (into {}
+          (map (fn [id]
+                 (let [file (bfc/get-file th/*system* id)]
+                   [(:name file) file])))
+          (:file-ids result))))
+
+(t/deftest export-include-libraries-keeps-tokens-status-of-the-file
+  (let [profile (th/create-profile* 1)
+        {:keys [library file]} (prepare-file-with-tokens-lib profile)
+        output (tmp/tempfile :suffix ".zip")]
+
+    (v3/export-files!
+     (assoc th/*system*
+            ::bfc/file-ids #{(:id file)}
+            ::bfc/export-type :include-libraries
+            ::bfc/output (io/output-stream output)))
+
+    (let [files        (import-output profile output)
+          library'     (get files (:name library))
+          file'        (get files (:name file))
+          file-data    (:data file')
+          library-lib  (cfo/get-tokens-lib (:data library'))
+          file-status  (cfo/get-tokens-status file-data)]
+
+      (t/is (= 2 (count files)))
+      (t/is (= (:id library') (cfo/get-tokens-source file-data)))
+
+      ;; The active sets of the file are resolved against the sets of the
+      ;; imported library, so they are not lost.
+      (t/is (= {:active-themes #{"/test-theme"}
+                :active-sets #{"test-token-set"}}
+               (cfo/ids->names file-status library-lib)))
+      (t/is (= #{"token-radius" "token-opacity"}
+               (set (keys (cfo/get-tokens-in-active-sets file-status library-lib))))))))
+
+(t/deftest export-file-with-deleted-tokens-library-embeds-its-tokens
+  (let [profile    (th/create-profile* 1)
+        {:keys [library file]} (prepare-file-with-tokens-lib profile)
+        tokens-lib (-> (bfc/get-file th/*system* (:id library))
+                       (:data)
+                       (cfo/get-tokens-lib))
+        output     (tmp/tempfile :suffix ".zip")]
+
+    ;; The state left by deleting the library: in the trash and unlinked,
+    ;; but still the tokens source of the file.
+    (th/db-update! :file {:deleted-at (ct/in-future {:days 7})} {:id (:id library)})
+    (th/db-delete! :file-library-rel {:library-file-id (:id library)})
+
+    (v3/export-files!
+     (assoc th/*system*
+            ::bfc/file-ids #{(:id file)}
+            ::bfc/export-type :include-libraries
+            ::bfc/output (io/output-stream output)))
+
+    (t/is (contains? (zip-entry-names output)
+                     (str "files/" (:id file) "/tokens.json")))
+
+    (let [files     (import-output profile output)
+          file-data (:data (get files (:name file)))]
+      (t/is (= 1 (count files)))
+      (t/is (nil? (cfo/get-tokens-source file-data)))
+      (t/is (= (ctob/export-dtcg-json tokens-lib)
+               (ctob/export-dtcg-json (cfo/get-tokens-lib file-data))))
+      (t/is (= {:active-themes #{"/test-theme"}
+                :active-sets #{"test-token-set"}}
+               (cfo/ids->names (cfo/get-tokens-status file-data)
+                               (cfo/get-tokens-lib file-data)))))))
+
+(t/deftest export-file-with-missing-tokens-library-removes-tokens-source
+  (let [profile (th/create-profile* 1)
+        {:keys [library file]} (prepare-file-with-tokens-lib profile)
+        output  (tmp/tempfile :suffix ".zip")]
+
+    ;; The tokens source points to a library that does not exist anymore
+    (th/db-delete! :file-library-rel {:library-file-id (:id library)})
+    (update-file!
+     :file-id (:id file)
+     :profile-id (:id profile)
+     :changes
+     (-> (pcb/empty-changes nil)
+         (pcb/with-library-data (:data (bfc/get-file th/*system* (:id file))))
+         (pcb/set-tokens-source (uuid/next))
+         (:redo-changes)))
+
+    (v3/export-files!
+     (assoc th/*system*
+            ::bfc/file-ids #{(:id file)}
+            ::bfc/export-type :include-libraries
+            ::bfc/output (io/output-stream output)))
+
+    (let [files     (import-output profile output)
+          file-data (:data (get files (:name file)))]
+      (t/is (= 1 (count files)))
+      (t/is (nil? (cfo/get-tokens-source file-data)))
+      (t/is (nil? (cfo/get-tokens-status file-data)))
+      (t/is (nil? (cfo/get-tokens-lib file-data))))))
 
 (t/deftest import-auto-links-single-candidate
   (let [profile (th/create-profile* 1)
@@ -400,9 +804,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Remove the source library to simulate a cross-environment import
       ;; where the original library does not exist in the target team.
@@ -464,9 +868,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :detach-libraries))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :detach-libraries)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Remove the source library to simulate a cross-environment import
       ;; where no matching library exists in the target team.
@@ -506,9 +910,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Remove the source library to simulate a cross-environment import
       ;; where the original library does not exist in the target team.
@@ -584,9 +988,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Remove the source library and recreate a matching one owned by owner
       (db/update! th/*system* :file
@@ -666,9 +1070,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file1) (:id file2)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file1) (:id file2)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Remove the source library and recreate a matching one
       (db/update! th/*system* :file
@@ -767,9 +1171,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Verify manifest has external-libraries
     (let [manifest (v3/get-manifest th/*system* output)
@@ -804,9 +1208,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; First import
     (let [result1 (-> th/*system*
@@ -837,9 +1241,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Import with overwrite (file-id set)
     (let [result (-> th/*system*
@@ -866,9 +1270,9 @@
     ;; Export file with link-later from team 1
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Import in team 2 (where library with same name exists)
     (let [result (-> th/*system*
@@ -899,9 +1303,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Import in team 2 (no library exists)
     (let [result (-> th/*system*
@@ -924,9 +1328,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Import in team 2 (library with different name)
     (let [result (-> th/*system*
@@ -955,9 +1359,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Import in team 2 (library exists but not shared)
     (let [result (-> th/*system*
@@ -980,9 +1384,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Delete the library in team 2
     (db/update! th/*system* :file
@@ -1032,9 +1436,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete original libraries
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib1)})
@@ -1093,9 +1497,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete both libraries
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib1)})
@@ -1145,9 +1549,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete original libraries
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib1)})
@@ -1213,9 +1617,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete original libraries
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib1)})
@@ -1279,9 +1683,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file1) (:id file2)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file1) (:id file2)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete original library and recreate
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib)})
@@ -1325,9 +1729,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file1) (:id file2)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file1) (:id file2)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete original library and recreate
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib)})
@@ -1377,9 +1781,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file1) (:id file2)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file1) (:id file2)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete original libraries and recreate
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib-icons)})
@@ -1436,9 +1840,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Import as viewer (no edit permission on library)
       (let [result (-> th/*system*
@@ -1478,9 +1882,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Import as editor (has edit permission)
       (let [result (-> th/*system*
@@ -1518,9 +1922,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Verify slug in manifest
       (let [manifest (v3/get-manifest th/*system* output)
@@ -1545,9 +1949,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Library with empty slug should be dropped from external-libraries
       (let [manifest (v3/get-manifest th/*system* output)
@@ -1565,9 +1969,9 @@
     ;; Export file with no libraries
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{(:id file)})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Manifest should have no external-libraries
     (let [manifest (v3/get-manifest th/*system* output)]
@@ -1599,9 +2003,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete original and create with different case
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib)})
@@ -1636,9 +2040,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Re-import in same team
     (let [result (-> th/*system*
@@ -1674,9 +2078,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Import in team 2 (no library exists)
     (let [result (-> th/*system*
@@ -1726,9 +2130,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete and recreate library
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib)})
@@ -1781,9 +2185,9 @@
     (let [output (tmp/tempfile :suffix ".zip")]
       (v3/export-files!
        (-> th/*system*
-           (assoc ::bfc/ids #{(:id file)})
-           (assoc ::bfc/export-type :link-later))
-       (io/output-stream output))
+           (assoc ::bfc/file-ids #{(:id file)})
+           (assoc ::bfc/export-type :link-later)
+           (assoc ::bfc/output (io/output-stream output))))
 
       ;; Delete and create two libraries with same name
       (db/update! th/*system* :file {:deleted-at (ct/now)} {:id (:id lib)})
@@ -1839,9 +2243,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Re-import in same team
     (let [result (-> th/*system*
@@ -1891,9 +2295,9 @@
     ;; Export file with link-later
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type :link-later))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type :link-later)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Create a viewer profile (no edit permission on the library)
     (let [viewer (th/create-profile* th/*system* 2 {})
@@ -1941,10 +2345,10 @@
     ;; type should win
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
+         (assoc ::bfc/file-ids #{file-id})
          (assoc ::bfc/export-type :link-later)
-         (assoc ::bfc/include-libraries true))
-     (io/output-stream output))
+         (assoc ::bfc/include-libraries true)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Verify manifest has external-libraries (only produced by link-later)
     (let [manifest (v3/get-manifest th/*system* output)
@@ -1961,9 +2365,9 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
-         (assoc ::bfc/export-type :detach-libraries))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{(:id file)})
+         (assoc ::bfc/export-type :detach-libraries)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Import with max-zip-entries=1 — the exported ZIP has more entries
     (let [cfg (-> th/*system*
@@ -2018,9 +2422,9 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
-         (assoc ::bfc/export-type :detach-libraries))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{(:id file)})
+         (assoc ::bfc/export-type :detach-libraries)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; Import with max-binary-entry-size=1 — the media object will exceed this
     (let [cfg (-> th/*system*
@@ -2106,9 +2510,9 @@
   (let [output (tmp/tempfile :suffix ".zip")]
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{file-id})
-         (assoc ::bfc/export-type export-type))
-     (io/output-stream output))
+         (assoc ::bfc/file-ids #{file-id})
+         (assoc ::bfc/export-type export-type)
+         (assoc ::bfc/output (io/output-stream output))))
     (-> th/*system*
         (assoc ::bfc/project-id (:default-project-id profile))
         (assoc ::bfc/profile-id (:id profile))
@@ -2209,9 +2613,9 @@
         {:keys [id page-id board-id clip-id fmo sobject]} (prepare-file-with-clip! profile)
         output  (tmp/tempfile :suffix ".zip")
         _       (v3/export-files! (-> th/*system*
-                                      (assoc ::bfc/ids #{id})
-                                      (assoc ::bfc/export-type :detach-libraries))
-                                  (io/output-stream output))
+                                      (assoc ::bfc/file-ids #{id})
+                                      (assoc ::bfc/export-type :detach-libraries)
+                                      (assoc ::bfc/output (io/output-stream output))))
         entries (with-open [zip (java.util.zip.ZipFile. (str output))]
                   (into #{} (map #(.getName ^java.util.zip.ZipEntry %)) (enumeration-seq (.entries zip))))
         result  (-> th/*system*
@@ -2320,10 +2724,10 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
+         (assoc ::bfc/file-ids #{(:id file)})
          (assoc ::bfc/embed-assets false)
-         (assoc ::bfc/include-libraries false))
-     (io/output-stream exported))
+         (assoc ::bfc/include-libraries false)
+         (assoc ::bfc/output (io/output-stream exported))))
 
     (let [bombed (tmp/tempfile :suffix ".zip")]
       (replace-zip-entry! exported bombed
@@ -2366,10 +2770,10 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
+         (assoc ::bfc/file-ids #{(:id file)})
          (assoc ::bfc/embed-assets false)
-         (assoc ::bfc/include-libraries false))
-     (io/output-stream output))
+         (assoc ::bfc/include-libraries false)
+         (assoc ::bfc/output (io/output-stream output))))
 
     (let [cfg (-> th/*system*
                   (assoc ::bfc/project-id (:default-project-id profile))
@@ -2413,10 +2817,10 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
+         (assoc ::bfc/file-ids #{(:id file)})
          (assoc ::bfc/embed-assets false)
-         (assoc ::bfc/include-libraries false))
-     (io/output-stream exported))
+         (assoc ::bfc/include-libraries false)
+         (assoc ::bfc/output (io/output-stream exported))))
 
     (let [sizes      (text-entries-sizes exported)
           max-single (apply max 0 sizes)
@@ -2466,24 +2870,28 @@
       (t/is (= :validation (:type out)))
       (t/is (= :max-file-size-reached (:code out))))))
 
-(t/deftest import-configures-finite-transaction-idle-timeout
-  ;; The binfile import transaction must set a finite ceiling for
-  ;; idle_in_transaction_session_timeout (20 min) instead of disabling
-  ;; it entirely: a stalled import must not retain a pool connection
-  ;; without any upper bound. The ceiling must be scoped with SET
-  ;; LOCAL: once the transaction ends, the pool session default must
-  ;; be restored for subsequent transactions.
-  (let [pg-setting-sql ["SELECT setting FROM pg_settings WHERE name = 'idle_in_transaction_session_timeout'"]
-        in-tx  (db/tx-run! th/*system*
-                           (fn [cfg]
-                             (bfc/configure-database-timeouts! cfg)
-                             (:setting (db/exec-one! cfg pg-setting-sql))))
-        ;; SET LOCAL must not leak past the transaction boundary
-        after  (db/tx-run! th/*system*
-                           (fn [cfg]
-                             (:setting (db/exec-one! cfg pg-setting-sql))))]
-    (t/is (= "1200000" in-tx))
-    (t/is (= "300000" after))))
+(def ^:private sql:current-idle-timeout
+  "SELECT current_setting('idle_in_transaction_session_timeout')::interval
+          = interval '30 minutes' AS ok")
+
+(t/deftest binfile-transactions-use-a-finite-idle-timeout
+  ;; The binfile import and export transactions must set a finite
+  ;; ceiling for idle_in_transaction_session_timeout (30 min) instead
+  ;; of disabling it entirely: a stalled transaction must not retain a
+  ;; pool connection without any upper bound. The ceiling is scoped
+  ;; with SET LOCAL: once the transaction ends, the pool session
+  ;; default is restored for subsequent transactions.
+  (db/tx-run! th/*system*
+              (fn [{::db/keys [conn] :as cfg}]
+                (t/testing "export transaction"
+                  (bfc/set-transaction-idle-timeout cfg)
+                  (t/is (true? (-> (db/exec-one! conn [sql:current-idle-timeout])
+                                   :ok))))
+
+                (t/testing "import transaction"
+                  (bfc/configure-import-transaction cfg)
+                  (t/is (true? (-> (db/exec-one! conn [sql:current-idle-timeout])
+                                   :ok)))))))
 
 (def ^:private index-test-file-id "22222222-2222-2222-2222-222222222222")
 (def ^:private index-test-page-id "44444444-4444-4444-4444-444444444444")
@@ -2607,10 +3015,10 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id simple) (:id svg)})
+         (assoc ::bfc/file-ids #{(:id simple) (:id svg)})
          (assoc ::bfc/embed-assets false)
-         (assoc ::bfc/include-libraries false))
-     (io/output-stream output))
+         (assoc ::bfc/include-libraries false)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; import returns the imported file ids plus the library link
     ;; resolution; the test only needs the ids
@@ -2686,10 +3094,10 @@
 
     (v3/export-files!
      (-> th/*system*
-         (assoc ::bfc/ids #{(:id file)})
+         (assoc ::bfc/file-ids #{(:id file)})
          (assoc ::bfc/embed-assets false)
-         (assoc ::bfc/include-libraries false))
-     (io/output-stream output))
+         (assoc ::bfc/include-libraries false)
+         (assoc ::bfc/output (io/output-stream output))))
 
     ;; import returns the imported file ids plus the library link
     ;; resolution; the test only needs the ids
@@ -2715,3 +3123,15 @@
         (t/is (= (str (first result) "/" thumb-page-id "/" thumb-frame-id "/" thumb-tag)
                  (:object-id thumb)))
         (t/is (some? (:media-id thumb)))))))
+
+(t/deftest get-file-without-data-rejects-locks
+  ;; Locking is incompatible with `load-data? false`: the guard fires
+  ;; before any query, so no DB row is needed. Regression test for the
+  ;; `lock-for-share?`/`lock-for-share?` typo that left `lock-for-update?`
+  ;; unchecked. NOTE: the guard is an unconditional `when`/`throw` in
+  ;; `get-file*` (not an `assert`), so this test is not flag-dependent:
+  ;; it behaves the same with or without `enable-backend-asserts`.
+  (doseq [opt [:lock-for-share? :lock-for-update? :skip-locked?]]
+    (t/is (thrown? IllegalArgumentException
+                   (bfc/get-file th/*system* (uuid/random)
+                                 :load-data? false opt true)))))

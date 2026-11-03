@@ -10,6 +10,7 @@
    [app.common.geom.point :as gpt]
    [app.common.uuid :as uuid]
    [app.main.refs :as refs]
+   [app.main.store :as st]
    [cljs.test :as t :include-macros true]))
 
 (def ^:private resolved-uri? @#'refs/resolved-uri?)
@@ -70,3 +71,23 @@
       (t/is (nil? @(refs/workspace-wasm-modifiers-of #{})) "none for no shapes")
       (finally
         (reset! refs/workspace-wasm-modifiers before)))))
+
+(t/deftest thumbnail-ref-ignores-unrelated-state-changes
+  ;; A thumbnail loaded from the server keeps a media id as :uri, and
+  ;; the ref resolves it to a new map on each read. Subscribers (root
+  ;; frames, assets) must not re-render on every unrelated store change.
+  (let [object-id (str (uuid/next))
+        ref       (refs/workspace-thumbnail-by-id object-id)
+        calls     (atom 0)]
+    (swap! st/state assoc-in [:thumbnails object-id] {:uri (uuid/next) :rendered-at nil})
+    (add-watch ref ::probe (fn [_ _ _ _] (swap! calls inc)))
+    (try
+      (swap! st/state assoc ::probe (uuid/next))
+      (t/is (zero? @calls) "unrelated change does not notify")
+      (swap! st/state assoc-in [:thumbnails object-id :uri] (uuid/next))
+      (t/is (= 1 @calls) "a new thumbnail uri notifies")
+      (finally
+        (remove-watch ref ::probe)
+        (swap! st/state #(-> %
+                             (dissoc ::probe)
+                             (update :thumbnails dissoc object-id)))))))

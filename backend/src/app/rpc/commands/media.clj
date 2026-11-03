@@ -57,15 +57,19 @@
                 :code :media-type-not-allowed
                 :hint "audio is not enabled on this server"))
     (-> content
-        (media.v/validate-media-type!)
-        (media.v/validate-media-size!))))
+        (media.v/check-media-type)
+        (media.v/check-media-size))))
 
-(defn- check-media-quote!
-  [cfg profile-id team content]
-  (quotes/check! cfg {::quotes/id        ::quotes/media-storage-bytes-per-team
-                      ::quotes/profile-id profile-id
-                      ::quotes/team-id    (:id team)
-                      ::quotes/incr       (:size content)}))
+;; TEMPORARILY DISABLED (2026-10-19, upstream): the media-storage-bytes-per-team
+;; quote check of an upload performs a full SUM over storage_object (3-12s in
+;; prod on a 3.5TB DB). Disabled until a cheaper approximation lands; the
+;; uploads below leave it out until then.
+;; TODO: re-enable with the new implementation, for images and audio alike,
+;; with a test of an upload over the quote (as the chunked assemble had):
+;; (quotes/check! cfg {::quotes/id        ::quotes/media-storage-bytes-per-team
+;;                     ::quotes/profile-id profile-id
+;;                     ::quotes/team-id    (:id team)
+;;                     ::quotes/incr       (:size content)})
 
 (def ^:private schema:upload-file-media-object
   [:map {:title "upload-file-media-object" :closed true}
@@ -78,15 +82,17 @@
   {::doc/added "1.17"
    ::doc/changes [["2.19" "The optional :id param is rejected with a params-validation error; the server always generates the identifier"]]
    ::sm/params schema:upload-file-media-object
+   ::rpc/multipart-only-params [:content]
    ::climit/id [[:process-image/by-profile ::rpc/profile-id]
                 [:process-image/global]]}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id file-id content] :as params}]
   (files/check-edition-permissions! pool profile-id file-id)
 
+  (media.v/check-upload-path content)
+
   (let [team    (teams/get-team-for-file pool file-id)
         content (validate-content! team content)
         params  (assoc params :content content)]
-    (check-media-quote! cfg profile-id team content)
 
     (db/run! cfg (fn [{:keys [::db/conn] :as cfg}]
                    ;; We get the minimal file for proper checking if
@@ -104,6 +110,7 @@
                        {::audit/replace-props
                         {:name (:name params)
                          :file-id file-id
+                         :team-id (:id team)
                          :is-local (:is-local params)
                          :size (:size content)
                          :mtype (:mtype content)}}))))))
@@ -267,6 +274,8 @@
 (sv/defmethod ::create-file-media-object-from-url
   {::doc/added "1.17"
    ::doc/changes [["2.19" "The optional :id param is rejected with a params-validation error; the server always generates the identifier"]]
+   ::climit/id [[:process-image/by-profile ::rpc/profile-id]
+                [:process-image/global]]
    ::sm/params schema:create-file-media-object-from-url}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id file-id] :as params}]
   (files/check-edition-permissions! pool profile-id file-id)
@@ -290,16 +299,7 @@
                     (assoc :from-url? true)
                     (assoc :content content)
                     (assoc :name (d/nilv name "unknown")))]
-
-    ;; NOTE: we use the climit here in a dynamic invocation because we
-    ;; don't want saturate the process-image limit with IO (download
-    ;; of external image)
-
-    (-> cfg
-        (assoc ::climit/id [[:process-image/by-profile (:profile-id params)]
-                            [:process-image/global]])
-        (assoc ::climit/label "create-file-media-object-from-url")
-        (climit/invoke! #(db/run! %1 create-file-media-object %2) params))))
+    (db/run! cfg create-file-media-object params)))
 
 
 ;; --- Clone File Media object (Upload and create from url)
@@ -407,9 +407,11 @@
 (sv/defmethod ::upload-chunk
   {::doc/added "2.17"
    ::sm/params schema:upload-chunk
+   ::rpc/multipart-only-params [:content]
    ::sm/result schema:upload-chunk-result}
   [{:keys [::db/pool] :as cfg}
    {:keys [::rpc/profile-id session-id index content] :as _params}]
+  (media.v/check-upload-path content)
   (let [session (db/tx-run! cfg check-upload-chunk-slot session-id profile-id index content)]
     (l/trc :hint "upload-chunk"
            :session-id session-id
@@ -612,7 +614,6 @@
                                        (assoc :filename (str "upload:" name))
                                        (assoc :mtype mtype))
                                    (validate-content! team))
-                      _       (check-media-quote! cfg profile-id team content)
                       mobj    (create-file-media-object cfg (assoc params
                                                                    :from-chunks? true
                                                                    :content content))]

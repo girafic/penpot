@@ -3499,7 +3499,8 @@ export interface LibraryComponent extends LibraryElement {
   remove(): void;
 
   /**
-   * Restores this component if it has been deleted, including its main instance.
+   * Restores this component if it has been deleted, including its main instance,
+   * in the current file's library.
    * Leaves the current page, selection, zoom, and viewport unchanged.
    * Requires `library:write` permission. Does nothing if already restored.
    *
@@ -3599,6 +3600,32 @@ export type LibraryContext = {
    * ```
    */
   readonly connected: Library[];
+
+  /**
+   * The library that supplies tokens to the current file.
+   * Defaults to the local library.
+   *
+   * Assign a connected library that has its own tokens to use it as the
+   * source. This copies its active themes and sets to the current file.
+   * Assign `local` to use the file's own tokens again. Themes and sets
+   * that don't exist in the local tokens are deactivated.
+   * Setting the source requires `content:write` permission and supports undo.
+   * Assigning the current source again keeps the active themes and sets.
+   *
+   * The catalog of an external `tokensSource` is read-only and reports the
+   * library's own active themes and sets. To change which ones are active
+   * in the current file, use `penpot.library.local.tokens`, which lists the
+   * tokens of the source.
+   *
+   * @example
+   * ```js
+   * const source = await penpot.library.connectLibrary('library-id');
+   * penpot.library.tokensSource = source;
+   * // Restore local tokens:
+   * penpot.library.tokensSource = penpot.library.local;
+   * ```
+   */
+  tokensSource: Library;
 
   /**
    * Retrieves a summary of available libraries that can be connected to.
@@ -7476,6 +7503,11 @@ export interface ShapeBase extends PluginData {
    * several tokens with the same name in different sets, the actual token applied
    * and the value set to the attributes will depend on which sets are active
    * (and will change if different sets or themes are activated later).
+   *
+   * NOTE that the per-side stroke width properties (`strokeWidthTop`,
+   * `strokeWidthRight`, `strokeWidthBottom`, `strokeWidthLeft`) are only valid on
+   * boards and rectangles. Applying one to any other shape raises a validation
+   * error. The uniform `strokeWidth` property is accepted on every shape.
    */
   applyToken(token: Token, properties?: TokenProperty[]): void;
 
@@ -7980,6 +8012,10 @@ export interface TokenBase {
    * several tokens with the same name in different sets, the actual token applied
    * and the value set to the attributes will depend on which sets are active
    * (and will change if different sets or themes are activated later).
+   *
+   * NOTE that the per-side stroke width properties are only valid on boards and
+   * rectangles; applying one to any other shape raises a validation error. The
+   * uniform `strokeWidth` property is accepted on every shape.
    */
   applyToShapes(shapes: Shape[], properties?: TokenProperty[]): void;
 
@@ -8753,10 +8789,12 @@ export type Token =
  */
 export interface TokenCatalog {
   /**
-   * Returns true if the tokens can be edited (it can't
-   * if the tokens of the file are in an external library).
-   * Note that even in this case, Themes and Sets status still
-   * can be changed and tokens can be applied to shapes.
+   * Returns true if the tokens in this catalog can be edited. Only the
+   * catalog of the current file (`penpot.library.local.tokens`) can be
+   * edited, and only when the file is its own tokens source.
+   * When the tokens come from an external library, the local catalog
+   * can still change the active themes and sets, and its tokens can
+   * still be applied to shapes.
    */
   readonly isEditableTokens: boolean;
 
@@ -8830,7 +8868,8 @@ export interface TokenSet {
   name: string;
 
   /**
-   * Indicates if the set is currently active.
+   * Indicates if the set is active in the file that owns this catalog.
+   * Only sets from `penpot.library.local.tokens` can be changed.
    */
   active: boolean;
 
@@ -8846,6 +8885,7 @@ export interface TokenSet {
 
   /**
    * Toggles the active status of this set.
+   * Only sets from `penpot.library.local.tokens` can be changed.
    */
   toggleActive(): void;
 
@@ -8930,12 +8970,14 @@ export interface TokenTheme {
   name: string;
 
   /**
-   * Indicates if the theme is currently active.
+   * Indicates if the theme is active in the file that owns this catalog.
+   * Only themes from `penpot.library.local.tokens` can be changed.
    */
   active: boolean;
 
   /**
    * Toggles the active status of this theme.
+   * Only themes from `penpot.library.local.tokens` can be changed.
    */
   toggleActive(): void;
 

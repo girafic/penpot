@@ -29,7 +29,6 @@
    [app.rpc.doc :as-alias doc]
    [app.rpc.quotes :as quotes]
    [app.rpc.retry :as rtry]
-   [app.util.pointer-map :as pmap]
    [app.util.services :as sv]
    [clojure.set :as set]
    [cuerdas.core :as str]))
@@ -170,7 +169,7 @@
 (defn- get-file
   "A specialized version of get-file for comments module."
   [cfg file-id page-id]
-  (binding [pmap/*load-fn* (partial feat.fdata/load-pointer cfg file-id)]
+  (feat.fdata/with-pointers cfg file-id
     (let [file (bfc/get-file cfg file-id)
           data (get file :data)]
       (-> file
@@ -492,7 +491,7 @@
     (let [params (assoc params ::file file)
           thread (db/tx-run! cfg create-comment-thread params)]
 
-      (vary-meta thread assoc ::audit/props thread))))
+      (vary-meta thread assoc ::audit/props (assoc thread :team-id team-id)))))
 
 (defn- create-comment-thread
   [{:keys [::db/conn] :as cfg}
@@ -657,7 +656,7 @@
 
       (send-comment-emails! cfg profile comment thread file)
 
-      (vary-meta comment assoc ::audit/props comment))))
+      (vary-meta comment assoc ::audit/props (assoc comment :team-id team-id)))))
 
 ;; --- COMMAND: Update Comment
 

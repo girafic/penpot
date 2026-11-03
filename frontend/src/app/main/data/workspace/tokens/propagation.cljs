@@ -225,9 +225,7 @@
   with tokenscript or with Style Dictionary."
   [tokens-tree]
   (if (contains? cf/flags :tokenscript)
-    (rx/of (-> (ts/resolve-tokens tokens-tree)
-               (d/update-vals #(update % :resolved-value
-                                       (partial ts/resolved-value->penpot-unit (:type %))))))
+    (rx/of (ts/resolve-tokens tokens-tree))
     (sd/resolve-tokens tokens-tree)))
 
 (defn- commit-token-timelines
