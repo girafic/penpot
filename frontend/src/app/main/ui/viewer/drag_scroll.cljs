@@ -178,7 +178,7 @@
     (when (> (max dx dy) threshold)
       (if (> dx dy) :x :y))))
 
-(defn claim!
+(defn claim-press
   "Take the press going on from the screen, for a board in it that
   scrolls its content (see `app.main.ui.viewer.container-scroll`): the
   screen leaves it from the move that claims it on, and it counts as
@@ -188,7 +188,7 @@
     (swap! state* assoc :claimed true :dragged? true)))
 
 (defn claimed?
-  "Whether a board took the press going on (see `claim!`)."
+  "Whether a board took the press going on (see `claim-press`)."
   []
   (true? (:claimed @state*)))
 
@@ -295,7 +295,7 @@
               (fn [event]
                 (when-let [gesture @gesture*]
                   (cond
-                    ;; a board in the screen took it (see `claim!`)
+                    ;; a board in the screen took it (see `claim-press`)
                     (claimed?)
                     (do (vreset! gesture* nil)
                         (set! (.. section -style -cursor) ""))

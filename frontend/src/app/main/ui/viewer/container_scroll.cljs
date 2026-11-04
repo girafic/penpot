@@ -16,7 +16,7 @@
 
   On the screen of a touch device a press that drags along an axis of
   the innermost container under it that takes it scrolls that one: it
-  takes the press from the screen (see `dds/claim!`) before the screen
+  takes the press from the screen (see `dds/claim-press`) before the screen
   moves, and keeps it to the end."
   (:require
    [app.common.data :as d]
@@ -151,15 +151,15 @@
               rest*  (volatile! nil)
               frame* (volatile! nil)
 
-              stop!
+              stop
               (fn []
                 (some-> @frame* js/cancelAnimationFrame)
                 (vreset! frame* nil))
 
               ;; the rubber band back to the end, once the wheel rests
-              spring!
+              spring
               (fn [screen-id id offset [x0 y0]]
-                (stop!)
+                (stop)
                 (let [t0 (js/performance.now)]
                   (letfn [(step [now]
                             (let [t (- now t0)
@@ -170,9 +170,9 @@
                               (vreset! frame* (when-not done? (js/requestAnimationFrame step)))))]
                     (vreset! frame* (js/requestAnimationFrame step)))))
 
-              scroll!
+              scroll-by
               (fn [objects screen-id id axes dx dy]
-                (stop!)
+                (stop)
                 (some-> @rest* js/clearTimeout)
                 (let [frame   (get objects id)
                       range   (dvs/scroll-range objects frame axes)
@@ -192,7 +192,7 @@
                   (when (or (not (zero? px)) (not (zero? py)))
                     (vreset! rest* (js/setTimeout (fn []
                                                     (vreset! past* [0 0])
-                                                    (spring! screen-id id offset shown))
+                                                    (spring screen-id id offset shown))
                                                   dds/wheel-rest-ms)))))
 
               on-wheel
@@ -220,7 +220,7 @@
                       (.preventDefault event)
                       (.stopPropagation event))
                     (when-let [id (:id target)]
-                      (scroll! objects screen-id id (:axes target) dx dy)))))]
+                      (scroll-by objects screen-id id (:axes target) dx dy)))))]
 
           (letfn [;; where the pointer of `event` is in the view box of
                   ;; the hotspots the press maps through
@@ -229,7 +229,7 @@
 
                   ;; each axis it scrolls along follows the pointer as the
                   ;; screen does (see `dds/move`), past an end as rubber
-                  (follow! [drag ^js event]
+                  (follow [drag ^js event]
                     (let [point    (drag-point drag event)
                           t        (.-timeStamp event)
                           gestures (reduce-kv (fn [gestures axis gesture]
@@ -246,16 +246,16 @@
                                                   [axis [scroll (- offset)]])))
                                          gestures)]
                       (vreset! drag* drag)
-                      (emit! drag shown)))
+                      (emit drag shown)))
 
-                  (emit! [drag shown]
+                  (emit [drag shown]
                     (let [[ox ox-past] (get shown :x [(get-in drag [:origin 0]) 0])
                           [oy oy-past] (get shown :y [(get-in drag [:origin 1]) 0])]
                       (st/emit! (dv/scroll-container (:screen-id drag) (:id drag) [ox oy] [ox-past oy-past]))))
 
                   ;; let go: past an end it springs back, else it coasts on
                   ;; at its speed and bounces off an end it runs into
-                  (release! [drag ^js event]
+                  (release [drag ^js event]
                     (let [t     (.-timeStamp event)
                           state (into {}
                                       (map (fn [[axis gesture]]
@@ -271,7 +271,7 @@
                                       (:gestures drag))
                           state (volatile! state)
                           last* (volatile! 0)]
-                      (stop!)
+                      (stop)
                       (let [t0 (js/performance.now)]
                         (letfn [(step-axis [axis {:keys [mode offset v p0 since bv] :as s} t dt]
                                   (case mode
@@ -296,29 +296,29 @@
                                                 (assoc s :past 0 :mode :rest)
                                                 (assoc s :past p)))
                                     s))
-                                (frame! [now]
+                                (tick [now]
                                   (let [t  (- now t0)
                                         dt (- t @last*)]
                                     (vreset! last* t)
                                     (vswap! state (fn [state]
                                                     (into {} (map (fn [[axis s]] [axis (step-axis axis s t dt)])) state)))
-                                    (emit! drag (update-vals @state (juxt :offset :past)))
+                                    (emit drag (update-vals @state (juxt :offset :past)))
                                     (vreset! frame* (when (some #(not= :rest (:mode %)) (vals @state))
-                                                      (js/requestAnimationFrame frame!)))))]
+                                                      (js/requestAnimationFrame tick)))))]
                           (when (some #(not= :rest (:mode %)) (vals @state))
-                            (vreset! frame* (js/requestAnimationFrame frame!)))))))
+                            (vreset! frame* (js/requestAnimationFrame tick)))))))
 
                   (on-drag-move [^js event]
                     (when-let [drag @drag*]
                       (if (some? (:id drag))
-                        (follow! drag event)
+                        (follow drag event)
                         (when-let [axis (dds/drag-axis (:client drag) [(.-clientX event) (.-clientY event)])]
                           (let [{:keys [objects]} (mf/ref-val context-ref)
                                 hit (d/seek #(dvs/takes-gesture? (axes-of objects (:view drag) (:id %)) axis)
                                             (:under drag))]
                             (if (nil? hit)
                               ;; not one of its containers': the screen's
-                              (end-drag!)
+                              (end-drag)
                               (let [id      (:id hit)
                                     frame   (get objects id)
                                     axes    (axes-of objects (:view drag) id)
@@ -337,20 +337,20 @@
                                                                (assoc :x (dds/start (:x start) (first origin) (.-timeStamp down)))
                                                                (contains? axes :y)
                                                                (assoc :y (dds/start (:y start) (second origin) (.-timeStamp down)))))]
-                                (dds/claim!)
+                                (dds/claim-press)
                                 (set! (.. section -style -cursor) "grabbing")
                                 (vreset! drag* drag)
-                                (follow! drag event))))))))
+                                (follow drag event))))))))
 
                   (on-drag-up [event]
                     (let [drag @drag*]
-                      (end-drag!)
+                      (end-drag)
                       (when (some? (:id drag))
                         (set! (.. section -style -cursor) "")
                         (dds/swallow-click!)
-                        (release! drag event))))
+                        (release drag event))))
 
-                  (end-drag! []
+                  (end-drag []
                     (vreset! drag* nil)
                     (.removeEventListener js/window "pointermove" on-drag-move true)
                     (.removeEventListener js/window "pointerup" on-drag-up true)
@@ -358,7 +358,7 @@
 
                   ;; in the capture phase: its moves come before the
                   ;; screen's, which leaves them once a container claims
-                  ;; the press (see `dds/claim!`)
+                  ;; the press (see `dds/claim-press`)
                   (on-down [^js event]
                     (when (and (zero? (.-button event))
                                (not= "touch" (.-pointerType event))
@@ -367,7 +367,7 @@
                             view  (view-of event (mf/ref-val viewport-ref) (:id frame) size fixed-drop overlays)
                             under (containers-under objects (:id frame) view event)]
                         (when (seq under)
-                          (stop!)
+                          (stop)
                           (vreset! drag* {:screen-id (:id frame)
                                           :view view
                                           :under under
@@ -382,6 +382,6 @@
             (fn []
               (.removeEventListener section "wheel" on-wheel #js {:capture true :passive false})
               (.removeEventListener section "pointerdown" on-down true)
-              (end-drag!)
+              (end-drag)
               (some-> @rest* js/clearTimeout)
-              (stop!))))))))
+              (stop))))))))

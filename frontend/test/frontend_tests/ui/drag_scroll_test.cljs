@@ -88,5 +88,5 @@
   (t/is (= :x (dds/drag-axis [100 100] [80 104])) "a chip row dragged sideways"))
 
 (t/deftest a-board-of-the-screen-takes-the-press-from-it
-  (t/is (nil? (dds/claim!)) "without a touch device, nothing to take")
+  (t/is (nil? (dds/claim-press)) "without a touch device, nothing to take")
   (t/is (not (dds/claimed?))))
