@@ -139,16 +139,20 @@
   (wasm.api/clear-render-include-filter!)
   (when (seq include-ids)
     (wasm.api/set-render-include-filter! include-ids))
+  ;; the board under the layers fixed when scrolling: the pass below draws
+  ;; its fills and shadows, here they would cover what scrolls
   (doseq [id clear-fills-ids]
     (wselect/use-shape id)
-    (wasm.api/clear-shape-fills!)))
+    (wasm.api/clear-shape-fills!)
+    (wasm.api/set-shape-shadows [])))
 
 (defn- viewer-restore-layer-mask!
   [page-objects clear-fills-ids]
   (wasm.api/clear-render-include-filter!)
   (doseq [id clear-fills-ids]
     (wselect/use-shape id)
-    (wasm.api/set-shape-fills id (get-in page-objects [id :fills] []) false)))
+    (wasm.api/set-shape-fills id (get-in page-objects [id :fills] []) false)
+    (wasm.api/set-shape-shadows (get-in page-objects [id :shadow] []))))
 
 (defn- viewer-do-render!
   "Render the board `object-id` into `os-canvas` and blit it onto
