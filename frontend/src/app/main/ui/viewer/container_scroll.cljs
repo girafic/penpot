@@ -196,16 +196,86 @@
                   (drag-point [drag event]
                     (svg-point (:svg drag) event))
 
-                  (follow! [drag event]
-                    (let [{:keys [objects]} (mf/ref-val context-ref)
-                          {:keys [screen-id id axes start origin]} drag
-                          frame (get objects id)
-                          range (dvs/scroll-range objects frame axes)
-                          point (drag-point drag event)
-                          [ox oy] origin
-                          dx    (if (contains? axes :x) (- (:x start) (:x point)) 0)
-                          dy    (if (contains? axes :y) (- (:y start) (:y point)) 0)]
-                      (st/emit! (dv/scroll-container screen-id id (dvs/clamp-offset range [(+ ox dx) (+ oy dy)]) [0 0]))))
+                  ;; each axis it scrolls along follows the pointer as the
+                  ;; screen does (see `dds/move`), past an end as rubber
+                  (follow! [drag ^js event]
+                    (let [point    (drag-point drag event)
+                          t        (.-timeStamp event)
+                          gestures (reduce-kv (fn [gestures axis gesture]
+                                                (assoc gestures axis (dds/move gesture (get point axis) t)))
+                                              {}
+                                              (:gestures drag))
+                          drag     (assoc drag :gestures gestures)
+                          shown    (into {}
+                                         (map (fn [[axis gesture]]
+                                                (let [{:keys [scroll offset]}
+                                                      (dds/split-top (or (:top gesture) (:top0 gesture))
+                                                                     (get-in drag [:range axis])
+                                                                     (get-in drag [:size axis]))]
+                                                  [axis [scroll (- offset)]])))
+                                         gestures)]
+                      (vreset! drag* drag)
+                      (emit! drag shown)))
+
+                  (emit! [drag shown]
+                    (let [[ox ox-past] (get shown :x [(get-in drag [:origin 0]) 0])
+                          [oy oy-past] (get shown :y [(get-in drag [:origin 1]) 0])]
+                      (st/emit! (dv/scroll-container (:screen-id drag) (:id drag) [ox oy] [ox-past oy-past]))))
+
+                  ;; let go: past an end it springs back, else it coasts on
+                  ;; at its speed and bounces off an end it runs into
+                  (release! [drag ^js event]
+                    (let [t     (.-timeStamp event)
+                          state (into {}
+                                      (map (fn [[axis gesture]]
+                                             (let [{:keys [scroll offset]}
+                                                   (dds/split-top (or (:top gesture) (:top0 gesture))
+                                                                  (get-in drag [:range axis])
+                                                                  (get-in drag [:size axis]))
+                                                   v (dds/speed gesture t)]
+                                               [axis {:offset scroll :past (- offset) :p0 (- offset) :v v :since 0
+                                                      :mode (cond (not (zero? offset)) :spring
+                                                                  (> (mth/abs v) dds/min-speed) :coast
+                                                                  :else :rest)}])))
+                                      (:gestures drag))
+                          state (volatile! state)
+                          last* (volatile! 0)]
+                      (stop!)
+                      (let [t0 (js/performance.now)]
+                        (letfn [(step-axis [axis {:keys [mode offset v p0 since bv] :as s} t dt]
+                                  (case mode
+                                    :spring (let [p (dds/spring-back p0 (- t since))]
+                                              (if (< (mth/abs p) 0.5)
+                                                (assoc s :past 0 :mode :rest)
+                                                (assoc s :past p)))
+                                    :coast  (let [[dist v] (dds/coast v dt)
+                                                  limit    (get-in drag [:range axis])
+                                                  o        (+ offset dist)]
+                                              (cond
+                                                (or (neg? o) (> o limit))
+                                                (assoc s :offset (mth/clamp o 0 limit) :mode :bounce :bv v :since t)
+
+                                                (< (mth/abs v) dds/min-speed)
+                                                (assoc s :offset o :mode :rest)
+
+                                                :else
+                                                (assoc s :offset o :v v)))
+                                    :bounce (let [p (- (dds/bounce bv (- t since)))]
+                                              (if (and (> (- t since) (* 2 dds/spring-ms)) (< (mth/abs p) 0.5))
+                                                (assoc s :past 0 :mode :rest)
+                                                (assoc s :past p)))
+                                    s))
+                                (frame! [now]
+                                  (let [t  (- now t0)
+                                        dt (- t @last*)]
+                                    (vreset! last* t)
+                                    (vswap! state (fn [state]
+                                                    (into {} (map (fn [[axis s]] [axis (step-axis axis s t dt)])) state)))
+                                    (emit! drag (update-vals @state (juxt :offset :past)))
+                                    (vreset! frame* (when (some #(not= :rest (:mode %)) (vals @state))
+                                                      (js/requestAnimationFrame frame!)))))]
+                          (when (some #(not= :rest (:mode %)) (vals @state))
+                            (vreset! frame* (js/requestAnimationFrame frame!)))))))
 
                   (on-drag-move [^js event]
                     (when-let [drag @drag*]
@@ -218,25 +288,36 @@
                             (if (nil? hit)
                               ;; not one of its containers': the screen's
                               (end-drag!)
-                              (let [id     (:id hit)
-                                    frame  (get objects id)
-                                    axes   (dvs/container-axes objects frame)
-                                    origin (dvs/clamp-offset (dvs/scroll-range objects frame axes)
-                                                             (or (dm/get-in (shown-scroll (:screen-id drag)) [id :offset])
-                                                                 [0 0]))
-                                    drag   (assoc drag :id id :axes axes :svg (:svg hit) :origin origin
-                                                  :start (svg-point (:svg hit) (:down drag)))]
+                              (let [id      (:id hit)
+                                    frame   (get objects id)
+                                    axes    (dvs/container-axes objects frame)
+                                    [mx my] (dvs/scroll-range objects frame axes)
+                                    origin  (dvs/clamp-offset [mx my]
+                                                              (or (dm/get-in (shown-scroll (:screen-id drag)) [id :offset])
+                                                                  [0 0]))
+                                    {:keys [width height]} (:selrect frame)
+                                    down    ^js (:down drag)
+                                    start   (svg-point (:svg hit) down)
+                                    drag    (assoc drag :id id :svg (:svg hit) :origin origin
+                                                   :range {:x mx :y my}
+                                                   :size {:x width :y (or (dvs/screen-h frame) height)}
+                                                   :gestures (cond-> {}
+                                                               (contains? axes :x)
+                                                               (assoc :x (dds/start (:x start) (first origin) (.-timeStamp down)))
+                                                               (contains? axes :y)
+                                                               (assoc :y (dds/start (:y start) (second origin) (.-timeStamp down)))))]
                                 (dds/claim!)
                                 (set! (.. section -style -cursor) "grabbing")
                                 (vreset! drag* drag)
                                 (follow! drag event))))))))
 
-                  (on-drag-up [_]
+                  (on-drag-up [event]
                     (let [drag @drag*]
                       (end-drag!)
                       (when (some? (:id drag))
                         (set! (.. section -style -cursor) "")
-                        (dds/swallow-click!))))
+                        (dds/swallow-click!)
+                        (release! drag event))))
 
                   (end-drag! []
                     (vreset! drag* nil)

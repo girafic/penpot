@@ -29,7 +29,7 @@
   as long."
   325)
 
-(def ^:private min-speed
+(def min-speed
   "The speed, px/ms, a coast stops at."
   0.02)
 
@@ -37,7 +37,7 @@
   "How stiff the rubber is past an end: the less, the stiffer."
   0.55)
 
-(def ^:private spring-ms
+(def spring-ms
   "How fast, ms, the screen springs back to an end, and a bounce turns."
   90)
 
