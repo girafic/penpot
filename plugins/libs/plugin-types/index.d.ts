@@ -250,20 +250,30 @@ export interface Board extends ShapeBase {
   clipContent: boolean;
 
   /**
-   * How the board scrolls in the prototype (view mode). `"vertical"`
-   * scrolls through its content below its bottom edge: the board keeps
-   * its size in the design, its first screen, and its layers fixed when
-   * scrolling stay on screen. `"none"` (the default) scrolls only as far
-   * as the board is high. Only a board at the top of a page can scroll
-   * so.
+   * How the board scrolls in the prototype (view mode).
+   *
+   * A board at the top of a page (a screen) takes `"vertical"`: it
+   * scrolls through its content below its bottom edge, keeping its size
+   * in the design as its first screen, its layers fixed when scrolling
+   * staying on screen. `"horizontal"` and `"both"` are refused there (a
+   * screen that has one, moved out of a board, keeps it: `"both"` then
+   * scrolls vertically, `"horizontal"` not at all).
+   *
+   * A board inside another (a list, a chip row, a carousel, also inside
+   * an overlay) takes `"vertical"`, `"horizontal"` or `"both"`: it stays
+   * where it is and its content scrolls inside its box, which clips it,
+   * by the wheel, by dragging and by a finger; a layer fixed when
+   * scrolling in it stays while it scrolls. `"none"` (the default)
+   * scrolls nothing.
    *
    * @example
    * ```js
    * menu.resize(402, 874);
    * menu.scrollOverflow = "vertical";
+   * chips.scrollOverflow = "horizontal";
    * ```
    */
-  scrollOverflow: 'none' | 'vertical';
+  scrollOverflow: 'none' | 'vertical' | 'horizontal' | 'both';
 
   /**
    * When true the board will be displayed in the view mode
