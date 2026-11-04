@@ -853,6 +853,51 @@
     (update [_ state]
       (assoc-in state [:viewer-local :nav-scroll] scroll))))
 
+;; --- Scroll of containers
+;;
+;; Boards that scroll their content inside their box (Penpot Motion, see
+;; `app.main.data.viewer.scroll`) keep how far in `[:viewer-local
+;; :scroll]`: `{:board-id …, :containers {id {:offset [x y] :past [x y]}}}`,
+;; for the board shown. It changes at each step of a scroll, so it stays
+;; out of what renders the view mode (see `steady-local`).
+
+(defn steady-local
+  "The local state of the view mode `local` but what changes at each
+  frame: the playback of the animation and the scroll of the containers."
+  [local]
+  (dissoc local :timeline :scroll))
+
+(defn scroll-container
+  "Scroll the container `id` of the board `board-id` shown to `offset`
+  (`[x y]`, within its range) and `past` (`[x y]`, how far it gives past
+  an end). The containers of another board are forgotten."
+  [board-id id offset past]
+  (ptk/reify ::scroll-container
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:viewer-local :scroll]
+                 (fn [scroll]
+                   (-> (if (= board-id (:board-id scroll))
+                         scroll
+                         {:board-id board-id :containers {}})
+                       (assoc-in [:containers id] {:offset offset :past past})))))))
+
+(defn reset-container-scroll
+  "Every container at rest again (the board shown changed)."
+  []
+  (ptk/reify ::reset-container-scroll
+    ptk/UpdateEvent
+    (update [_ state]
+      (d/update-when state :viewer-local dissoc :scroll))))
+
+(defn- forget-container-scroll
+  "`state` with the containers in the board `frame-id` of the page shown
+  at rest: an overlay opens with its content where it is in the design."
+  [state frame-id]
+  (let [objects (:objects (shown-page state))]
+    (d/update-in-when state [:viewer-local :scroll :containers]
+                      #(apply dissoc % (cfh/get-children-ids-with-self objects frame-id)))))
+
 (defn reset-nav-scroll
   []
   (ptk/reify ::reset-nav-scroll
@@ -984,7 +1029,7 @@
 
 (defn- open-overlay*
   [state frame position snap-to close-click-outside background-overlay animation fixed-source?]
-  (cond-> state
+  (cond-> (forget-container-scroll state (:id frame))
     :always
     (update :viewer-overlays conj
             {:frame frame

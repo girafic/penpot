@@ -78,17 +78,28 @@
   (-> (gsh/transform-shape frame (ctm/change-size frame (dm/get-in frame [:selrect :width]) height))
       (assoc ::screen-h (dm/get-in frame [:selrect :height]))))
 
+(declare container-axes)
+
 (defn scroll-objects
   "`objects` of a page with each top board that scrolls vertically as
-  high as its content (see `scroll-height`)."
+  high as its content (see `scroll-height`), and every board that
+  scrolls its content clipping it (see `container-axes`; a top board
+  too, for when it shows as the root of an overlay)."
   [objects]
-  (reduce (fn [objects id]
-            (let [frame (get objects id)]
-              (if-let [height (and (cfh/frame-shape? frame) (scroll-height objects frame))]
-                (assoc objects id (extend-board frame height))
-                objects)))
-          objects
-          (dm/get-in objects [uuid/zero :shapes])))
+  (let [grown (reduce (fn [objects id]
+                        (let [frame (get objects id)]
+                          (if-let [height (and (cfh/frame-shape? frame) (scroll-height objects frame))]
+                            (assoc objects id (extend-board frame height))
+                            objects)))
+                      objects
+                      (dm/get-in objects [uuid/zero :shapes]))]
+    (reduce (fn [objects shape]
+              (if (and (true? (:show-content shape))
+                       (container-axes objects shape :overlay-root? true))
+                (assoc-in objects [(:id shape) :show-content] false)
+                objects))
+            grown
+            (filter :scroll-overflow (vals grown)))))
 
 (defn scroll-page
   "The page `page` of the view mode (see `app.main.data.viewer`) with its
@@ -158,6 +169,36 @@
   `scroll-range`)."
   [[max-x max-y] [x y]]
   [(mth/clamp x 0 max-x) (mth/clamp y 0 max-y)])
+
+(defn container-ids
+  "The ids of the containers in the board `root-id` of `objects`, it
+  too when it is the root of an overlay (`overlay-root?`, see
+  `container-axes`)."
+  [objects root-id & {:keys [overlay-root?]}]
+  (into #{}
+        (filter (fn [id]
+                  (some? (container-axes objects (get objects id)
+                                         :overlay-root? (and overlay-root? (= id root-id))))))
+        (cfh/get-children-ids-with-self objects root-id)))
+
+(defn view-offsets
+  "How far the containers of `scroll` (`{id {:offset :past}}`, see
+  `app.main.data.viewer/scroll-container`) show scrolled over the shown
+  `objects`: their offset clamped to their range there (a turned device
+  or a live change may have changed it), and past it the rubber band.
+  `overlay-root`, the id of the root of an overlay, scrolls as one (see
+  `container-axes`). `{id [x y]}`."
+  [objects scroll & {:keys [overlay-root]}]
+  (reduce-kv (fn [offsets id {:keys [offset past]}]
+               (let [frame (get objects id)
+                     axes  (container-axes objects frame :overlay-root? (= id overlay-root))]
+                 (if (and (some? axes) (some? offset))
+                   (let [[x y]   (clamp-offset (scroll-range objects frame axes) offset)
+                         [px py] (or past [0 0])]
+                     (assoc offsets id [(+ x px) (+ y py)]))
+                   offsets)))
+             {}
+             scroll))
 
 (defn scroll-shifts
   "How far each layer moves for the scroll `offsets` of containers

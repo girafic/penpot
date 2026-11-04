@@ -179,9 +179,10 @@
   (see `rwv/use-viewer-wasm-viewport!`); `is-snapshot` draws nothing on
   it (see `interactions/viewport*`). On a screen `fixed-drop` px lower
   than its first one, its layers fixed when scrolling stay where their
-  vertical constraint holds them (see `vpc/fixed-pins`)."
+  vertical constraint holds them (see `vpc/fixed-pins`). `scroll-ref`
+  holds the scroll of its containers (see `rwv/use-viewer-wasm-viewport!`)."
   {::mf/wrap [mf/memo]}
-  [{:keys [page frame base offset size delta is-fixed modifiers-ref is-snapshot fixed-drop]}]
+  [{:keys [page frame base offset size delta is-fixed modifiers-ref scroll-ref is-snapshot fixed-drop]}]
   (let [;; the same point each render, or the layers would render again
         delta     (mf/with-memo [delta] (or delta (gpt/point 0 0)))
         vbox      (:vbox size)
@@ -259,7 +260,7 @@
      page-id objects size scale frame-id
      not-fixed-wasm-ref fixed-wasm-ref
      not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids pins
-     delta modifiers-ref (true? is-snapshot))
+     delta modifiers-ref scroll-ref nil (true? is-snapshot))
 
     [:& (mf/provider shapes/base-frame-ctx) {:value (get prepared-all (:id base))}
      [:& (mf/provider shapes/frame-offset-ctx) {:value offset}

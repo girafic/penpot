@@ -358,17 +358,26 @@
           (.clearRect ctx 0 0 (.-width dst) (.-height dst))
           (.drawImage ctx src 0 0 (.-width dst) (.-height dst)))))))
 
-(defonce ^{:doc "Spike of the scroll containers (plan
-  2026-11-04-prototype-scroll-containers, Task 1): `{:offsets {id [x y]}
-  :sheet-root id}` set from the console scrolls them (see
-  `dvs/scroll-entries`). The scroll state of the view mode replaces it."}
-  dev-scroll
-  (atom nil))
+(defn- scroll-of
+  "How the containers in `objects` scroll for `scroll` (`{id {:offset
+  :past}}`, see `dvs/view-offsets`): the shifts of their layers (see
+  `dvs/scroll-shifts`) and `sheet-root`, the root of an overlay drawn
+  back at its box (see `dvs/scroll-entries`). `cache-ref` keeps the
+  last: a frame of an animation that does not scroll works out nothing."
+  [cache-ref objects scroll sheet-root]
+  (let [[c-objects c-scroll c-result] (mf/ref-val cache-ref)]
+    (if (and (identical? c-objects objects) (identical? c-scroll scroll))
+      c-result
+      (let [result {:shifts     (dvs/scroll-shifts objects (dvs/view-offsets objects scroll
+                                                                             :overlay-root sheet-root))
+                    :sheet-root sheet-root}]
+        (mf/set-ref-val! cache-ref [objects scroll result])
+        result))))
 
 (defn- use-viewer-wasm-layers!
   [page-id page-objects size scale frame-id not-fixed-ref fixed-ref
    not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins delta dpr-key
-   modifiers-ref frozen?]
+   modifiers-ref scroll-ref sheet-root frozen?]
   ;; The hot-areas SVG shifts every object by `-(size + delta)` so the frame
   ;; `selrect` lands flush against the overlay snap side, ignoring the extra
   ;; padding reserved for shadows/blur/strokes. Bake the same `delta` into the
@@ -381,13 +390,15 @@
         ;; The render asked last: while an animation plays, frames the
         ;; renderer did not get to are skipped, not queued.
         generation-ref (mf/use-ref 0)
+        scroll-cache   (mf/use-ref nil)
 
         ;; Render the layers with `modifiers`, the animation at a time (a
         ;; delay of its modif-tree), or nil.
         render!
         (mf/use-fn
          (mf/deps page-id page-objects render-size scale frame-id
-                  not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins frozen?)
+                  not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins
+                  scroll-ref sheet-root frozen?)
          (fn [modifiers]
            (when (and (not frozen?) (get page-objects frame-id))
              (let [generation (inc (mf/ref-val generation-ref))]
@@ -398,9 +409,8 @@
                        (when ready?
                          (let [not-fixed-canvas (mf/ref-val not-fixed-ref)
                                fixed-canvas     (mf/ref-val fixed-ref)
-                               {:keys [offsets sheet-root]} @dev-scroll
-                               scroll           {:shifts (dvs/scroll-shifts page-objects offsets)
-                                                 :sheet-root sheet-root}
+                               scroll           (scroll-of scroll-cache page-objects
+                                                           (some-> scroll-ref deref) sheet-root)
                                passes
                                (cond-> []
                                  not-fixed-canvas
@@ -447,24 +457,29 @@
           (add-watch modifiers-ref key (fn [_ _ _ modifiers] (render! modifiers)))
           #(remove-watch modifiers-ref key))))
 
-    (mf/with-effect [render! modifiers-ref]
-      (let [key (js/Symbol "viewer-wasm-scroll")]
-        (add-watch dev-scroll key (fn [_ _ _ _] (render! (some-> modifiers-ref deref))))
-        #(remove-watch dev-scroll key)))))
+    ;; and each step of a scroll of its containers (see `scroll-of`)
+    (mf/with-effect [render! modifiers-ref scroll-ref]
+      (when (some? scroll-ref)
+        (let [key (js/Symbol "viewer-wasm-scroll")]
+          (add-watch scroll-ref key (fn [_ _ _ _] (render! (some-> modifiers-ref deref))))
+          #(remove-watch scroll-ref key))))))
 
 (defn use-viewer-wasm-viewport!
   "WASM render passes for the viewer viewport.
   `modifiers-ref`, when given, is a ref of the animation it plays at a
   time (a delay of its modif-tree, see `show-animation!`): it renders
-  again at each of its frames. `frozen?` renders nothing: the canvases
+  again at each of its frames. `scroll-ref`, when given, is a ref of the
+  scroll of its containers (`{id {:offset :past}}`): it renders again at
+  each step; `sheet-root`, the root of an overlay that scrolls as one
+  (see `dvs/scroll-entries`). `frozen?` renders nothing: the canvases
   keep the picture drawn on them (see `copy-canvases!`). The fixed
   layers of `fixed-pins` show that far up (see `vpc/fixed-pins`)."
   [page-id page-objects size scale frame-id
    not-fixed-ref fixed-ref
    not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins
-   delta modifiers-ref frozen?]
+   delta modifiers-ref scroll-ref sheet-root frozen?]
   (let [dpr-key (use-viewer-dpr-key)]
     (use-viewer-wasm-layers! page-id page-objects size scale frame-id
                              not-fixed-ref fixed-ref
                              not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
-                             fixed-pins delta dpr-key modifiers-ref frozen?)))
+                             fixed-pins delta dpr-key modifiers-ref scroll-ref sheet-root frozen?)))

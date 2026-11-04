@@ -6,6 +6,7 @@
 
 (ns frontend-tests.data.viewer-test
   (:require
+   [app.common.geom.point :as gpt]
    [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
    [app.main.router :as rt]
@@ -261,3 +262,41 @@
                           (reduce (fn [kept [k v]] (if (some? v) (assoc kept k v) (dissoc kept k)))
                                   kept
                                   [[::dv/device (first before)] [::dv/device-color (second before)]])))))
+
+;; --- Scroll of containers (Penpot Motion, see `app.main.data.viewer.scroll`)
+
+(t/deftest the-containers-scroll-for-the-board-shown
+  (let [board (uuid/custom 1 2)
+        other (uuid/custom 1 3)
+        list  (uuid/custom 1 4)
+        chips (uuid/custom 1 5)
+        s1    (ptk/update (dv/scroll-container board list [0 100] [0 0]) {:viewer-local {:zoom 1}})
+        s2    (ptk/update (dv/scroll-container board chips [20 0] [0 -8]) s1)
+        s3    (ptk/update (dv/scroll-container other list [0 10] [0 0]) s2)]
+    (t/is (= {:board-id board :containers {list {:offset [0 100] :past [0 0]}}}
+             (get-in s1 [:viewer-local :scroll])))
+    (t/is (= {:offset [20 0] :past [0 -8]} (get-in s2 [:viewer-local :scroll :containers chips])))
+    (t/is (= {list {:offset [0 10] :past [0 0]}} (get-in s3 [:viewer-local :scroll :containers]))
+          "another board forgets them")
+    (t/is (nil? (get-in (ptk/update (dv/reset-container-scroll) s2) [:viewer-local :scroll])))
+    (t/is (= {:zoom 1} (dv/steady-local (assoc (:viewer-local s2) :timeline {:time 3})))
+          "what changes at each frame is left out of what renders the view mode")))
+
+(t/deftest an-overlay-opens-with-its-containers-at-rest
+  (let [board   (uuid/custom 1 2)
+        overlay (uuid/custom 1 6)
+        inner   (uuid/custom 1 7)
+        list    (uuid/custom 1 4)
+        frame   {:id overlay :type :frame :parent-id uuid/zero :frame-id uuid/zero :shapes [inner]}
+        objects {overlay frame
+                 inner   {:id inner :type :frame :parent-id overlay :frame-id overlay :shapes []}}
+        state   {:route {:params {:query {:page-id (str page-id)}}
+                         :query-params {:page-id (str page-id)}}
+                 :viewer {:pages {page-id {:objects objects :all-frames [frame]}}}
+                 :viewer-local {:scroll {:board-id board
+                                         :containers {inner {:offset [0 50] :past [0 0]}
+                                                      list  {:offset [0 100] :past [0 0]}}}}}
+        opened  (ptk/update (dv/open-overlay overlay (gpt/point 0 0) nil false false nil false) state)]
+    (t/is (= 1 (count (:viewer-overlays opened))))
+    (t/is (= {list {:offset [0 100] :past [0 0]}} (get-in opened [:viewer-local :scroll :containers]))
+          "the screen's list stays scrolled")))

@@ -163,10 +163,11 @@
   keeps WASM from drawing on it: it shows the picture the viewer drew on
   it (the board that leaves when the board changes). `fixed-drop`, the
   px of its first screen below the screen of its device (see
-  `viewport.wasm/viewport-wasm*`)."
+  `viewport.wasm/viewport-wasm*`). `scroll-ref`, the scroll of its
+  containers, scrolls them with WASM only."
   {::mf/wrap [mf/memo]}
-  [{:keys [interactions-mode frame-offset size delta page frame base-frame is-fixed modifiers-ref is-snapshot
-           fixed-drop]}]
+  [{:keys [interactions-mode frame-offset size delta page frame base-frame is-fixed modifiers-ref scroll-ref
+           is-snapshot fixed-drop]}]
   (let [;; NOTE: with `use-equal-memo` hook we ensure that all values
         ;; conserves the reference identity for avoid unnecessary
         ;; dummy rerenders.
@@ -223,6 +224,7 @@
                                         :is-fixed is-fixed
                                         :is-snapshot is-snapshot
                                         :modifiers-ref modifiers-ref
+                                        :scroll-ref scroll-ref
                                         :fixed-drop fixed-drop}]
 
       (some? modifiers-ref)

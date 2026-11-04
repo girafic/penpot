@@ -246,3 +246,27 @@
   (t/is (= [0 0 402 1300] (box (dvs/scroll-objects (menu-objects 874 1300 :scroll-overflow :both)) :menu)))
   (let [side (menu-objects 874 1300 :scroll-overflow :horizontal)]
     (t/is (identical? side (dvs/scroll-objects side)) "sideways it does not scroll as a screen")))
+
+(t/deftest the-view-mode-reads-the-scroll-of-its-containers-clamped
+  (let [objects (-> (screen-file 1890)
+                    (cthc/add-frame :inner :parent-label :list :x 24 :y 100 :width 354 :height 200
+                                    :scroll-overflow :vertical)
+                    (cthf/current-page)
+                    :objects)
+        id      #(cthi/id %)]
+    (t/is (= #{(id :list) (id :chips) (id :inner)} (dvs/container-ids objects (id :screen))))
+    (t/is (= #{(id :list) (id :inner)} (dvs/container-ids objects (id :list)))
+          "a board inside another is a container of its own")
+    (t/is (= {(id :list) [0 1520] (id :chips) [446 0]}
+             (dvs/view-offsets objects {(id :list)   {:offset [0 2000] :past [0 30]}
+                                        (id :chips)  {:offset [999 5]}
+                                        (id :screen) {:offset [0 40]}}))
+          "within its range, the rubber band past it; a screen scrolls as a page does")))
+
+(t/deftest a-container-clips-its-content-in-the-view-mode
+  (let [objects (screen-objects 1890 :show-content true)
+        clipped (dvs/scroll-objects objects)]
+    (t/is (false? (get-in clipped [(cthi/id :list) :show-content])))
+    (t/is (= (get objects (cthi/id :chips)) (get clipped (cthi/id :chips))) "already clipped")
+    (let [plain (screen-objects 1890)]
+      (t/is (identical? plain (dvs/scroll-objects plain)) "nothing to grow or clip: the same objects"))))

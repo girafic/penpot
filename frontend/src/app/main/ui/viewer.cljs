@@ -83,9 +83,32 @@
   (l/derived #(dm/get-in % [:viewer-local :timeline]) st/state))
 
 (def ^:private viewer-local-ref
-  "The local state of the view mode but the playback of the animation
-  (see `viewer-timeline-ref`), which changes at each of its frames."
-  (l/derived #(dissoc % :timeline) refs/viewer-local =))
+  "The local state of the view mode but what changes at each frame (see
+  `dv/steady-local`): the playback of the animation (see
+  `viewer-timeline-ref`) and the scroll of the containers (see
+  `use-scroll-ref`)."
+  (l/derived dv/steady-local refs/viewer-local =))
+
+(def ^:private viewer-scroll-ref
+  (l/derived #(dm/get-in % [:viewer-local :scroll]) st/state))
+
+(defn- use-scroll-ref
+  "A ref of the scroll of the containers in the board `root-id` of
+  `objects` (`{id {:offset :past}}`, see `dv/scroll-container`) while
+  the board `screen-id` shows; nil without containers or `scroll?`
+  (the Interactions section with WASM). Each viewport has its own: a
+  scroll elsewhere renders it not again. With `overlay-root?` the root
+  scrolls as one too (see `dvs/container-axes`)."
+  [objects screen-id root-id scroll? overlay-root?]
+  (let [ids (mf/with-memo [objects root-id overlay-root?]
+              (dvs/container-ids objects root-id :overlay-root? overlay-root?))]
+    (mf/with-memo [ids screen-id scroll?]
+      (when (and scroll? (seq ids))
+        (l/derived (fn [{:keys [board-id containers]}]
+                     (when (= board-id screen-id)
+                       (not-empty (select-keys containers ids))))
+                   viewer-scroll-ref
+                   =)))))
 
 (defn- animation-modifiers
   "When a timeline is active, the modif-tree of the shapes of `page` at
@@ -348,14 +371,16 @@
   modif-tree at the playback time from a ref, so neither this nor the
   rest of the view mode renders again at each frame. `fixed-drop`, the
   px of its first screen below the screen of its device (see
-  `fixed-drop`)."
+  `fixed-drop`). Its containers scroll with `is-scrolling` (see
+  `use-scroll-ref`)."
   {::mf/private true}
-  [{:keys [page frame size interactions-mode fixed-drop]}]
+  [{:keys [page frame size interactions-mode fixed-drop is-scrolling]}]
   (let [files         (mf/deref refs/files)
         ;; A delay: a frame the viewport does not get to is not worked out.
         modifiers-ref (mf/with-memo [page files]
                         (l/derived #(delay (animation-modifiers page files %))
-                                   viewer-timeline-ref))]
+                                   viewer-timeline-ref))
+        scroll-ref    (use-scroll-ref (:objects page) (:id frame) (:id frame) (true? is-scrolling) false)]
     [:> interactions/viewport*
      {:frame frame
       :base-frame frame
@@ -363,13 +388,14 @@
       :size size
       :page page
       :modifiers-ref modifiers-ref
+      :scroll-ref scroll-ref
       :interactions-mode interactions-mode
       :fixed-drop fixed-drop}]))
 
 (mf/defc viewer-wrapper
   {::mf/wrap-props false}
   [{:keys [wrapper-size orig-frame orig-viewport-ref orig-size page file users current-viewport-ref
-           size frame interactions-mode overlays zoom section index animated sound fixed-drop]}]
+           size frame interactions-mode overlays zoom section index animated sound fixed-drop scroll]}]
 
   [:*
    [:& viewer-pagination-and-sidebar
@@ -416,7 +442,8 @@
         :size size
         :page page
         :interactions-mode interactions-mode
-        :fixed-drop fixed-drop}]
+        :fixed-drop fixed-drop
+        :is-scrolling scroll}]
 
       (for [overlay overlays]
         [:& viewer-overlay
@@ -671,6 +698,11 @@
     (mf/with-effect []
       (when (not allowed)
         (st/emit! (dv/go-to-section :interactions))))
+
+    ;; Another board on screen shows its containers at rest, whichever
+    ;; way it came (see `dv/scroll-container`).
+    (mf/with-effect [(:id frame)]
+      (st/emit! (dv/reset-container-scroll)))
 
     ;; The board on screen changing, or the view mode left, stops what
     ;; plays and its sound. Shown in the prototype, a board that animates
@@ -1147,7 +1179,10 @@
               :sound board-sound?
               ;; turned, its fixed layers are where the screen
               ;; turned has them (see `dvt/turn-objects`)
-              :fixed-drop (when-not (:turned? shown) (fixed-drop frame device))}]]))]
+              :fixed-drop (when-not (:turned? shown) (fixed-drop frame device))
+              ;; containers scroll in the prototype, with WASM (see
+              ;; `use-scroll-ref`)
+              :scroll (and wasm? (= section :interactions))}]]))]
 
       ;; the island, notch or camera of the device, over its screen, and
       ;; a loader on it until the first board is drawn (the preview has
