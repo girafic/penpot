@@ -237,9 +237,12 @@
            ;; What the tile cache holds after a render: the next one with
            ;; the same can draw only what changed (see `viewer-do-render!`).
            ;; The passes of a board with fixed layers render other shapes
-           ;; each, so they render all.
-           render-key   (when (and (empty? include-ids) (empty? clear-fills-ids))
-                          [object-id scale size vis-w vis-h dpr])
+           ;; each: one draws only what changed when the same pass drew last,
+           ;; as the one of what scrolls does as its containers scroll (see
+           ;; `use-viewer-wasm-layers!`). The one that clears fills renders
+           ;; all.
+           render-key   (when (empty? clear-fills-ids)
+                          [object-id scale size vis-w vis-h dpr include-ids])
            do-render!   (fn [os-canvas prev-props]
                           (let [;; no other writer used a shape since
                                 ;; the last frame (see `wasm/shape-uses`)
@@ -395,18 +398,25 @@
         ;; renderer did not get to are skipped, not queued.
         generation-ref (mf/use-ref 0)
         scroll-cache   (mf/use-ref nil)
+        ;; whether the layers fixed when scrolling are owed a pass: a scroll
+        ;; of the containers leaves them where they are, so a render it
+        ;; alone asks for draws them not, unless one that would was skipped
+        fixed-owed-ref (mf/use-ref true)
 
         ;; Render the layers with `modifiers`, the animation at a time (a
-        ;; delay of its modif-tree), or nil.
+        ;; delay of its modif-tree), or nil; `scroll-only?` when only the
+        ;; containers scrolled since.
         render!
         (mf/use-fn
          (mf/deps page-id page-objects render-size scale frame-id
                   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins
                   scroll-ref sheet-root frozen?)
-         (fn [modifiers]
+         (fn [modifiers scroll-only?]
            (when (and (not frozen?) (get page-objects frame-id))
-             (let [generation (inc (mf/ref-val generation-ref))]
+             (let [generation (inc (mf/ref-val generation-ref))
+                   fixed?     (or (not scroll-only?) (mf/ref-val fixed-owed-ref))]
                (mf/set-ref-val! generation-ref generation)
+               (when fixed? (mf/set-ref-val! fixed-owed-ref true))
                (->> @wasm.api/module
                     (p/fmap
                      (fn [ready?]
@@ -424,7 +434,7 @@
                                                   (seq not-fixed-include-ids)
                                                   (assoc :include-ids not-fixed-include-ids))})
 
-                                 (and fixed-canvas (seq fixed-include-ids))
+                                 (and fixed? fixed-canvas (seq fixed-include-ids))
                                  (conj {:canvas fixed-canvas
                                         :opts   (cond-> {:include-ids fixed-include-ids
                                                          ;; held at the bottom of a
@@ -448,24 +458,26 @@
                                                                                nil opts)))
                                               (p/resolved nil)
                                               passes)
-                                      (p/then #(mark-rendered! (map :canvas passes) frame-id))))))))))))))))]
+                                      (p/then (fn [_]
+                                                (when fixed? (mf/set-ref-val! fixed-owed-ref false))
+                                                (mark-rendered! (map :canvas passes) frame-id)))))))))))))))))]
 
     (mf/with-layout-effect [render! dpr-key modifiers-ref]
-      (render! (some-> modifiers-ref deref)))
+      (render! (some-> modifiers-ref deref) false))
 
     ;; Each frame of the animation renders the layers from here, as the
     ;; workspace does, without the components rendering again.
     (mf/with-effect [render! modifiers-ref]
       (when (some? modifiers-ref)
         (let [key (js/Symbol "viewer-wasm-layers")]
-          (add-watch modifiers-ref key (fn [_ _ _ modifiers] (render! modifiers)))
+          (add-watch modifiers-ref key (fn [_ _ _ modifiers] (render! modifiers false)))
           #(remove-watch modifiers-ref key))))
 
     ;; and each step of a scroll of its containers (see `scroll-of`)
     (mf/with-effect [render! modifiers-ref scroll-ref]
       (when (some? scroll-ref)
         (let [key (js/Symbol "viewer-wasm-scroll")]
-          (add-watch scroll-ref key (fn [_ _ _ _] (render! (some-> modifiers-ref deref))))
+          (add-watch scroll-ref key (fn [_ _ _ _] (render! (some-> modifiers-ref deref) true)))
           #(remove-watch scroll-ref key))))))
 
 (defn use-viewer-wasm-viewport!
