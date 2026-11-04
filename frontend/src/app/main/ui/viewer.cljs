@@ -1152,17 +1152,22 @@
        (when current-animations
          (doseq [[overlay-frame-id animation-vals] current-animations]
            (let [overlay-viewport (dom/get-element (str "overlay-" (str (:overlay-id animation-vals))))
-                 overlay          (d/seek #(= (:id (:frame %)) overlay-frame-id)
-                                          overlays)
+                 overlay          (-> (d/seek #(= (:id (:frame %)) overlay-frame-id)
+                                              overlays)
+                                      (overlay-on-screen overlay-drop))
                  overlay-size     (calculate-size (:objects page) (:frame overlay) zoom)
-                 overlay-position {:x (* (:x (:position overlay)) zoom)
-                                   :y (* (:y (:position overlay)) zoom)}
+                 ;; from and to where its element is (see `viewer-overlay`)
+                 overlay-position (gpt/scale (overlay-element-position overlay overlay-size) zoom)
                  orig-frame       (when (:orig-frame-id animation-vals)
                                     (d/seek #(= (:id %) (:orig-frame-id animation-vals)) frames))
                  size             (calculate-size (:objects page) frame zoom)
                  orig-size        (when orig-frame
                                     (calculate-size (:objects page) orig-frame zoom))
-                 wrapper-size     (calculate-wrapper size orig-size zoom)]
+                 wrapper-size     (cond-> (calculate-wrapper size orig-size zoom)
+                                    ;; it slides in and out at the edge of the screen
+                                    (stays-on-screen? overlay on-screen?)
+                                    (assoc :height (* zoom (- (dm/get-in (dvs/design-box frame) [:selrect :height])
+                                                              (or overlay-drop 0)))))]
              (case (:kind animation-vals)
                :open-overlay
                (interactions/animate-open-overlay
