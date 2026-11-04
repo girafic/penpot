@@ -53,19 +53,33 @@
     (or (empty? overlays-ids) (nil? shape) (cfh/root? shape)) base-frame
     :else (find-relative-to-base-frame (cfh/get-parent objects (:id shape)) objects overlays-ids base-frame)))
 
-(defn in-page?
-  "Whether an overlay placed by the layer `relative-to-id` of `objects`
-  scrolls with the page: a layer of the screen `base-frame` that scrolls
-  with it (not one fixed when scrolling, see `vpc/screen-fixed?`). One
-  placed by the screen, by a fixed layer or by a layer of an overlay
-  stays on the screen."
-  [objects relative-to-id base-frame]
-  (let [base-id (:id base-frame)]
-    (boolean
-     (and (some? relative-to-id)
-          (not= relative-to-id base-id)
-          (some #(= % base-id) (cfh/get-parent-ids objects relative-to-id))
-          (not (vpc/screen-fixed? objects relative-to-id))))))
+(defn overlay-anchor
+  "What an overlay placed by the layer `relative-to-id` of `objects` holds
+  to as the page of the screen `base-frame` scrolls (see
+  `app.main.ui.viewer/viewer-wrapper`): `:page`, by a layer of the screen
+  that scrolls with it (not one fixed when scrolling, see
+  `vpc/screen-fixed?`), and it scrolls with it; `:screen`, by the screen
+  itself, and it stays on the screen, up from its first one at the side
+  it snaps to on a lower one (see `app.main.ui.viewer/overlay-on-screen`);
+  `:layer`, by a fixed layer or a layer of one of the `overlays` that
+  stays, and it stays too. By a layer of an overlay that scrolls with the
+  page it does as well."
+  [objects relative-to-id base-frame overlays]
+  (let [base-id (:id base-frame)
+        parents (when (contains? objects relative-to-id)
+                  (cfh/get-parent-ids objects relative-to-id))]
+    (cond
+      (or (nil? parents) (= relative-to-id base-id))
+      :screen
+
+      (some #(= % base-id) parents)
+      (if (vpc/screen-fixed? objects relative-to-id) :layer :page)
+
+      :else
+      (let [ids (set (cons relative-to-id parents))]
+        (if (= :page (:anchor (d/seek #(contains? ids (:id %)) overlays)))
+          :page
+          :layer)))))
 
 (defn- ignore-frame-shape
   [shape objects manual?]
@@ -120,7 +134,7 @@
                                    background-overlay
                                    (:animation interaction)
                                    fixed-base?
-                                   (in-page? objects relative-to-id base-frame)))))
+                                   (overlay-anchor objects relative-to-id base-frame overlays)))))
 
     :toggle-overlay
     (let [manual?                    (= :manual (:overlay-pos-type interaction))
@@ -154,7 +168,7 @@
                                      background-overlay
                                      (:animation interaction)
                                      fixed-base?
-                                     (in-page? objects relative-to-id base-frame)))))
+                                     (overlay-anchor objects relative-to-id base-frame overlays)))))
 
     :close-overlay
     (let [dest-frame-id (or (:destination interaction)
@@ -223,7 +237,7 @@
                                      background-overlay
                                      (:animation interaction)
                                      fixed-base?
-                                     (in-page? objects relative-to-id base-frame)))))
+                                     (overlay-anchor objects relative-to-id base-frame overlays)))))
 
 
     :close-overlay
@@ -257,7 +271,7 @@
                                    background-overlay
                                    (:animation interaction)
                                    fixed-base?
-                                   (in-page? objects relative-to-id base-frame)))))
+                                   (overlay-anchor objects relative-to-id base-frame overlays)))))
     nil))
 
 (defn- touch?

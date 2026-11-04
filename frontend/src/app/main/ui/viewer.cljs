@@ -294,6 +294,13 @@
          :frame frame
          :page page}])]))
 
+(defn- snap-part
+  "How much of a length an overlay snapped to `side` moves by: all of it
+  at the bottom or the right, half of it in the middle, none at the top or
+  the left."
+  [side]
+  (case side (:bottom :right) 1 :center 0.5 0))
+
 (defn overlay-element-position
   "Where the element of `overlay` goes, in px of the board (`size` its
   bounds, see `calculate-size`): `:position` is where the box of its board
@@ -304,14 +311,50 @@
   [overlay size]
   (let [{:keys [width height]} (dm/get-in overlay [:frame :selrect])
         [snap-v snap-h] (:snap-to overlay)
-        part     #(case % (:bottom :right) 1 :center 0.5 0)
         position (:position overlay)]
-    (gpt/point (+ (:x position) (* (part snap-h) (- width (:base-width size))))
-               (+ (:y position) (* (part snap-v) (- height (:base-height size)))))))
+    (gpt/point (+ (:x position) (* (snap-part snap-h) (- width (:base-width size))))
+               (+ (:y position) (* (snap-part snap-v) (- height (:base-height size)))))))
+
+(defn overlay-on-screen
+  "`overlay` on a screen `drop` px lower than the box of its board (see
+  `overlay-drop`): placed by the screen (see `shapes/overlay-anchor`), it
+  goes up as far at the bottom and half as far in the middle, as the
+  layers fixed when scrolling do there (see `vpc/fixed-pins`); the
+  others stay where they are."
+  [overlay drop]
+  (let [part (snap-part (first (:snap-to overlay)))]
+    (if (and (= :screen (:anchor overlay)) (some? drop) (pos? part))
+      (update overlay :position gpt/subtract (gpt/point 0 (* part drop)))
+      overlay)))
+
+(defn overlay-drop
+  "Px the box of the board `frame` reaches below the screen of `device`
+  (see `dvd/resolve-device`), its first screen when it scrolls through its
+  content (see `dvs/design-box`): an overlay placed by the screen goes up
+  so far (see `overlay-on-screen`). Nil without a device or with nothing
+  below."
+  [frame device]
+  (when (some? device)
+    (let [drop (- (dm/get-in (dvs/design-box frame) [:selrect :height]) (:screen-h device))]
+      (when (pos? drop) drop))))
+
+(defn- stays-on-screen?
+  "Whether `overlay` stays on the screen as the page scrolls (see
+  `viewer-wrapper`): on a board that shows as a screen (`on-screen?`), in
+  a device or scrolling through its content, one not placed by a layer
+  that scrolls; one placed by a fixed layer holds its own place."
+  [overlay on-screen?]
+  (and (true? on-screen?)
+       (not= :page (:anchor overlay))
+       (not (:fixed-source? overlay))))
 
 (mf/defc viewer-overlay
-  [{:keys [overlay page frame zoom wrapper-size interactions-mode scroll]}]
-  (let [close-click-outside? (:close-click-outside overlay)
+  "`drop`, how far an overlay placed by the screen goes up (see
+  `overlay-on-screen`)."
+  [{:keys [overlay page frame zoom wrapper-size interactions-mode scroll drop]}]
+  (let [overlay              (mf/with-memo [overlay drop]
+                               (overlay-on-screen overlay drop))
+        close-click-outside? (:close-click-outside overlay)
         background-overlay?  (:background-overlay overlay)
         overlay-frame        (:frame overlay)
         overlay-position     (:position overlay)
@@ -425,7 +468,8 @@
 (mf/defc viewer-wrapper
   {::mf/wrap-props false}
   [{:keys [wrapper-size orig-frame orig-viewport-ref orig-size page file users current-viewport-ref
-           size frame interactions-mode overlays zoom section index animated sound fixed-drop scroll]}]
+           size frame interactions-mode overlays zoom section index animated sound fixed-drop scroll
+           on-screen overlay-drop]}]
 
   [:*
    [:& viewer-pagination-and-sidebar
@@ -475,15 +519,14 @@
         :fixed-drop fixed-drop
         :is-scrolling scroll}]
 
-      ;; An overlay placed by the screen stays on it as the page scrolls,
-      ;; as the layers fixed when scrolling do (see `viewport-wasm*`): its
-      ;; position is on the first screen. One placed by a layer that
-      ;; scrolls goes with it; one placed by a fixed layer holds its own
-      ;; place (see `viewer-overlay`).
+      ;; On a board that shows as a screen an overlay stays on it as the
+      ;; page scrolls, as the layers fixed when scrolling do (see
+      ;; `viewport-wasm*`): its position is on the first screen, up from
+      ;; it on a lower one (`overlay-drop`). One placed by a layer that
+      ;; scrolls goes with it (see `stays-on-screen?`).
       (for [overlay overlays]
         [:div {:key (dm/str (:id overlay))
-               :class (stl/css-case :screen-overlay (not (or (:in-page overlay)
-                                                             (:fixed-source? overlay))))}
+               :class (stl/css-case :screen-overlay (stays-on-screen? overlay on-screen))}
          [:& viewer-overlay
           {:overlay overlay
            :page page
@@ -491,7 +534,8 @@
            :zoom zoom
            :wrapper-size wrapper-size
            :interactions-mode interactions-mode
-           :scroll scroll}]])]]
+           :scroll scroll
+           :drop overlay-drop}]])]]
 
 
     (when (= section :comments)
@@ -676,6 +720,13 @@
         wrapper-size
         (mf/with-memo [size orig-size zoom]
           (calculate-wrapper size orig-size zoom))
+
+        ;; whether the board shows as a screen, its overlays on it as
+        ;; its page scrolls (see `viewer-wrapper`), and how far those
+        ;; placed by the screen go up on the screen of its device; turned,
+        ;; its layers are where the screen turned has them
+        on-screen?   (or (some? device) (some? (dvs/screen-h frame)))
+        overlay-drop (when-not (:turned? shown) (overlay-drop frame device))
 
         click-on-screen
         (mf/use-fn
@@ -1233,6 +1284,8 @@
               ;; turned, its fixed layers are where the screen
               ;; turned has them (see `dvt/turn-objects`)
               :fixed-drop (when-not (:turned? shown) (fixed-drop frame device))
+              :on-screen on-screen?
+              :overlay-drop overlay-drop
               ;; containers scroll in the prototype, with WASM (see
               ;; `use-scroll-ref`)
               :scroll (and wasm? (= section :interactions))}]]))]

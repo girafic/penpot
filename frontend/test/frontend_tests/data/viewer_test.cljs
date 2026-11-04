@@ -296,7 +296,7 @@
                  :viewer-local {:scroll {:board-id board
                                          :containers {inner {:offset [0 50] :past [0 0]}
                                                       list  {:offset [0 100] :past [0 0]}}}}}
-        opened  (ptk/update (dv/open-overlay overlay (gpt/point 0 0) nil false false nil false false) state)]
+        opened  (ptk/update (dv/open-overlay overlay (gpt/point 0 0) nil false false nil false :screen) state)]
     (t/is (= 1 (count (:viewer-overlays opened))))
     (t/is (= {list {:offset [0 100] :past [0 0]}} (get-in opened [:viewer-local :scroll :containers]))
           "the screen's list stays scrolled")))

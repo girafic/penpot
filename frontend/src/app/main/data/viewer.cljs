@@ -1028,10 +1028,9 @@
 ;; it, as going to another board does.
 
 (defn- open-overlay*
-  "`in-page?`: it was placed by a layer that scrolls with the page, and
-  goes with it; the others stay on the screen as it scrolls (see
-  `app.main.ui.viewer/viewer-wrapper`)."
-  [state frame position snap-to close-click-outside background-overlay animation fixed-source? in-page?]
+  "`anchor`, what it holds to as the page scrolls: `:page`, `:screen` or
+  `:layer` (see `app.main.ui.viewer.shapes/overlay-anchor`)."
+  [state frame position snap-to close-click-outside background-overlay animation fixed-source? anchor]
   (cond-> (forget-container-scroll state (:id frame))
     :always
     (update :viewer-overlays conj
@@ -1043,7 +1042,7 @@
              :background-overlay background-overlay
              :animation animation
              :fixed-source? fixed-source?
-             :in-page (true? in-page?)})
+             :anchor anchor})
 
     (some? animation)
     (assoc-in [:viewer-animations (:id frame)]
@@ -1063,7 +1062,7 @@
                :animation animation})))
 
 (defn open-overlay
-  [frame-id position snap-to close-click-outside background-overlay animation fixed-source? in-page?]
+  [frame-id position snap-to close-click-outside background-overlay animation fixed-source? anchor]
   (dm/assert! (uuid? frame-id))
   (dm/assert! (gpt/point? position))
   (dm/assert! (or (nil? close-click-outside)
@@ -1090,12 +1089,12 @@
                          background-overlay
                          animation
                          fixed-source?
-                         in-page?)
+                         anchor)
           state)))))
 
 
 (defn toggle-overlay
-  [frame-id position snap-to close-click-outside background-overlay animation fixed-source? in-page?]
+  [frame-id position snap-to close-click-outside background-overlay animation fixed-source? anchor]
   (dm/assert! (uuid? frame-id))
   (dm/assert! (gpt/point? position))
   (dm/assert! (or (nil? close-click-outside)
@@ -1123,7 +1122,7 @@
                          background-overlay
                          animation
                          fixed-source?
-                         in-page?)
+                         anchor)
           (close-overlay* state
                           (:id frame)
                           (ctsi/invert-direction animation)))))))

@@ -7,7 +7,8 @@
 (ns frontend-tests.viewer-overlay-test
   "Where an overlay with a shadow shows: its box where its position says,
   the margin of the shadow round it, at any zoom; on the screen as the
-  page scrolls, but with a layer that scrolls when that placed it."
+  page scrolls, but with a layer that scrolls when that placed it, and up
+  on a screen lower than the board."
   (:require
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
@@ -71,10 +72,31 @@
         (shape option :rect sheet-id sheet-id 524 100 354 52)]
        (into {} (map (juxt :id identity)))))
 
-(t/deftest an-overlay-scrolls-with-the-page-by-a-layer-that-does
+(t/deftest an-overlay-holds-to-what-placed-it-as-the-page-scrolls
   (let [screen (get objects screen-id)]
-    (t/is (true? (shapes/in-page? objects row screen)) "by a row of the screen")
-    (t/is (false? (shapes/in-page? objects nil screen)) "not by the screen (no layer)")
-    (t/is (false? (shapes/in-page? objects screen-id screen)) "nor by the screen itself")
-    (t/is (false? (shapes/in-page? objects back screen)) "nor by a layer fixed when scrolling")
-    (t/is (false? (shapes/in-page? objects option screen)) "nor by a layer of an overlay")))
+    (t/is (= :page (shapes/overlay-anchor objects row screen [])) "a row of the screen: the page")
+    (t/is (= :screen (shapes/overlay-anchor objects nil screen [])) "no layer: the screen")
+    (t/is (= :screen (shapes/overlay-anchor objects screen-id screen [])) "the screen itself")
+    (t/is (= :layer (shapes/overlay-anchor objects back screen [])) "a layer fixed when scrolling")
+    (t/is (= :layer (shapes/overlay-anchor objects option screen [{:id sheet-id :anchor :screen}]))
+          "a layer of an overlay on the screen")
+    (t/is (= :page (shapes/overlay-anchor objects option screen [{:id sheet-id :anchor :page}]))
+          "a layer of an overlay that scrolls with the page")))
+
+(t/deftest an-overlay-placed-by-the-screen-goes-up-on-a-lower-screen
+  (let [placed (fn [anchor snap-v]
+                 {:anchor anchor :snap-to [snap-v :center] :position (gpt/point 0 314)})
+        y      #(:y (:position (viewer/overlay-on-screen %1 %2)))]
+    (t/is (= 107 (y (placed :screen :bottom) 207)) "at the bottom as far")
+    (t/is (= 210.5 (y (placed :screen :center) 207)) "in the middle half as far")
+    (t/is (= 314 (y (placed :screen :top) 207)) "not at the top")
+    (t/is (= 314 (y (placed :layer :bottom) 207)) "not by a layer, which sits where it is")
+    (t/is (= 314 (y (placed :screen :bottom) nil)) "not without a lower screen")))
+
+(t/deftest the-box-of-a-board-reaches-below-the-screen-of-a-device
+  (let [board (fn [h & {:as attrs}] (merge {:selrect (grc/make-rect 0 0 402 h)} attrs))]
+    (t/is (= 207 (viewer/overlay-drop (board 1450 :app.main.data.viewer.scroll/screen-h 874) {:screen-h 667}))
+          "of a board that scrolls through its content, its first screen")
+    (t/is (= 926 (viewer/overlay-drop (board 1800) {:screen-h 874})) "of a long board, all of it")
+    (t/is (nil? (viewer/overlay-drop (board 874) {:screen-h 932})) "nothing on a higher screen")
+    (t/is (nil? (viewer/overlay-drop (board 1800) nil)) "nothing without a device")))
