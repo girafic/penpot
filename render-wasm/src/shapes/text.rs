@@ -35,6 +35,16 @@ use crate::Uuid;
 // TODO: maybe move this to the wasm module?
 pub type ParagraphBuilderGroup = Vec<ParagraphBuilder>;
 
+/// How far, px, the box of a text may differ from the one it was laid out
+/// for and still take that layout: a move puts the box at other page
+/// coordinates, and the f32 sums there leave its width a few 1e-5 px off,
+/// which would lay out again a text that just fits in two lines.
+const LAYOUT_SIZE_TOLERANCE: f32 = 0.01;
+
+fn same_layout_size(a: f32, b: f32) -> bool {
+    (a - b).abs() < LAYOUT_SIZE_TOLERANCE
+}
+
 /// True when the modifier changes the text layout container (resize), as opposed
 /// to rotation/move where glyph layout can be reused.
 pub fn modifier_changes_text_layout(base: &Shape, modifier: &Matrix) -> bool {
@@ -515,8 +525,8 @@ impl TextContent {
     /// clones paragraphs into a rebound copy with an empty layout cache.
     pub fn paint_content_for_selrect<'a>(&'a self, selrect: Rect) -> Cow<'a, Self> {
         let stored_bounds = self.bounds();
-        if (stored_bounds.width() - selrect.width()).abs() < 0.01
-            && (stored_bounds.height() - selrect.height()).abs() < 0.01
+        if same_layout_size(stored_bounds.width(), selrect.width())
+            && same_layout_size(stored_bounds.height(), selrect.height())
         {
             Cow::Borrowed(self)
         } else {
@@ -1178,7 +1188,7 @@ impl TextContent {
             return true;
         }
         self.layout_paint_size.is_some_and(|(width, height)| {
-            (width - selrect.width()).abs() < 0.01 && (height - selrect.height()).abs() < 0.01
+            same_layout_size(width, selrect.width()) && same_layout_size(height, selrect.height())
         })
     }
 
@@ -1194,7 +1204,7 @@ impl TextContent {
             return false;
         };
         let container_w = self.get_width(shape.selrect().width());
-        (layout_w - container_w).abs() < f32::EPSILON
+        same_layout_size(layout_w, container_w)
     }
 
     /// True when any span requests underline/overline/line-through (custom draw path).
@@ -1244,7 +1254,7 @@ impl TextContent {
         let layout_matches_container = self.grow_type() == GrowType::AutoWidth
             || self
                 .layout_width
-                .is_some_and(|w| (w - selrect.width()).abs() < f32::EPSILON);
+                .is_some_and(|w| same_layout_size(w, selrect.width()));
 
         if !self.layout.needs_update()
             && self.layout_version == self.content_version
@@ -2392,6 +2402,34 @@ mod tests {
         let mut shape = Shape::new(Uuid::nil());
         shape.set_selrect(0.0, 0.0, 300.0, 100.0);
         assert!(!content.has_usable_paint_layout(&shape));
+    }
+
+    #[test]
+    fn has_usable_paint_layout_true_when_a_move_leaves_the_width_a_hair_off() {
+        let mut content = sample_text_content();
+        content.layout.paragraphs = Rc::new(vec![vec![]]);
+        content.layout_width = Some(150.0);
+        content.layout_version = 3;
+        content.content_version = 3;
+        // the box of a text moved by 233.7 px at page coordinates
+        let (left, top) = (362.0_f32 + 233.7, 300.0_f32);
+        let mut shape = Shape::new(Uuid::nil());
+        shape.set_selrect(left, top, left + 149.99994, top + 26.0);
+        assert!(content.has_usable_paint_layout(&shape));
+    }
+
+    #[test]
+    fn update_layout_keeps_the_layout_of_a_box_a_hair_off() {
+        let mut content = sample_text_content();
+        content.layout.paragraphs = Rc::new(vec![vec![]]);
+        content.layout_width = Some(150.0);
+        content.layout_version = content.content_version;
+        let paragraphs = Rc::clone(&content.layout.paragraphs);
+        content.update_layout(Rect::from_xywh(233.7, 0.0, 149.99994, 26.0));
+        assert!(
+            Rc::ptr_eq(&paragraphs, &content.layout.paragraphs),
+            "not laid out again"
+        );
     }
 
     fn text_shape_with_cached_layout(content: TextContent) -> Shape {
