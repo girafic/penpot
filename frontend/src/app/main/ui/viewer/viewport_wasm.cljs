@@ -320,9 +320,11 @@
        ;; holds it there as it scrolls, a scroll event would come a frame
        ;; late). It is as large as nothing, its picture as large as the
        ;; board hangs from it. Only its hotspots take a click, the rest goes
-       ;; to the layers that scroll below.
+       ;; to the layers that scroll below. Nothing of an overlay scrolls
+       ;; with the section: there it lies where its element starts, which
+       ;; the margin of a shadow can put before the screen.
        (when has-fixed?
-         [:div {:style {:position "sticky"
+         [:div {:style {:position (if (true? is-overlay) "absolute" "sticky")
                         :top 0
                         :left 0
                         :width 0
