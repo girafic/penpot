@@ -307,6 +307,20 @@
   position: absolute;
 }
 
+// an overlay on the screen (see `viewer-wrapper`): it sticks to the top
+// left corner of the section as the page scrolls under it
+.screen-overlay {
+  position: sticky;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 0;
+  block-size: 0;
+}
+
+.viewer-section.in-device[data-overscroll] .screen-overlay [data-scroll-layer="true"] {
+  transform: none;
+}
+
 .viewport-container {
   clip-path: inset(0 0 0 0);
   grid-column: 1 / 1;

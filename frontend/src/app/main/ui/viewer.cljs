@@ -475,16 +475,23 @@
         :fixed-drop fixed-drop
         :is-scrolling scroll}]
 
+      ;; An overlay placed by the screen stays on it as the page scrolls,
+      ;; as the layers fixed when scrolling do (see `viewport-wasm*`): its
+      ;; position is on the first screen. One placed by a layer that
+      ;; scrolls goes with it; one placed by a fixed layer holds its own
+      ;; place (see `viewer-overlay`).
       (for [overlay overlays]
-        [:& viewer-overlay
-         {:overlay overlay
-          :key (dm/str (:id overlay))
-          :page page
-          :frame frame
-          :zoom zoom
-          :wrapper-size wrapper-size
-          :interactions-mode interactions-mode
-          :scroll scroll}])]]
+        [:div {:key (dm/str (:id overlay))
+               :class (stl/css-case :screen-overlay (not (or (:in-page overlay)
+                                                             (:fixed-source? overlay))))}
+         [:& viewer-overlay
+          {:overlay overlay
+           :page page
+           :frame frame
+           :zoom zoom
+           :wrapper-size wrapper-size
+           :interactions-mode interactions-mode
+           :scroll scroll}]])]]
 
 
     (when (= section :comments)

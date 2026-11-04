@@ -142,7 +142,7 @@
                   []))
         id    (uuid/next)]
     (t/is (not-any? #{::dv/pause-timeline}
-                    (types (dv/open-overlay id (gpt/point 0 0) nil false false nil false))))
+                    (types (dv/open-overlay id (gpt/point 0 0) nil false false nil false false))))
     (t/is (not-any? #{::dv/pause-timeline} (types (dv/close-overlay id))))))
 
 (t/deftest a-looping-copy-sounds-on-after-the-board

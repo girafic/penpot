@@ -53,6 +53,20 @@
     (or (empty? overlays-ids) (nil? shape) (cfh/root? shape)) base-frame
     :else (find-relative-to-base-frame (cfh/get-parent objects (:id shape)) objects overlays-ids base-frame)))
 
+(defn in-page?
+  "Whether an overlay placed by the layer `relative-to-id` of `objects`
+  scrolls with the page: a layer of the screen `base-frame` that scrolls
+  with it (not one fixed when scrolling, see `vpc/screen-fixed?`). One
+  placed by the screen, by a fixed layer or by a layer of an overlay
+  stays on the screen."
+  [objects relative-to-id base-frame]
+  (let [base-id (:id base-frame)]
+    (boolean
+     (and (some? relative-to-id)
+          (not= relative-to-id base-id)
+          (some #(= % base-id) (cfh/get-parent-ids objects relative-to-id))
+          (not (vpc/screen-fixed? objects relative-to-id))))))
+
 (defn- ignore-frame-shape
   [shape objects manual?]
   (let [shape (cond-> shape ;; When the the interaction is not manual and its origin is a frame,
@@ -105,7 +119,8 @@
                                    close-click-outside
                                    background-overlay
                                    (:animation interaction)
-                                   fixed-base?))))
+                                   fixed-base?
+                                   (in-page? objects relative-to-id base-frame)))))
 
     :toggle-overlay
     (let [manual?                    (= :manual (:overlay-pos-type interaction))
@@ -138,7 +153,8 @@
                                      close-click-outside
                                      background-overlay
                                      (:animation interaction)
-                                     fixed-base?))))
+                                     fixed-base?
+                                     (in-page? objects relative-to-id base-frame)))))
 
     :close-overlay
     (let [dest-frame-id (or (:destination interaction)
@@ -206,7 +222,8 @@
                                      close-click-outside
                                      background-overlay
                                      (:animation interaction)
-                                     fixed-base?))))
+                                     fixed-base?
+                                     (in-page? objects relative-to-id base-frame)))))
 
 
     :close-overlay
@@ -239,7 +256,8 @@
                                    close-click-outside
                                    background-overlay
                                    (:animation interaction)
-                                   fixed-base?))))
+                                   fixed-base?
+                                   (in-page? objects relative-to-id base-frame)))))
     nil))
 
 (defn- touch?
