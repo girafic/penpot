@@ -1106,6 +1106,7 @@ Board:
     interface Board {
         type: "board";
         clipContent: boolean;
+        scrollOverflow: "none" | "vertical";
         showInViewMode: boolean;
         perspective: number | null;
         perspectiveX: number | null;
@@ -1302,6 +1303,22 @@ Board:
         ```
 
         When true the board will clip the children inside
+      scrollOverflow: |-
+        ```
+        scrollOverflow: "none" | "vertical"
+        ```
+
+        How the board scrolls in the prototype (view mode). `"vertical"`
+        scrolls through its content below its bottom edge: the board keeps
+        its size in the design, its first screen, and its layers fixed when
+        scrolling stay on screen. `"none"` (the default) scrolls only as far
+        as the board is high. Only a board at the top of a page can scroll
+        so.
+
+        Example
+        ```
+        menu.resize(402, 874);menu.scrollOverflow = "vertical";
+        ```
       showInViewMode: |-
         ```
         showInViewMode: boolean
@@ -2496,6 +2513,7 @@ VariantContainer:
     interface VariantContainer {
         type: "board";
         clipContent: boolean;
+        scrollOverflow: "none" | "vertical";
         showInViewMode: boolean;
         perspective: number | null;
         perspectiveX: number | null;
@@ -2692,6 +2710,22 @@ VariantContainer:
         ```
 
         When true the board will clip the children inside
+      scrollOverflow: |-
+        ```
+        scrollOverflow: "none" | "vertical"
+        ```
+
+        How the board scrolls in the prototype (view mode). `"vertical"`
+        scrolls through its content below its bottom edge: the board keeps
+        its size in the design, its first screen, and its layers fixed when
+        scrolling stay on screen. `"none"` (the default) scrolls only as far
+        as the board is high. Only a board at the top of a page can scroll
+        so.
+
+        Example
+        ```
+        menu.resize(402, 874);menu.scrollOverflow = "vertical";
+        ```
       showInViewMode: |-
         ```
         showInViewMode: boolean

@@ -421,9 +421,12 @@
 (defn- get-overflow
   [shape]
   (when (and (cfh/frame-shape? shape)
-             (not (cgc/svg-markup? shape))
-             (not (:show-content shape)))
-    "hidden"))
+             (not (cgc/svg-markup? shape)))
+    (cond
+      ;; a top board that scrolls through its content in the prototype
+      ;; (Penpot Motion, see `app.main.data.viewer.scroll`)
+      (= :vertical (:scroll-overflow shape)) "hidden auto"
+      (not (:show-content shape)) "hidden")))
 
 (defn- get-flex-direction
   [shape]

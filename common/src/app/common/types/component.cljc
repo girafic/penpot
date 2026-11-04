@@ -111,6 +111,7 @@
    :constraints-h           :constraints-group
    :constraints-v           :constraints-group
    :fixed-scroll            :constraints-group
+   :scroll-overflow         :constraints-group
    :bool-type               :content-group
    :bool-content            :content-group
    :exports                 :exports-group

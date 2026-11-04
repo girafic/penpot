@@ -250,6 +250,22 @@ export interface Board extends ShapeBase {
   clipContent: boolean;
 
   /**
+   * How the board scrolls in the prototype (view mode). `"vertical"`
+   * scrolls through its content below its bottom edge: the board keeps
+   * its size in the design, its first screen, and its layers fixed when
+   * scrolling stay on screen. `"none"` (the default) scrolls only as far
+   * as the board is high. Only a board at the top of a page can scroll
+   * so.
+   *
+   * @example
+   * ```js
+   * menu.resize(402, 874);
+   * menu.scrollOverflow = "vertical";
+   * ```
+   */
+  scrollOverflow: 'none' | 'vertical';
+
+  /**
    * When true the board will be displayed in the view mode
    */
   showInViewMode: boolean;

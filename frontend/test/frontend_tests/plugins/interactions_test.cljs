@@ -180,3 +180,26 @@
             (set! (.-action i) #js {:type "navigate-to" :destination board2
                                     :animation #js {:type type :direction "up" :duration 400}})
             (t/is (= "linear" (.. i -action -animation -easing)) "linear without an easing")))))))
+
+(t/deftest a-top-board-scrolls-through-its-content
+  ;; Penpot Motion: `scrollOverflow`, see `app.main.data.viewer.scroll`
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js menu    (.createBoard context)
+            ^js inner   (.createBoard context)
+            stored      #(get-in @store [:files (aget (. context -currentFile) "$id") :data :pages-index
+                                         (aget (. context -currentPage) "$id") :objects (aget % "$id")])]
+        (ptk/emit! store #(assoc-in % [:plugins :flags plugin-id :throw-validation-errors] true))
+        (.appendChild menu inner)
+        (t/is (= "none" (.-scrollOverflow menu)))
+        (set! (.-scrollOverflow menu) "vertical")
+        (t/is (= "vertical" (.-scrollOverflow menu)))
+        (t/is (= :vertical (:scroll-overflow (stored menu))))
+        (t/is (throws? #(set! (.-scrollOverflow menu) "horizontal")) "vertically only, for now")
+        (t/is (throws? #(set! (.-scrollOverflow inner) "vertical")) "a board in a board does not")
+        (t/is (= "none" (.-scrollOverflow inner)))
+        (set! (.-scrollOverflow menu) "none")
+        (t/is (not (contains? (stored menu) :scroll-overflow)) "none is no attribute")))))

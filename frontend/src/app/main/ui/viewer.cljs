@@ -25,6 +25,7 @@
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.devices :as dvd]
    [app.main.data.viewer.preview :as dvp]
+   [app.main.data.viewer.scroll :as dvs]
    [app.main.data.viewer.shortcuts :as sc]
    [app.main.data.viewer.turn :as dvt]
    [app.main.features :as features]
@@ -114,14 +115,14 @@
 (defn fixed-drop
   "Px of the first screen of the board `frame` below the screen of
   `device` (see `dvd/resolve-device`) it shows in: the screen of the
-  device \"auto\" gives it, else all of it (see `dvd/first-screen-h`).
-  Its layers fixed when scrolling sit on its first screen; those at its
-  bottom stay at the bottom of a lower one (see `vpc/fixed-pins`). Nil
-  without a device or with nothing below."
+  device \"auto\" gives it, else all of it, or its box when it scrolls
+  through its content (see `dvd/board-first-screen-h`). Its layers fixed
+  when scrolling sit on its first screen; those at its bottom stay at the
+  bottom of a lower one (see `vpc/fixed-pins`). Nil without a device or
+  with nothing below."
   [frame device]
   (when (some? device)
-    (let [{:keys [width height]} (:selrect frame)
-          drop (- (dvd/first-screen-h width height) (:screen-h device))]
+    (let [drop (- (dvd/board-first-screen-h frame) (:screen-h device))]
       (when (pos? drop) drop))))
 
 (defn calculate-delta
@@ -471,10 +472,16 @@
 
         page-id (or page-id (-> file :data :pages first))
 
+        ;; its top boards that scroll through their content as high as it
+        ;; goes (see `dvs/scroll-page`), but in the Inspect, which shows
+        ;; them as they are
         base-page (mf/use-memo
-                   (mf/deps data page-id)
+                   (mf/deps data page-id section)
                    (fn []
-                     (get-in data [:pages page-id])))
+                     (let [page (get-in data [:pages page-id])]
+                       (cond-> page
+                         (and (some? page) (not= section :inspect))
+                         (dvs/scroll-page)))))
 
         ;; the device the boards show in, in the Interactions section
         ;; (see `dv/device-shown`): the screen is the section of the

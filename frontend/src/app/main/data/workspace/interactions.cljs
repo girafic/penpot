@@ -103,6 +103,20 @@
                                        (assoc shape :counterpart counterpart)
                                        (dissoc shape :counterpart)))))))))
 
+(defn set-scroll-overflow
+  "Make the top board `id` scroll in the prototype as `overflow` says
+  (see `app.main.data.viewer.scroll`): `:vertical` through its content
+  below its bottom edge, nil not past its box."
+  [id overflow]
+  (ptk/reify ::set-scroll-overflow
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (dwsh/update-shapes [id]
+                                 (fn [shape]
+                                   (if (some? overflow)
+                                     (assoc shape :scroll-overflow overflow)
+                                     (dissoc shape :scroll-overflow))))))))
+
 (defn update-flow
   [page-id flow-id update-fn]
 

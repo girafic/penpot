@@ -2260,6 +2260,31 @@
                      :else
                      (st/emit! (dwsh/update-shapes [id] #(assoc % :show-content (not value))))))}
 
+                {:name "scrollOverflow"
+                 :get
+                 (fn [self]
+                   (if (= :vertical (-> self u/proxy->shape :scroll-overflow))
+                     "vertical"
+                     "none"))
+
+                 :set
+                 (fn [self value]
+                   (cond
+                     (not (contains? #{"none" "vertical"} value))
+                     (u/not-valid plugin-id :scrollOverflow value)
+
+                     (not (cfh/root-frame? (u/proxy->shape self)))
+                     (u/not-valid plugin-id :scrollOverflow "Only a board at the top of a page scrolls in the prototype")
+
+                     (not (r/check-permission plugin-id "content:write"))
+                     (u/not-valid plugin-id :scrollOverflow "Plugin doesn't have 'content:write' permission")
+
+                     (not (u/page-active? page-id))
+                     (u/not-valid plugin-id :scrollOverflow "Cannot modify a page that is not currently active")
+
+                     :else
+                     (st/emit! (dwi/set-scroll-overflow id (when (= value "vertical") :vertical)))))}
+
                 {:name "perspective"
                  :get
                  (fn [self]

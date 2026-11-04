@@ -391,7 +391,12 @@
    ;; place (Penpot Motion, see `app.main.data.viewer.turn`): another
    ;; top board that stands the other way, or its own id for itself
    ;; turned by its constraints; absent, the board named as it.
-   [:counterpart {:optional true} ::sm/uuid]])
+   [:counterpart {:optional true} ::sm/uuid]
+   ;; How a top board scrolls in the prototype (Penpot Motion, see
+   ;; `app.main.data.viewer.scroll`): `:vertical` through what its content
+   ;; holds below its bottom edge, its box staying the first screen;
+   ;; absent, as high as it is.
+   [:scroll-overflow {:optional true} [::sm/one-of #{:vertical}]]])
 
 (def ^:private schema:nilable-geom-attrs
   "`schema:shape-geom-attrs`, but nilable.
@@ -626,7 +631,7 @@
 (def ^:private allowed-group-attrs #{:shapes})
 (def ^:private allowed-frame-attrs #{:shapes :hide-fill-on-export :show-content :hide-in-viewer
                                      :perspective :perspective-x :perspective-y :orthographic
-                                     :light :depth-fade :depth-blur :depth-focus
+                                     :light :depth-fade :depth-blur :depth-focus :scroll-overflow
                                      :layout :layout-flex-dir :layout-gap-type :layout-gap
                                      :layout-align-items :layout-justify-content :layout-align-content
                                      :layout-wrap-type :layout-padding-type :layout-padding

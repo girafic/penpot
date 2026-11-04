@@ -350,3 +350,15 @@
           objs   (objects (frame pid :depth-blur 4) plain hidden)]
       (is (some? (css/get-css-value objs plain :filter)) "the depth blur")
       (is (= (css/get-css-value objs plain :filter) (css/get-css-value objs hidden :filter))))))
+
+;; --- Overflow --------------------------------------------------------------
+
+(deftest a-board-that-scrolls-in-the-prototype-scrolls-its-content
+  (let [clipped   (frame (uuid/next))
+        shown     (frame (uuid/next) :show-content true)
+        scrolling (frame (uuid/next) :scroll-overflow :vertical)
+        objs      (objects clipped shown scrolling)]
+    (is (= "hidden" (css/get-css-value objs clipped :overflow)))
+    (is (nil? (css/get-css-value objs shown :overflow)))
+    (is (= "hidden auto" (css/get-css-value objs scrolling :overflow))
+        "clipped across, scrolling down (see `app.main.data.viewer.scroll`)")))

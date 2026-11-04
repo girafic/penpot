@@ -46,6 +46,7 @@
    [frontend-tests.data.uploads-test]
    [frontend-tests.data.viewer-devices-test]
    [frontend-tests.data.viewer-playback-test]
+   [frontend-tests.data.viewer-scroll-test]
    [frontend-tests.data.viewer-test]
    [frontend-tests.data.viewer-turn-test]
    [frontend-tests.data.workspace-audio-recording-test]
@@ -284,6 +285,7 @@
    'frontend-tests.data.uploads-test
    'frontend-tests.data.viewer-devices-test
    'frontend-tests.data.viewer-playback-test
+   'frontend-tests.data.viewer-scroll-test
    'frontend-tests.data.viewer-test
    'frontend-tests.data.viewer-turn-test
    'frontend-tests.data.workspace-audio-recording-test

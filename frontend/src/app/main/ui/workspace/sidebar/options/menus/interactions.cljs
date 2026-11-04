@@ -812,6 +812,39 @@
       [:p {:class (stl/css :counterpart-hint)}
        (tr "workspace.options.counterpart.hint")]]]))
 
+(mf/defc scrolling*
+  "How the top board `shape` scrolls in the prototype (see
+  `app.main.data.viewer.scroll`): not past its box, or vertically through
+  its content below its bottom edge."
+  {::mf/private true}
+  [{:keys [shape]}]
+  (let [id      (:id shape)
+        value   (if (= :vertical (:scroll-overflow shape)) "vertical" "none")
+        options (mf/with-memo []
+                  [{:value "none" :label (tr "workspace.options.scrolling.none")}
+                   {:value "vertical" :label (tr "workspace.options.scrolling.vertical")}])
+        on-change
+        (mf/use-fn
+         (mf/deps id)
+         (fn [value]
+           (st/emit! (dwi/set-scroll-overflow id (when (= value "vertical") :vertical)))))]
+    [:div {:class (stl/css :section)}
+     [:div {:class (stl/css :title)}
+      [:> title-bar* {:collapsable false
+                      :title (tr "workspace.options.scrolling")
+                      :class (stl/css :title-bar)}]]
+     [:div {:class (stl/css :content)}
+      [:div {:class (stl/css :interaction-row)}
+       [:div {:class (stl/css :interaction-row-label)}
+        [:div {:class (stl/css :interaction-row-name)}
+         (tr "workspace.options.scrolling.overflow")]]
+       [:div {:class (stl/css :interaction-row-select)}
+        [:& select {:default-value value
+                    :options options
+                    :on-change on-change}]]]
+      [:p {:class (stl/css :counterpart-hint)}
+       (tr "workspace.options.scrolling.hint")]]]))
+
 (mf/defc interactions*
   [{:keys [interactions shape]}]
   (let [show-content* (mf/use-state true)
@@ -879,7 +912,9 @@
           [:> shape-flows* {:flows flows
                             :shape shape}]
           (when (cfh/root-frame? shape)
-            [:> counterpart* {:shape shape}])])
+            [:*
+             [:> counterpart* {:shape shape}]
+             [:> scrolling* {:shape shape}]])])
        [:*
         (when flows
           [:> page-flows* {:flows flows}])

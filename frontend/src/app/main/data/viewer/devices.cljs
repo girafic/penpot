@@ -15,7 +15,8 @@
   iPhone Duo, which stands wide."
   (:require
    [app.common.data :as d]
-   [app.common.math :as mth]))
+   [app.common.math :as mth]
+   [app.main.data.viewer.scroll :as dvs]))
 
 (def kinds
   "The devices, in the order they claim a size they share (an iPhone
@@ -200,6 +201,14 @@
   else all of it."
   [bw bh]
   (min bh (or (:screen-h (resolve-device "auto" bw bh)) bh)))
+
+(defn board-first-screen-h
+  "How high the first screen of the board `frame` of the view mode is:
+  its box in the design when it scrolls through its content (see
+  `dvs/screen-h`), else as `first-screen-h` has it."
+  [frame]
+  (let [{:keys [width height]} (:selrect frame)]
+    (or (dvs/screen-h frame) (first-screen-h width height))))
 
 (defn turn
   "`device` (see `resolve-device`) turned a quarter: on its side, or

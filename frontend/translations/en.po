@@ -8794,6 +8794,26 @@ msgstr "Portrait version"
 msgid "workspace.options.counterpart.turn"
 msgstr "None: turn the board"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling"
+msgstr "Scrolling"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.hint"
+msgstr "In the prototype, the board scrolls through the content below its bottom edge"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.none"
+msgstr "None"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.overflow"
+msgstr "Overflow"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.vertical"
+msgstr "Vertical"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/prototype_background.cljs
 msgid "workspace.options.prototype-background"
 msgstr "Prototype background"
