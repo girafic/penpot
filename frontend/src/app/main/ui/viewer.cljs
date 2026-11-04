@@ -152,7 +152,8 @@
 (defn calculate-delta
   "Calculate the displacement we need to apply so that the original selrect appears in the
    same position as if it had no extra paddings, depending on the side the frame will
-   be snapped to."
+   be snapped to. In px of the board, as its view box takes it (see
+   `vpc/prepare-objects`), at any `zoom` of `size`."
   [size selrect [snap-v snap-h] zoom]
   (let [delta-x (case snap-h
                   :left   (- (:x1 selrect) (:x size))
@@ -164,7 +165,7 @@
                   :bottom (- (:y2 selrect) (+ (:y size) (/ (:height size) zoom)))
                   :center (- (/ (- (:height selrect) (/ (:height size) zoom)) 2)
                              (- (:y size) (:y1 selrect))))]
-    (gpt/point (* delta-x zoom) (* delta-y zoom))))
+    (gpt/point delta-x delta-y)))
 
 (defn- calculate-wrapper
   [size1 size2 zoom]

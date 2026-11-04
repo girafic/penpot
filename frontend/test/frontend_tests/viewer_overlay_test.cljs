@@ -6,7 +6,7 @@
 
 (ns frontend-tests.viewer-overlay-test
   "Where an overlay with a shadow shows: its box where its position says,
-  the margin of the shadow round it."
+  the margin of the shadow round it, at any zoom."
   (:require
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
@@ -30,3 +30,17 @@
   (t/is (= (gpt/point -116 110) (viewer/overlay-element-position (overlay [:bottom :center]) size))
         "at the bottom the element ends where the box does, in the middle across")
   (t/is (= (gpt/point -232 242) (viewer/overlay-element-position (overlay [:center :right]) size))))
+
+(defn- sized
+  "What `calculate-size` gives for the bounds of that box at `zoom`: its
+  start in px of the board, its size in px of the screen too."
+  [zoom]
+  (assoc size :x 384 :y -116 :width (* 634 zoom) :height (* 764 zoom)))
+
+(t/deftest an-overlay-shifts-its-box-by-px-of-the-board-at-any-zoom
+  (let [selrect (grc/make-rect 500 0 402 500)]
+    (doseq [zoom [1 0.6418 2]]
+      (t/is (gpt/close? (gpt/point 0 -148) (viewer/calculate-delta (sized zoom) selrect [:bottom :center] zoom))
+            (str "at the bottom it moves up by the shadow below, at zoom " zoom))
+      (t/is (gpt/close? (gpt/point 116 116) (viewer/calculate-delta (sized zoom) selrect [:top :left] zoom))
+            (str "at the top left by the margin above and before, at zoom " zoom)))))
