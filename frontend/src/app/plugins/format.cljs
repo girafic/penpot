@@ -565,7 +565,7 @@
        :open-overlay
        #js {:type "open-overlay"
             :destination (when (:destination interaction) (shape-proxy plugin file-id page-id (:destination interaction)))
-            :relativeTo (when (:relative-to interaction) (shape-proxy plugin file-id page-id (:relative-to interaction)))
+            :relativeTo (when (:position-relative-to interaction) (shape-proxy plugin file-id page-id (:position-relative-to interaction)))
             :position (format-key (:overlay-pos-type interaction))
             :manualPositionLocation (format-point (:overlay-position interaction))
             :closeWhenClickOutside (:close-click-outside interaction)
@@ -575,7 +575,7 @@
        :toggle-overlay
        #js {:type "toggle-overlay"
             :destination (when (:destination interaction) (shape-proxy plugin file-id page-id (:destination interaction)))
-            :relativeTo (when (:relative-to interaction) (shape-proxy plugin file-id page-id (:relative-to interaction)))
+            :relativeTo (when (:position-relative-to interaction) (shape-proxy plugin file-id page-id (:position-relative-to interaction)))
             :position (format-key (:overlay-pos-type interaction))
             :manualPositionLocation (format-point (:overlay-position interaction))
             :closeWhenClickOutside (:close-click-outside interaction)

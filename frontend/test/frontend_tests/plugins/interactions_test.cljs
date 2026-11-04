@@ -212,3 +212,23 @@
         (t/is (= "both" (.-scrollOverflow menu)) "a top board shows what it has, moved out of a board")
         (set! (.-scrollOverflow menu) "none")
         (t/is (not (contains? (stored menu) :scroll-overflow)) "none is no attribute")))))
+
+(t/deftest an-overlay-opens-relative-to-a-layer
+  ;; `relativeTo` went to a key the position of the overlay does not read
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js board   (.createBoard context)
+            ^js chip    (.createRectangle context)
+            ^js menu    (.createBoard context)
+            stored      #(get-in @store [:files (aget (. context -currentFile) "$id") :data :pages-index
+                                         (aget (. context -currentPage) "$id") :objects (aget % "$id")])]
+        (set! format/shape-proxy shape/shape-proxy)
+        (.appendChild board chip)
+        (let [^js i (.addInteraction chip "click" #js {:type "open-overlay" :destination menu
+                                                       :relativeTo chip :position "bottom-left"})]
+          (t/is (= (aget chip "$id") (-> (stored chip) :interactions first :position-relative-to))
+                "where the position reads it")
+          (t/is (= (aget chip "$id") (aget (.. i -action -relativeTo) "$id")) "and back"))))))
