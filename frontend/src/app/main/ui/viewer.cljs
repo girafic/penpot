@@ -293,6 +293,21 @@
          :frame frame
          :page page}])]))
 
+(defn overlay-element-position
+  "Where the element of `overlay` goes, in px of the board (`size` its
+  bounds, see `calculate-size`): `:position` is where the box of its board
+  goes, and the element, larger than it by the margin of shadows, blur
+  and strokes, holds the box at its snap side (see `calculate-delta`), so
+  it moves back by that margin at a bottom or right side, by half of it
+  in the middle."
+  [overlay size]
+  (let [{:keys [width height]} (dm/get-in overlay [:frame :selrect])
+        [snap-v snap-h] (:snap-to overlay)
+        part     #(case % (:bottom :right) 1 :center 0.5 0)
+        position (:position overlay)]
+    (gpt/point (+ (:x position) (* (part snap-h) (- width (:base-width size))))
+               (+ (:y position) (* (part snap-v) (- height (:base-height size)))))))
+
 (mf/defc viewer-overlay
   [{:keys [overlay page frame zoom wrapper-size interactions-mode scroll]}]
   (let [close-click-outside? (:close-click-outside overlay)
@@ -313,6 +328,10 @@
         delta
         (mf/with-memo [size overlay-frame overlay zoom]
           (calculate-delta size (:selrect overlay-frame) (:snap-to overlay) zoom))
+
+        element-position
+        (mf/with-memo [overlay size]
+          (overlay-element-position overlay size))
 
         on-click
         (mf/use-fn
@@ -337,8 +356,8 @@
      (if fixed-base?
        [:div {:class (stl/css :viewport-container-wrapper)
               :style {:position "absolute"
-                      :left (* (:x overlay-position) zoom)
-                      :top (* (:y overlay-position) zoom)
+                      :left (* (:x element-position) zoom)
+                      :top (* (:y element-position) zoom)
                       :width (:width size)
                       :height (:height size)
                       :z-index 2}}
@@ -362,8 +381,8 @@
               :id (dm/str "overlay-" (:id overlay-frame))
               :style {:width (:width size)
                       :height (:height size)
-                      :left (* (:x overlay-position) zoom)
-                      :top (* (:y overlay-position) zoom)}}
+                      :left (* (:x element-position) zoom)
+                      :top (* (:y element-position) zoom)}}
         [:> interactions/viewport*
          {:frame overlay-frame
           :base-frame frame
