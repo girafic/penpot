@@ -5,9 +5,9 @@
 ;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns frontend-tests.util.code-gen-motion-svg-test
-  "Which SVG the code of the Inspect writes (Penpot Motion): the export of
-  WASM for what plays nothing, the code generation, at rest, for the
-  layers of an animated board."
+  "Which SVG the code of the Inspect and Copy as SVG write (Penpot
+  Motion): the export of WASM for what plays nothing, the code
+  generation, at rest, for the layers of an animated board."
   (:require
    [app.common.files.changes-builder :as pcb]
    [app.common.test-helpers.components :as cthc]

@@ -404,14 +404,15 @@
                  (gsh/translate-to-frame % (get objects parent-frame-id)))
 
             shapes          (mapv maybe-translate selected)
+            wasm?           (features/active-feature? state "render-wasm/v1")
             ;; With render-wasm active the SVG comes from WASM, but for
             ;; animated boards: the code generation writes them at rest,
             ;; as the Inspect does (see `cgm/svg-by-wasm?`).
-            codes           (when (features/active-feature? state "animation/v1")
+            codes           (when (and wasm? (features/active-feature? state "animation/v1"))
                               (cgm/code-of-boards (dsh/lookup-page state)
                                                   (dsh/lookup-libraries state)
-                                                  (map :id selected)))
-            svg-formatted   (if (cgm/svg-by-wasm? "svg" (features/active-feature? state "render-wasm/v1") codes)
+                                                  (cfh/selected-with-children objects (mapv :id selected))))
+            svg-formatted   (if (cgm/svg-by-wasm? "svg" wasm? codes)
                               (svg.wasm/get-formatted-svg-markup (mapv :id shapes))
                               (svg/generate-formatted-markup objects shapes))]
         (-> (clipboard/to-clipboard-multi
