@@ -28,6 +28,7 @@
    [app.main.ui.shapes.svg-raw :as svg-raw]
    [app.main.ui.shapes.text :as text]
    [app.main.ui.viewer.drag-scroll :as dds]
+   [app.main.ui.viewer.viewport-common :as vpc]
    [app.util.dom :as dom]
    [app.util.object :as obj]
    [app.util.timers :as tm]
@@ -87,7 +88,8 @@
           background-overlay         (:background-overlay interaction)
           overlays-ids               (set (map :id overlays))
           relative-to-base-frame     (find-relative-to-base-frame relative-to-shape objects overlays-ids base-frame)
-          fixed-base?                (cfh/fixed? objects relative-to-id)
+          ;; a layer fixed in a container scrolls with the screen
+          fixed-base?                (vpc/screen-fixed? objects relative-to-id)
           [position snap-to]         (ctsi/calc-overlay-position interaction
                                                                  shape
                                                                  objects

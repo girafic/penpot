@@ -15,7 +15,8 @@
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.types.modifiers :as ctm]
-   [app.common.uuid :as uuid]))
+   [app.common.uuid :as uuid]
+   [app.main.data.viewer.scroll :as dvs]))
 
 (defn prepare-objects
   [frame size delta objects]
@@ -29,29 +30,61 @@
          (reduce update-fn objects))))
 
 (defn get-fixed-ids
-  [objects]
-  (let [fixed-ids (filter cfh/fixed-scroll? (vals objects))
+  ([objects]
+   (get-fixed-ids objects cfh/fixed-scroll?))
+  ([objects fixed?]
+   (let [fixed-ids (filter fixed? (vals objects))
 
-        fixed-children-ids
-        (into #{} (mapcat #(cfh/get-children-ids objects (:id %)) fixed-ids))
+         fixed-children-ids
+         (into #{} (mapcat #(cfh/get-children-ids objects (:id %)) fixed-ids))
 
-        parent-children-ids
-        (->> fixed-ids
-             (mapcat #(cons (:id %) (cfh/get-parent-ids objects (:id %))))
-             (remove #(= % uuid/zero)))
+         parent-children-ids
+         (->> fixed-ids
+              (mapcat #(cons (:id %) (cfh/get-parent-ids objects (:id %))))
+              (remove #(= % uuid/zero)))
 
-        fixed-ids
-        (concat fixed-children-ids parent-children-ids)]
-    fixed-ids))
+         fixed-ids
+         (concat fixed-children-ids parent-children-ids)]
+     fixed-ids)))
+
+(defn in-container?
+  "Whether the layer `id` of `objects` is in a board that scrolls its
+  content in the view mode (see `dvs/container-axes`): fixed when
+  scrolling there, it stays with that board, not with the screen."
+  [objects id]
+  (boolean (some #(dvs/container-axes objects (get objects %))
+                 (cfh/get-parent-ids-seq objects id))))
+
+(defn screen-fixed-layer?
+  "Whether the layer `shape` of `objects` stays on screen as it scrolls:
+  fixed when scrolling, and not in a container (see `in-container?`)."
+  [objects shape]
+  (and (cfh/fixed-scroll? shape)
+       (not (in-container? objects (:id shape)))))
+
+(defn screen-fixed?
+  "Whether the layer `id` of `objects`, one it holds or one it is in
+  below its top board stays on screen as it scrolls (see
+  `screen-fixed-layer?`), as `cfh/fixed?` asks but for the layers fixed
+  in a container."
+  [objects id]
+  (boolean
+   (some #(screen-fixed-layer? objects (get objects %))
+         (concat [id]
+                 (cfh/get-children-ids objects id)
+                 (->> (cfh/get-parent-ids objects id)
+                      (take-while #(and (not= % uuid/zero) (not (cfh/root-frame? objects %)))))))))
 
 (defn frame-fixed-mask-ids
-  "Fixed-layer shape ids inside `frame-id` (same rules as `get-fixed-ids`)."
+  "Fixed-layer shape ids inside `frame-id` (same rules as
+  `get-fixed-ids`): the layers that stay on screen as it scrolls (see
+  `screen-fixed-layer?`)."
   [objects frame-id]
   (when frame-id
     (let [subtree (into #{} (cfh/get-children-ids-with-self objects frame-id))]
       (into #{}
             (filter #(contains? subtree %)
-                    (get-fixed-ids objects))))))
+                    (get-fixed-ids objects #(screen-fixed-layer? objects %)))))))
 
 (defn fixed-pins
   "How far up each layer of the board `frame-id` of `objects` fixed when

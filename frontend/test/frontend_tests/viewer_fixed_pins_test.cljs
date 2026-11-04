@@ -74,3 +74,37 @@
     (t/is (nil? (viewer/fixed-drop board nil)) "nothing without a device")
     (t/is (= 874 (dvd/first-screen-h 402 1814)) "the first screen of a long board")
     (t/is (= 500 (dvd/first-screen-h 500 500)) "all of a board no device takes")))
+
+;; --- Fixed layers in containers (see `app.main.data.viewer.scroll`)
+
+(def ^:private list-id (uuid/custom 10 8))
+(def ^:private pin (uuid/custom 10 9))
+(def ^:private card (uuid/custom 10 10))
+(def ^:private badge (uuid/custom 10 11))
+
+(def ^:private container-objects
+  "The board of `objects` with a container, the list, holding a layer
+  fixed when scrolling (its pin), and an ordinary board, the card,
+  holding one (its badge)."
+  (-> objects
+      (update-in [board-id :shapes] conj list-id card)
+      (assoc list-id (shape list-id :frame board-id 24 100 354 300 :scroll-overflow :vertical :shapes [pin])
+             pin     (shape pin :rect list-id 24 360 354 40 :fixed-scroll true)
+             card    (shape card :frame board-id 24 500 354 100 :shapes [badge])
+             badge   (shape badge :rect card 30 510 40 40 :fixed-scroll true))
+      (assoc-in [pin :frame-id] list-id)
+      (assoc-in [badge :frame-id] card)))
+
+(t/deftest a-fixed-layer-of-a-container-stays-with-it
+  (let [fixed (vpc/frame-fixed-mask-ids container-objects board-id)]
+    (t/is (not (contains? fixed pin)) "it stays as its container scrolls, not on screen")
+    (t/is (not (contains? fixed list-id)) "nor does it bring its container onto the fixed layer")
+    (t/is (contains? fixed badge) "one of an ordinary board stays on screen, as before")
+    (t/is (contains? fixed header))
+    (t/is (vpc/in-container? container-objects pin))
+    (t/is (not (vpc/screen-fixed? container-objects pin)) "an overlay from it scrolls with the screen")
+    (t/is (vpc/screen-fixed? container-objects badge))
+    (t/is (vpc/screen-fixed? container-objects tab) "and one from a layer of a fixed one does not")
+    (t/is (= (set (vpc/get-fixed-ids container-objects))
+             (set (concat (vpc/get-fixed-ids objects) [pin list-id card badge])))
+          "the SVG renderer keeps its rule")))

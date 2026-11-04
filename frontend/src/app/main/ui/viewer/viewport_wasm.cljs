@@ -201,7 +201,7 @@
 
         has-fixed?
         (and (not is-fixed)
-             (some #(cfh/fixed-scroll? (get objects %))
+             (some #(vpc/screen-fixed-layer? objects (get objects %))
                    (cfh/get-children-ids objects frame-id)))
 
         prepared
