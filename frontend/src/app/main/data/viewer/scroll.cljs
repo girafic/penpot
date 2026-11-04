@@ -200,6 +200,53 @@
              {}
              scroll))
 
+(defn gesture-axis
+  "The axis of a wheel gesture whose first step is `[dx dy]`: the one it
+  moves more along (a trackpad swiped down moves sideways a little too)."
+  [[dx dy]]
+  (if (> (mth/abs dx) (mth/abs dy)) :x :y))
+
+(defn takes-gesture?
+  "Whether a container that scrolls along `axes` takes a gesture along
+  `axis` (see `gesture-axis`): one of its axis; one that scrolls both
+  ways, any."
+  [axes axis]
+  (or (= axes #{:x :y}) (contains? axes axis)))
+
+(defn can-scroll?
+  "Whether a container scrolled `offset` (`[x y]`) within `range` (see
+  `scroll-range`) along `axes` can still move as `[dx dy]` asks, along one
+  of them at least."
+  [[max-x max-y] [x y] axes [dx dy]]
+  (letfn [(moves? [v max d]
+            (or (and (pos? d) (< v max)) (and (neg? d) (> v 0))))]
+    (or (and (contains? axes :x) (moves? x max-x dx))
+        (and (contains? axes :y) (moves? y max-y dy)))))
+
+(declare scroll-shifts)
+
+(defn container-at
+  "The containers of `ids` under the point `point` of the page of the
+  shown `objects`, the innermost first: their boxes where the scroll
+  `offsets` of the ones around them (`{id [x y]}`, see `view-offsets`)
+  and `extra` (`{id point}`, how far else they show moved) have them, and
+  within those boxes too (a container clips what it holds)."
+  [objects ids offsets point & {:keys [extra]}]
+  (let [ids     (set ids)
+        shifts  (scroll-shifts objects offsets)
+        zero    (gpt/point 0 0)
+        inside? (fn [id]
+                  (let [{:keys [x y width height]} (dm/get-in objects [id :selrect])
+                        shift (gpt/add (get shifts id zero) (get extra id zero))]
+                    (grc/contains-point? (grc/make-rect (+ x (:x shift)) (+ y (:y shift)) width height)
+                                         point)))
+        around  (fn [id] (filter ids (cfh/get-parent-ids-seq objects id)))
+        hit     (into #{} (filter inside?) ids)]
+    (->> hit
+         (filter #(every? hit (around %)))
+         (sort-by #(count (around %)) >)
+         (vec))))
+
 (defn scroll-shifts
   "How far each layer moves for the scroll `offsets` of containers
   (`{id [x y]}`): the layers of a container, but for those fixed when

@@ -124,12 +124,15 @@
   "The WASM picture of the layers of `shape-filter` and their hotspots,
   those of `pins` that far up (see `vpc/fixed-pins`). The ones that
   scroll (`scrolls`) move past an end of a touch screen (see
-  `.in-device[data-overscroll]` in the viewer styles)."
+  `.in-device[data-overscroll]` in the viewer styles); the fixed ones
+  (`fixed-layer`) stay (the wheel over their containers maps through
+  their hotspots, see `app.main.ui.viewer.container-scroll`)."
   [{:keys [canvas-ref scale size vbox
            prepared prepared-all prepared-frame class shape-filter
-           objects frame delta modifiers-ref scrolls pins]}]
+           objects frame delta modifiers-ref scrolls fixed-layer pins]}]
   (let [{:keys [width height]} (canvas-dimensions scale size)]
     [:div {:data-scroll-layer scrolls
+           :data-fixed-layer fixed-layer
            :style {:position "absolute"
                    :top 0
                    :left 0
@@ -249,6 +252,7 @@
                    :delta delta
                    :modifiers-ref modifiers-ref
                    :canvas-ref fixed-wasm-ref
+                   :fixed-layer true
                    :scale scale
                    :size size
                    :vbox vbox

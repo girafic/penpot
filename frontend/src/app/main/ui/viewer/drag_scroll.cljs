@@ -108,7 +108,7 @@
     (> top max) {:scroll max :offset (- (rubber (- top max) size))}
     :else       {:scroll top :offset 0}))
 
-(def ^:private wheel-reach
+(def wheel-reach
   "How far, as a share of its height, a wheel or a trackpad pushes a
   screen past an end at most, as a finger drags it no further than across
   it: the swing of a trackpad goes on long after it is let go."
@@ -136,7 +136,7 @@
     (pos? past) (- (rubber past size))
     :else 0))
 
-(def ^:private wheel-rest-ms
+(def wheel-rest-ms
   "How long, ms, a wheel past an end stays still before the screen springs
   back."
   90)

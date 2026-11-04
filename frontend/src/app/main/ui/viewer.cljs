@@ -41,6 +41,7 @@
    [app.main.ui.modal :refer [modal-container*]]
    [app.main.ui.viewer.background :as vbg]
    [app.main.ui.viewer.comments :refer [comments-layer comments-sidebar*]]
+   [app.main.ui.viewer.container-scroll :as cscroll]
    [app.main.ui.viewer.device-frame :as dfr :refer [device-drawing*]]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.viewer.header :as header]
@@ -927,6 +928,11 @@
     (dds/use-drag-scroll! viewer-section-ref
                           (and (some? device-layout) (dvd/touch? (:kind device)))
                           (some-> frame :fills first :fill-color))
+
+    ;; the wheel over a board that scrolls its content scrolls it
+    (cscroll/use-container-scroll! viewer-section-ref current-viewport-ref page frame size
+                                   (when-not (:turned? shown) (fixed-drop frame device))
+                                   (and wasm? (= section :interactions)))
 
     (mf/with-effect []
       (let [events

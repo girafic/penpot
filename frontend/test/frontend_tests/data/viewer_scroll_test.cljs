@@ -270,3 +270,37 @@
     (t/is (= (get objects (cthi/id :chips)) (get clipped (cthi/id :chips))) "already clipped")
     (let [plain (screen-objects 1890)]
       (t/is (identical? plain (dvs/scroll-objects plain)) "nothing to grow or clip: the same objects"))))
+
+(t/deftest a-wheel-gesture-goes-along-the-axis-it-moves-more
+  (t/is (= :y (dvs/gesture-axis [3 40])) "a trackpad swiped down")
+  (t/is (= :x (dvs/gesture-axis [-30 4])))
+  (t/is (dvs/takes-gesture? #{:x} :x))
+  (t/is (not (dvs/takes-gesture? #{:x} :y)) "a chip row lets a swipe down go on to the screen")
+  (t/is (dvs/takes-gesture? #{:x :y} :y))
+  (t/is (dvs/can-scroll? [0 1490] [0 100] #{:y} [0 40]))
+  (t/is (dvs/can-scroll? [0 1490] [0 100] #{:y} [0 -40]))
+  (t/is (not (dvs/can-scroll? [0 1490] [0 1490] #{:y} [0 40])) "at its end")
+  (t/is (not (dvs/can-scroll? [0 1490] [0 0] #{:y} [0 -40])) "at its start")
+  (t/is (not (dvs/can-scroll? [446 0] [0 0] #{:x} [0 40])) "not along its axis"))
+
+(t/deftest the-wheel-finds-the-innermost-container-under-the-pointer
+  (let [objects (-> (screen-file 1890)
+                    (cthc/add-frame :inner :parent-label :list :x 24 :y 100 :width 354 :height 200
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :item :parent-label :inner :x 24 :y 100 :width 354 :height 400)
+                    (cthf/current-page)
+                    :objects)
+        id      #(cthi/id %)
+        ids     (dvs/container-ids objects (id :screen))
+        at      (fn [x y & {:keys [offsets extra]}]
+                  (dvs/container-at objects ids (or offsets {}) (gpt/point x y) :extra extra))]
+    (t/is (= [(id :inner) (id :list)] (at 100 150)) "the innermost first")
+    (t/is (= [(id :list)] (at 100 350)) "below the inner one")
+    (t/is (= [(id :chips)] (at 100 620)))
+    (t/is (= [] (at 390 620)) "beside it")
+    (t/is (= [(id :list)] (at 100 160 :offsets {(id :list) [0 150]}))
+          "the inner one scrolled up off the pointer")
+    (t/is (= [(id :inner) (id :list)] (at 100 50 :offsets {(id :list) [0 80]}))
+          "scrolled up into the pointer")
+    (t/is (= [(id :chips)] (at 100 560 :extra {(id :chips) (gpt/point 0 -50)}))
+          "where a pin holds it")))
