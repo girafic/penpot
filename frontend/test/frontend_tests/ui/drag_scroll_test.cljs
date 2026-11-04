@@ -90,3 +90,11 @@
 (t/deftest a-board-of-the-screen-takes-the-press-from-it
   (t/is (nil? (dds/claim-press)) "without a touch device, nothing to take")
   (t/is (not (dds/claimed?))))
+
+(t/deftest a-finger-that-dragged-makes-no-tap
+  (dds/note-touch-start)
+  (t/is (not (dds/dragged?)) "a finger comes down")
+  (dds/note-touch-drag)
+  (t/is (dds/dragged?) "it dragged: its release is no tap")
+  (dds/note-touch-start)
+  (t/is (not (dds/dragged?)) "the next one starts afresh"))

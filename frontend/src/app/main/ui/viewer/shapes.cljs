@@ -242,10 +242,16 @@
                                    fixed-base?))))
     nil))
 
+(defn- touch?
+  "Whether `event` comes from a finger on a real touch screen."
+  [event]
+  (= "touch" (.-pointerType event)))
+
 (defn- on-pointer-down
   [event shape base-frame frame-offset objects overlays]
-  (let [;; on a touch device a click acts on release (see `on-pointer-up`)
-        click?       (not (dds/defer-taps?))
+  (let [;; on a touch device, or by a finger, a click acts on release (see
+        ;; `on-pointer-up`)
+        click?       (not (or (dds/defer-taps?) (touch? event)))
         interactions (->> (:interactions shape)
                           (filter #(or (and click? (= (:event-type %) :click))
                                        (= (:event-type %) :mouse-press))))]
@@ -258,8 +264,9 @@
   [event shape base-frame frame-offset objects overlays]
   (let [releases (->> (:interactions shape)
                       (filter #(= (:event-type %) :mouse-press)))
-        ;; a tap on a touch device: a press that did not drag the screen
-        taps     (when (and (dds/defer-taps?) (not (dds/dragged?)))
+        ;; a tap on a touch device, or by a finger: a press that did not
+        ;; drag
+        taps     (when (and (or (dds/defer-taps?) (touch? event)) (not (dds/dragged?)))
                    (->> (:interactions shape)
                         (filter #(= (:event-type %) :click))))]
     (when (or (seq releases) (seq taps))

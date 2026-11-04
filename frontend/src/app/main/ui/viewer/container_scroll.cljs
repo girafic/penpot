@@ -17,7 +17,8 @@
   On the screen of a touch device a press that drags along an axis of
   the innermost container under it that takes it scrolls that one: it
   takes the press from the screen (see `dds/claim-press`) before the screen
-  moves, and keeps it to the end."
+  moves, and keeps it to the end. So does a finger on a real touch
+  screen, from the first move the browser still lets go."
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
@@ -308,39 +309,105 @@
                           (when (some #(not= :rest (:mode %)) (vals @state))
                             (vreset! frame* (js/requestAnimationFrame tick)))))))
 
+                  ;; the container of the press going on `drag` that takes
+                  ;; its move along `axis`: the press as it scrolls it, nil
+                  ;; when none takes it (the screen's)
+                  (claimed [drag axis]
+                    (let [{:keys [objects]} (mf/ref-val context-ref)]
+                      (when-let [hit (d/seek #(dvs/takes-gesture? (axes-of objects (:view drag) (:id %)) axis)
+                                             (:under drag))]
+                        (let [id      (:id hit)
+                              frame   (get objects id)
+                              axes    (axes-of objects (:view drag) id)
+                              [mx my] (dvs/scroll-range objects frame axes)
+                              origin  (dvs/clamp-offset [mx my]
+                                                        (or (dm/get-in (shown-scroll (:screen-id drag)) [id :offset])
+                                                            [0 0]))
+                              {:keys [width height]} (:selrect frame)
+                              down    ^js (:down drag)
+                              start   (svg-point (:svg hit) down)]
+                          (assoc drag :id id :svg (:svg hit) :origin origin
+                                 :range {:x mx :y my}
+                                 :size {:x width :y (or (dvs/screen-h frame) height)}
+                                 :gestures (cond-> {}
+                                             (contains? axes :x)
+                                             (assoc :x (dds/start (:x start) (first origin) (.-timeStamp down)))
+                                             (contains? axes :y)
+                                             (assoc :y (dds/start (:y start) (second origin) (.-timeStamp down)))))))))
+
                   (on-drag-move [^js event]
                     (when-let [drag @drag*]
                       (if (some? (:id drag))
                         (follow drag event)
                         (when-let [axis (dds/drag-axis (:client drag) [(.-clientX event) (.-clientY event)])]
-                          (let [{:keys [objects]} (mf/ref-val context-ref)
-                                hit (d/seek #(dvs/takes-gesture? (axes-of objects (:view drag) (:id %)) axis)
-                                            (:under drag))]
-                            (if (nil? hit)
-                              ;; not one of its containers': the screen's
-                              (end-drag)
-                              (let [id      (:id hit)
-                                    frame   (get objects id)
-                                    axes    (axes-of objects (:view drag) id)
-                                    [mx my] (dvs/scroll-range objects frame axes)
-                                    origin  (dvs/clamp-offset [mx my]
-                                                              (or (dm/get-in (shown-scroll (:screen-id drag)) [id :offset])
-                                                                  [0 0]))
-                                    {:keys [width height]} (:selrect frame)
-                                    down    ^js (:down drag)
-                                    start   (svg-point (:svg hit) down)
-                                    drag    (assoc drag :id id :svg (:svg hit) :origin origin
-                                                   :range {:x mx :y my}
-                                                   :size {:x width :y (or (dvs/screen-h frame) height)}
-                                                   :gestures (cond-> {}
-                                                               (contains? axes :x)
-                                                               (assoc :x (dds/start (:x start) (first origin) (.-timeStamp down)))
-                                                               (contains? axes :y)
-                                                               (assoc :y (dds/start (:y start) (second origin) (.-timeStamp down)))))]
-                                (dds/claim-press)
+                          (if-let [drag (claimed drag axis)]
+                            (do (dds/claim-press)
                                 (set! (.. section -style -cursor) "grabbing")
                                 (vreset! drag* drag)
-                                (follow drag event))))))))
+                                (follow drag event))
+                            ;; not one of its containers': the screen's
+                            (end-drag))))))
+
+                  ;; a finger on a real touch screen, which scrolls by
+                  ;; itself: a touch that starts in a container is taken at
+                  ;; its first move the browser still lets go, if that goes
+                  ;; along an axis of it; else it scrolls the screen
+                  (touch-point [^js touch ^js event]
+                    #js {:clientX (.-clientX touch) :clientY (.-clientY touch) :timeStamp (.-timeStamp event)})
+
+                  (touch-of [drag ^js event]
+                    (d/seek #(= (:touch drag) (.-identifier %)) (array-seq (.-changedTouches event))))
+
+                  (on-touch-start [^js event]
+                    (dds/note-touch-start)
+                    (stop)
+                    (vreset! drag* nil)
+                    (when (= 1 (.. event -touches -length))
+                      (let [touch (aget (.-touches event) 0)
+                            {:keys [objects frame size fixed-drop overlays]} (mf/ref-val context-ref)
+                            view  (view-of touch (mf/ref-val viewport-ref) (:id frame) size fixed-drop overlays)
+                            under (containers-under objects (:id frame) view touch)]
+                        (when (seq under)
+                          (vreset! drag* {:screen-id (:id frame)
+                                          :view view
+                                          :under under
+                                          :touch (.-identifier touch)
+                                          :down (touch-point touch event)
+                                          :client [(.-clientX touch) (.-clientY touch)]})))))
+
+                  (on-touch-move [^js event]
+                    (let [drag  @drag*
+                          touch (some-> drag (touch-of event))]
+                      (when (some? touch)
+                        (let [point   (touch-point touch event)
+                              [x0 y0] (:client drag)
+                              dx      (- (.-clientX touch) x0)
+                              dy      (- (.-clientY touch) y0)]
+                          (when (> (max (mth/abs dx) (mth/abs dy)) dds/threshold)
+                            (dds/note-touch-drag))
+                          (cond
+                            (some? (:id drag))
+                            (do (.preventDefault event)
+                                (follow drag point))
+
+                            (and (.-cancelable event) (or (not (zero? dx)) (not (zero? dy))))
+                            (if-let [drag (claimed drag (dvs/gesture-axis [dx dy]))]
+                              (do (.preventDefault event)
+                                  (dds/note-touch-drag)
+                                  (vreset! drag* drag)
+                                  (follow drag point))
+                              (vreset! drag* nil))
+
+                            :else
+                            (vreset! drag* nil))))))
+
+                  (on-touch-end [^js event]
+                    (let [drag  @drag*
+                          touch (some-> drag (touch-of event))]
+                      (when (some? touch)
+                        (vreset! drag* nil)
+                        (when (some? (:id drag))
+                          (release drag (touch-point touch event))))))
 
                   (on-drag-up [event]
                     (let [drag @drag*]
@@ -379,9 +446,17 @@
 
             (.addEventListener section "wheel" on-wheel #js {:capture true :passive false})
             (.addEventListener section "pointerdown" on-down true)
+            (.addEventListener section "touchstart" on-touch-start #js {:capture true :passive true})
+            (.addEventListener section "touchmove" on-touch-move #js {:capture true :passive false})
+            (.addEventListener section "touchend" on-touch-end #js {:capture true})
+            (.addEventListener section "touchcancel" on-touch-end #js {:capture true})
             (fn []
               (.removeEventListener section "wheel" on-wheel #js {:capture true :passive false})
               (.removeEventListener section "pointerdown" on-down true)
+              (.removeEventListener section "touchstart" on-touch-start #js {:capture true :passive true})
+              (.removeEventListener section "touchmove" on-touch-move #js {:capture true :passive false})
+              (.removeEventListener section "touchend" on-touch-end #js {:capture true})
+              (.removeEventListener section "touchcancel" on-touch-end #js {:capture true})
               (end-drag)
               (some-> @rest* js/clearTimeout)
               (stop))))))))

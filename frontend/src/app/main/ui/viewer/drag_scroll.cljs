@@ -163,10 +163,25 @@
   []
   (some? @state*))
 
-(defn dragged?
-  "Whether the last press on the screen of a touch device dragged it."
+;; Whether the last finger on a real touch screen dragged (see
+;; `note-touch-drag`): the screen scrolls by itself there.
+(defonce ^:private touch-dragged* (atom false))
+
+(defn note-touch-start
+  "A finger on a real touch screen comes down: it dragged nothing yet."
   []
-  (true? (:dragged? @state*)))
+  (reset! touch-dragged* false))
+
+(defn note-touch-drag
+  "The finger on a real touch screen dragged: its release is no tap."
+  []
+  (reset! touch-dragged* true))
+
+(defn dragged?
+  "Whether the last press on the screen of a touch device dragged it, or
+  the last finger on a real touch screen dragged."
+  []
+  (or (true? (:dragged? @state*)) @touch-dragged*))
 
 (defn drag-axis
   "The axis a press dragged from `[x0 y0]` to `[x y]` goes along, once it
