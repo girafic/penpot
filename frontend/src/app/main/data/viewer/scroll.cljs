@@ -19,6 +19,7 @@
   (see `container-axes`), a move WASM gets after it has laid the shapes
   out (see `scroll-entries`), so no layout puts them back."
   (:require
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.matrix :as gmt]
@@ -269,6 +270,22 @@
                  (dm/get-in objects [id :shapes])))))
    {}
    offsets))
+
+(defn shift-objects
+  "`objects` with each layer of `shifts` moved as far (see
+  `scroll-shifts`): where the view mode shows them, for their hotspots
+  and what their interactions place by them."
+  [objects shifts]
+  (reduce-kv (fn [objects id shift]
+               (d/update-when objects id gsh/transform-shape (ctm/move-modifiers shift)))
+             objects
+             shifts))
+
+(defn innermost-container
+  "The container of `ids` the layer `id` of `objects` is in, the
+  innermost; nil outside them."
+  [objects ids id]
+  (d/seek ids (cfh/get-parent-ids-seq objects id)))
 
 (defn scroll-entries
   "The modifier entries `entries` of WASM (`[id matrix]`, the whole

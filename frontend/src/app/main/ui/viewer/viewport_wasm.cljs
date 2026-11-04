@@ -12,10 +12,12 @@
    [app.common.geom.modifiers :as gm]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
+   [app.main.data.viewer.scroll :as dvs]
    [app.main.render-viewer-wasm :as rwv]
    [app.main.ui.viewer.shapes :as shapes]
    [app.main.ui.viewer.viewport-common :as vpc]
    [app.render-wasm.api :as wasm.api]
+   [cuerdas.core :as str]
    [rumext.v2 :as mf]))
 
 (defn- canvas-dimensions
@@ -59,25 +61,49 @@
             (some-> @timer js/clearTimeout)))))
     (when follow? (deref state*))))
 
+(defonce ^:private no-scroll
+  (atom nil))
+
 (mf/defc wasm-hotspots-svg*
   "The hotspots of the board, over its WASM picture, where its shapes
   show: as the animation of `modifiers-ref` poses them (see
   `use-posed-modifiers`), tilted and in depth (see `shapes/hotspot*`).
   A board without hotspots does not follow the animation: posing all
   its shapes takes a while. The layers of `pins` show that far up (see
-  `vpc/fixed-pins`)."
+  `vpc/fixed-pins`). The layers in its containers follow their scroll
+  (`scroll-ref`) at once, the interactions they open from too, and the
+  hotspots there show within the boxes of their containers, which clip
+  them: one scrolled out of the box takes no click."
   [{:keys [vbox size class prepared prepared-all prepared-frame shape-filter
-           objects frame delta modifiers-ref pins]}]
-  (let [hotspots? (mf/with-memo [prepared prepared-frame shape-filter]
-                    (boolean (seq (shapes/hotspot-shapes prepared (:id prepared-frame) shape-filter))))
-        modifiers (use-posed-modifiers modifiers-ref hotspots?)
-        prepared  (mf/with-memo [prepared modifiers objects frame size delta pins]
-                    (cond-> (if (and (seq modifiers) (some? objects))
-                              (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
-                                   (vpc/prepare-objects frame size delta))
-                              prepared)
-                      (seq pins) (vpc/pin-objects pins)))
-        prepared-frame (or (get prepared (:id prepared-frame)) prepared-frame)]
+           objects frame delta modifiers-ref scroll-ref pins]}]
+  (let [hotspots?  (mf/with-memo [prepared prepared-frame shape-filter]
+                     (boolean (seq (shapes/hotspot-shapes prepared (:id prepared-frame) shape-filter))))
+        modifiers  (use-posed-modifiers modifiers-ref hotspots?)
+        scroll     (mf/deref (or scroll-ref no-scroll))
+        shifts     (mf/with-memo [objects scroll]
+                     (when (and (seq scroll) (some? objects))
+                       (not-empty (dvs/scroll-shifts objects (dvs/view-offsets objects scroll)))))
+        prepared   (mf/with-memo [prepared modifiers objects frame size delta pins shifts]
+                     (cond-> (if (and (seq modifiers) (some? objects))
+                               (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
+                                    (vpc/prepare-objects frame size delta))
+                               prepared)
+                       (seq pins)   (vpc/pin-objects pins)
+                       (seq shifts) (dvs/shift-objects shifts)))
+        prepared-all (mf/with-memo [prepared-all shifts]
+                       (cond-> prepared-all (seq shifts) (dvs/shift-objects shifts)))
+        prepared-frame (or (get prepared (:id prepared-frame)) prepared-frame)
+        containers (mf/with-memo [objects frame]
+                     (when (some? objects) (not-empty (dvs/container-ids objects (:id frame)))))
+        prefix     (str "scroll-clip-" (str/replace (mf/use-id) #"[^A-Za-z0-9]" "") "-")
+        clip-id    #(str prefix %)
+        clips      (mf/with-memo [prepared prepared-frame shape-filter containers prefix]
+                     (when (some? containers)
+                       (into {}
+                             (keep (fn [shape]
+                                     (when-let [container (dvs/innermost-container objects containers (:id shape))]
+                                       [(:id shape) (str "url(#" (clip-id container) ")")])))
+                             (shapes/hotspot-shapes prepared (:id prepared-frame) shape-filter))))]
     [:svg {:view-box vbox
            :width (:width size)
            :height (:height size)
@@ -89,11 +115,21 @@
                    :top 0
                    :left 0}
            :class class}
+     (when (seq clips)
+       [:defs
+        (for [id containers]
+          (let [outer (dvs/innermost-container objects containers id)
+                {:keys [x y width height]} (dm/get-in prepared [id :selrect])]
+            [:clipPath {:key (dm/str id)
+                        :id (clip-id id)
+                        :clip-path (when (some? outer) (str "url(#" (clip-id outer) ")"))}
+             [:rect {:x x :y y :width width :height height}]]))])
      [:> shapes/frame-hotspots*
       {:objects prepared
        :all-objects prepared-all
        :frame prepared-frame
-       :shape-filter shape-filter}]]))
+       :shape-filter shape-filter
+       :clips clips}]]))
 
 (mf/defc wasm-backdrops*
   "Under the layers fixed when scrolling (`fixed-mask-set`), boxes that
@@ -129,7 +165,7 @@
   their hotspots, see `app.main.ui.viewer.container-scroll`)."
   [{:keys [canvas-ref scale size vbox
            prepared prepared-all prepared-frame class shape-filter
-           objects frame delta modifiers-ref scrolls fixed-layer pins]}]
+           objects frame delta modifiers-ref scroll-ref scrolls fixed-layer pins]}]
   (let [{:keys [width height]} (canvas-dimensions scale size)]
     [:div {:data-scroll-layer scrolls
            :data-fixed-layer fixed-layer
@@ -153,6 +189,7 @@
                              :frame frame
                              :delta delta
                              :modifiers-ref modifiers-ref
+                             :scroll-ref scroll-ref
                              :pins pins}]]))
 
 (defn- fixed-scroll-layer-ids
@@ -232,6 +269,7 @@
                    :frame frame
                    :delta delta
                    :modifiers-ref modifiers-ref
+                   :scroll-ref scroll-ref
                    :canvas-ref not-fixed-wasm-ref
                    :scrolls (not is-fixed)
                    :scale scale
@@ -251,6 +289,7 @@
                    :frame frame
                    :delta delta
                    :modifiers-ref modifiers-ref
+                   :scroll-ref scroll-ref
                    :canvas-ref fixed-wasm-ref
                    :fixed-layer true
                    :scale scale

@@ -11,6 +11,7 @@
    [app.common.geom.tilt :as gtl]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
+   [app.main.data.viewer.scroll :as dvs]
    [app.main.ui.viewer.shapes :as vs]
    [cljs.test :as t :include-macros true]))
 
@@ -79,3 +80,16 @@
     (t/is (= [a] (map :id (vs/hotspot-shapes objs board-id nil))))
     (t/is (empty? (vs/hotspot-shapes objs board-id #(not= a %))) "the shape filter leaves it out")
     (t/is (empty? (vs/hotspot-shapes (update objs a dissoc :interactions) board-id nil)))))
+
+(t/deftest a-hotspot-in-a-container-follows-its-scroll
+  ;; Penpot Motion, see `app.main.data.viewer.scroll`
+  (let [[list row chip] (map #(uuid/custom 9 %) [20 21 22])
+        objs    (objects (shape board-id :frame uuid/zero 0 0 400 800 :frame-id uuid/zero :shapes [list])
+                         (shape list :frame board-id 20 100 360 300 :scroll-overflow :vertical :shapes [row])
+                         (shape row :rect list 20 500 360 80 :frame-id list :interactions [{:event-type :click}]))
+        shifted (dvs/shift-objects objs (dvs/scroll-shifts objs {list [0 250]}))]
+    (t/is (= 250 (get-in shifted [row :selrect :y])) "scrolled up into its box")
+    (t/is (= 100 (get-in shifted [list :selrect :y])) "its container stays")
+    (t/is (= list (dvs/innermost-container objs #{list} row)))
+    (t/is (nil? (dvs/innermost-container objs #{list} list)) "a container is not in itself")
+    (t/is (nil? (dvs/innermost-container objs #{list} chip)))))

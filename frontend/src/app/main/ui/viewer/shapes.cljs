@@ -370,7 +370,7 @@
       (gtl/projected-points objects shape))))
 
 (mf/defc hotspot*
-  [{:keys [shape objects all-objects]}]
+  [{:keys [shape objects all-objects clip]}]
   (let [base-frame   (mf/use-ctx base-frame-ctx)
         frame-offset (mf/use-ctx frame-offset-ctx)
         show-interactions (mf/deref ref:viewer-show-interactions)
@@ -397,6 +397,9 @@
 
     (when (some? outline)
       [:g {:style {:cursor (when (ctsi/actionable? interactions) "pointer")}
+           ;; in a board that scrolls its content: within its box (see
+           ;; `viewport.wasm/wasm-hotspots-svg*`)
+           :clip-path clip
            :on-pointer-down on-pd
            :on-pointer-up on-pu
            :on-pointer-enter on-pe
@@ -438,8 +441,9 @@
   frame; only shapes with interactions produce a hotspot.
 
   Optional `shape-filter` is a predicate that receives the shape id and returns
-  true when it should be included (used to split fixed-scroll vs normal layers)."
-  [{:keys [objects all-objects shape-filter frame]}]
+  true when it should be included (used to split fixed-scroll vs normal layers).
+  `clips`, the clip path of each shape in a board that scrolls its content."
+  [{:keys [objects all-objects shape-filter frame clips]}]
   (let [all-objects (or all-objects objects)
         hotspots    (hotspot-shapes objects (:id frame) shape-filter)]
     [:g {}
@@ -447,7 +451,8 @@
        [:> hotspot* {:key (str (:id shape))
                      :shape shape
                      :objects objects
-                     :all-objects all-objects}])]))
+                     :all-objects all-objects
+                     :clip (get clips (:id shape))}])]))
 
 
 ;; TODO: use-memo use-fn
