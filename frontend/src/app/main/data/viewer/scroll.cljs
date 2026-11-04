@@ -123,6 +123,16 @@
   [frame]
   (::screen-h frame))
 
+(defn design-box
+  "The board `shape` with its box as in the design when the view mode
+  grew it to its content (see `scroll-page`), as it is else: what places
+  an overlay by it, and its box as the root of one."
+  [shape]
+  (if-let [height (screen-h shape)]
+    (let [{:keys [x y width]} (:selrect shape)]
+      (assoc shape :selrect (grc/make-rect x y width height)))
+    shape))
+
 ;; --- Containers
 
 (def ^:private axes-of
@@ -237,7 +247,7 @@
         shifts  (scroll-shifts objects offsets)
         zero    (gpt/point 0 0)
         inside? (fn [id]
-                  (let [{:keys [x y width height]} (dm/get-in objects [id :selrect])
+                  (let [{:keys [x y width height]} (:selrect (design-box (get objects id)))
                         shift (gpt/add (get shifts id zero) (get extra id zero))]
                     (grc/contains-point? (grc/make-rect (+ x (:x shift)) (+ y (:y shift)) width height)
                                          point)))

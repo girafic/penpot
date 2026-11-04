@@ -294,7 +294,7 @@
          :page page}])]))
 
 (mf/defc viewer-overlay
-  [{:keys [overlay page frame zoom wrapper-size interactions-mode]}]
+  [{:keys [overlay page frame zoom wrapper-size interactions-mode scroll]}]
   (let [close-click-outside? (:close-click-outside overlay)
         background-overlay?  (:background-overlay overlay)
         overlay-frame        (:frame overlay)
@@ -304,6 +304,11 @@
         size
         (mf/with-memo [page overlay zoom]
           (calculate-size (:objects page) (:frame overlay) zoom))
+
+        ;; its containers scroll, it too as the root of one (see
+        ;; `use-scroll-ref`); it plays not the animation of the board
+        scroll-ref
+        (use-scroll-ref (:objects page) (:id frame) (:id overlay-frame) (true? scroll) true)
 
         delta
         (mf/with-memo [size overlay-frame overlay zoom]
@@ -349,6 +354,8 @@
            :size size
            :delta delta
            :page page
+           :scroll-ref scroll-ref
+           :is-overlay true
            :interactions-mode interactions-mode}]]]
 
        [:div {:class (stl/css :viewer-overlay :viewport-container)
@@ -364,6 +371,8 @@
           :size size
           :delta delta
           :page page
+          :scroll-ref scroll-ref
+          :is-overlay true
           :interactions-mode interactions-mode}]])]))
 
 (mf/defc animated-viewport*
@@ -454,7 +463,8 @@
           :frame frame
           :zoom zoom
           :wrapper-size wrapper-size
-          :interactions-mode interactions-mode}])]]
+          :interactions-mode interactions-mode
+          :scroll scroll}])]]
 
 
     (when (= section :comments)
@@ -603,6 +613,15 @@
 
         fullscreen? (mf/deref header/fullscreen-ref)
         overlays    (mf/deref current-overlays-ref)
+        ;; where the view box of each overlay starts on the page (see
+        ;; `vpc/prepare-objects`), for the wheel over its containers
+        overlay-origins
+        (mf/with-memo [overlays page zoom]
+          (mapv (fn [overlay]
+                  (let [size  (calculate-size (:objects page) (:frame overlay) zoom)
+                        delta (calculate-delta size (:selrect (:frame overlay)) (:snap-to overlay) zoom)]
+                    {:id (:id overlay) :origin (gpt/add (gpt/point (:x size) (:y size)) delta)}))
+                overlays))
         ;; the preview shows in its bar whether it plays (see below)
         playing?    (mf/deref ref:timeline-playing?)
         muted?      (mf/deref ref:audio-muted?)
@@ -932,6 +951,7 @@
     ;; the wheel over a board that scrolls its content scrolls it
     (cscroll/use-container-scroll! viewer-section-ref current-viewport-ref page frame size
                                    (when-not (:turned? shown) (fixed-drop frame device))
+                                   overlay-origins
                                    (and wasm? (= section :interactions)))
 
     (mf/with-effect []

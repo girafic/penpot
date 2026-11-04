@@ -304,3 +304,20 @@
           "scrolled up into the pointer")
     (t/is (= [(id :chips)] (at 100 560 :extra {(id :chips) (gpt/point 0 -50)}))
           "where a pin holds it")))
+
+(t/deftest a-sheet-root-places-and-takes-the-wheel-by-its-box
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :sheet :name "Sheet" :x 0 :y 0 :width 402 :height 500
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :item :parent-label :sheet :x 0 :y 1120 :width 402 :height 80)
+                    (cthf/current-page)
+                    :objects
+                    (dvs/scroll-objects))
+        sheet   (get objects (cthi/id :sheet))
+        ids     #{(cthi/id :sheet)}]
+    (t/is (= 1200 (get-in sheet [:selrect :height])) "grown by the view mode")
+    (t/is (= 500 (get-in (dvs/design-box sheet) [:selrect :height])) "placed by its box")
+    (t/is (= [(cthi/id :sheet)] (dvs/container-at objects ids {} (gpt/point 10 400))))
+    (t/is (= [] (dvs/container-at objects ids {} (gpt/point 10 600))) "below its box, nothing")
+    (t/is (= (get objects (cthi/id :item)) (dvs/design-box (get objects (cthi/id :item))))
+          "any other layer as it is")))

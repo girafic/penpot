@@ -14,6 +14,7 @@
    [app.common.types.shape.interactions :as ctsi]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.preview :as dvp]
+   [app.main.data.viewer.scroll :as dvs]
    [app.main.refs :as refs]
    [app.main.router :as rt]
    [app.main.store :as st]
@@ -77,13 +78,13 @@
     (let [manual?                    (= :manual (:overlay-pos-type interaction))
           [shape objects]            (ignore-frame-shape shape objects manual?)
           dest-frame-id              (:destination interaction)
-          dest-frame                 (get objects dest-frame-id)
+          dest-frame                 (dvs/design-box (get objects dest-frame-id))
           relative-to-id             (if manual?
                                        (if (= (:type shape) :frame) ;; manual interactions are always from "self"
                                          (:frame-id shape)
                                          (:id shape))
                                        (:position-relative-to interaction))
-          relative-to-shape          (or (get objects relative-to-id) base-frame)
+          relative-to-shape          (dvs/design-box (or (get objects relative-to-id) base-frame))
           close-click-outside        (:close-click-outside interaction)
           background-overlay         (:background-overlay interaction)
           overlays-ids               (set (map :id overlays))
@@ -110,13 +111,13 @@
     (let [manual?                    (= :manual (:overlay-pos-type interaction))
           [shape objects]            (ignore-frame-shape shape objects manual?)
           dest-frame-id              (:destination interaction)
-          dest-frame                 (get objects dest-frame-id)
+          dest-frame                 (dvs/design-box (get objects dest-frame-id))
           relative-to-id             (if (= :manual (:overlay-pos-type interaction))
                                        (if (= (:type shape) :frame) ;; manual interactions are always from "self"
                                          (:frame-id shape)
                                          (:id shape))
                                        (:position-relative-to interaction))
-          relative-to-shape          (or (get objects relative-to-id) base-frame)
+          relative-to-shape          (dvs/design-box (or (get objects relative-to-id) base-frame))
           overlays-ids               (set (map :id overlays))
           relative-to-base-frame     (find-relative-to-base-frame relative-to-shape objects overlays-ids base-frame)
           fixed-base?                (cfh/fixed? objects (:id base-frame))
@@ -178,13 +179,13 @@
     (let [manual?                    (= :manual (:overlay-pos-type interaction))
           [shape objects]            (ignore-frame-shape shape objects manual?)
           dest-frame-id              (:destination interaction)
-          dest-frame                 (get objects dest-frame-id)
+          dest-frame                 (dvs/design-box (get objects dest-frame-id))
           relative-to-id             (if (= :manual (:overlay-pos-type interaction))
                                        (if (= (:type shape) :frame) ;; manual interactions are always from "self"
                                          (:frame-id shape)
                                          (:id shape))
                                        (:position-relative-to interaction))
-          relative-to-shape          (or (get objects relative-to-id) base-frame)
+          relative-to-shape          (dvs/design-box (or (get objects relative-to-id) base-frame))
           overlays-ids               (set (map :id overlays))
           relative-to-base-frame     (find-relative-to-base-frame relative-to-shape objects overlays-ids base-frame)
           fixed-base?                (cfh/fixed? objects (:id base-frame))
@@ -212,13 +213,13 @@
     (let [manual?                    (= :manual (:overlay-pos-type interaction))
           [shape objects]            (ignore-frame-shape shape objects manual?)
           dest-frame-id              (:destination interaction)
-          dest-frame                 (get objects dest-frame-id)
+          dest-frame                 (dvs/design-box (get objects dest-frame-id))
           relative-to-id             (if (= :manual (:overlay-pos-type interaction))
                                        (if (= (:type shape) :frame) ;; manual interactions are always from "self"
                                          (:frame-id shape)
                                          (:id shape))
                                        (:position-relative-to interaction))
-          relative-to-shape          (or (get objects relative-to-id) base-frame)
+          relative-to-shape          (dvs/design-box (or (get objects relative-to-id) base-frame))
           close-click-outside        (:close-click-outside interaction)
           background-overlay         (:background-overlay interaction)
           overlays-ids               (set (map :id overlays))

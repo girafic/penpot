@@ -24,6 +24,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
+   [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.scroll :as dvs]
    [app.main.store :as st]
@@ -62,25 +63,49 @@
 (def ^:private scroll-layer-svg
   ":scope > [data-scroll-layer] > svg")
 
-(defn- containers-under
-  "The containers of the board `screen-id` of `objects` under the pointer
-  of `event` in the element `viewport` (`size` its box, see
+(defn- view-of
+  "What the pointer of `event` is over: one of the open `overlays`
+  (`{:id :origin}`, `:origin` where its view box starts on the page), its
+  element and its board, the root of one (`:overlay-root`); else the
+  board `screen-id` in the element `viewport` (`size` its box, see
   `app.main.ui.viewer/calculate-size`; `fixed-drop` how far its fixed
-  layers go up), the innermost first, those of its fixed layers before
-  (they show over the others): `[{:id :svg}]`, `:svg` the hotspots it
-  maps through."
-  [objects screen-id viewport size fixed-drop event]
-  (let [offsets (dvs/view-offsets objects (shown-scroll screen-id))
-        ids     (dvs/container-ids objects screen-id)
-        fixed?  #(vpc/screen-fixed? objects %)
-        pins    (vpc/fixed-pins objects screen-id fixed-drop)
+  layers go up)."
+  [^js event viewport screen-id size fixed-drop overlays]
+  (let [element (some-> (.-target event) (.closest "[id^='overlay-']"))
+        id      (some-> element .-id (subs 8) uuid/parse*)
+        overlay (when (some? id) (d/seek #(= id (:id %)) overlays))]
+    (if (some? overlay)
+      {:viewport element :root-id id :overlay-root id :origin (:origin overlay)}
+      {:viewport viewport :root-id screen-id :origin (gpt/point (:x size) (:y size)) :fixed-drop fixed-drop})))
+
+(defn- axes-of
+  "The axes the container `id` of `objects` scrolls along in `view` (see
+  `view-of`): the root of an overlay scrolls as one."
+  [objects view id]
+  (dvs/container-axes objects (get objects id) :overlay-root? (= id (:overlay-root view))))
+
+(defn- view-ids
+  "The containers in `view` (see `view-of`)."
+  [objects view]
+  (dvs/container-ids objects (:root-id view) :overlay-root? (some? (:overlay-root view))))
+
+(defn- containers-under
+  "The containers of `view` (see `view-of`) of the board `screen-id` of
+  `objects` under the pointer of `event`, the innermost first, those of
+  its fixed layers before (they show over the others): `[{:id :svg}]`,
+  `:svg` the hotspots it maps through."
+  [objects screen-id view event]
+  (let [{:keys [viewport root-id overlay-root origin fixed-drop]} view
+        offsets (dvs/view-offsets objects (shown-scroll screen-id) :overlay-root overlay-root)
+        ids     (view-ids objects view)
+        fixed?  (if (some? overlay-root) (constantly false) #(vpc/screen-fixed? objects %))
+        pins    (when (nil? overlay-root) (vpc/fixed-pins objects root-id fixed-drop))
         ;; a container in a fixed layer shows where its pin holds it
         extra   (into {}
                       (keep (fn [id]
                               (when-let [up (some #(get pins %) (cfh/get-parent-ids-seq objects id))]
                                 [id (gpt/point 0 (- up))])))
                       (filter fixed? ids))
-        origin  (gpt/point (:x size) (:y size))
         under   (fn [selector ids]
                   (let [svg (some-> viewport (.querySelector selector))]
                     (when-let [point (svg-point svg event)]
@@ -90,29 +115,32 @@
                  (under scroll-layer-svg (remove fixed? ids))))))
 
 (defn- target-under
-  "The container that takes the wheel `event` moving `[dx dy]` over the
-  board `screen-id` (see `containers-under`): `{:id :axes}`, `:id` nil
-  for the screen."
-  [objects screen-id viewport size fixed-drop event dx dy]
-  (let [offsets (dvs/view-offsets objects (shown-scroll screen-id))
+  "The container of `view` that takes the wheel `event` moving `[dx dy]`
+  (see `containers-under`): `{:id :axes}`, `:id` nil for the screen. Over
+  an overlay with containers none goes on to the screen beneath it
+  (`:eat`)."
+  [objects screen-id view event dx dy]
+  (let [offsets (dvs/view-offsets objects (shown-scroll screen-id) :overlay-root (:overlay-root view))
         axis    (dvs/gesture-axis [dx dy])
         id      (d/seek (fn [id]
-                          (let [frame (get objects id)
-                                axes  (dvs/container-axes objects frame)]
+                          (let [axes (axes-of objects view id)]
                             (and (dvs/takes-gesture? axes axis)
-                                 (dvs/can-scroll? (dvs/scroll-range objects frame axes)
+                                 (dvs/can-scroll? (dvs/scroll-range objects (get objects id) axes)
                                                   (get offsets id [0 0]) axes [dx dy]))))
-                        (map :id (containers-under objects screen-id viewport size fixed-drop event)))]
-    {:id id :axes (when (some? id) (dvs/container-axes objects (get objects id)))}))
+                        (map :id (containers-under objects screen-id view event)))]
+    {:id   id
+     :axes (when (some? id) (axes-of objects view id))
+     :eat  (and (nil? id) (some? (:overlay-root view)) (boolean (seq (view-ids objects view))))}))
 
 (defn use-container-scroll!
   "Lets the wheel scroll the containers of the board `frame` of `page`
   shown in the element of `viewport-ref` (`size` its box) in the section
   of `section-ref`, while `enabled?`. `fixed-drop`, how far its fixed
   layers go up (see `vpc/fixed-pins`)."
-  [section-ref viewport-ref page frame size fixed-drop enabled?]
+  [section-ref viewport-ref page frame size fixed-drop overlays enabled?]
   (let [context-ref (mf/use-ref nil)]
-    (mf/set-ref-val! context-ref {:objects (:objects page) :frame frame :size size :fixed-drop fixed-drop})
+    (mf/set-ref-val! context-ref {:objects (:objects page) :frame frame :size size :fixed-drop fixed-drop
+                                  :overlays overlays})
     (mf/with-effect [enabled?]
       (when-let [section (when enabled? (mf/ref-val section-ref))]
         (let [latch* (volatile! nil)
@@ -170,7 +198,7 @@
               on-wheel
               (fn [^js event]
                 (when-not (kbd/mod? event)
-                  (let [{:keys [objects frame size fixed-drop]} (mf/ref-val context-ref)
+                  (let [{:keys [objects frame size fixed-drop overlays]} (mf/ref-val context-ref)
                         screen-id (:id frame)
                         norm      ^js (nw/normalize-wheel event)
                         dx        (.-pixelX norm)
@@ -183,12 +211,15 @@
                         target    (if (and (some? latch) (< (- now (:at latch)) latch-ms))
                                     latch
                                     (do (vreset! past* [0 0])
-                                        (target-under objects screen-id (mf/ref-val viewport-ref)
-                                                      size fixed-drop event dx dy)))]
+                                        (target-under objects screen-id
+                                                      (view-of event (mf/ref-val viewport-ref) screen-id
+                                                               size fixed-drop overlays)
+                                                      event dx dy)))]
                     (vreset! latch* (assoc target :at now))
-                    (when-let [id (:id target)]
+                    (when (or (some? (:id target)) (:eat target))
                       (.preventDefault event)
-                      (.stopPropagation event)
+                      (.stopPropagation event))
+                    (when-let [id (:id target)]
                       (scroll! objects screen-id id (:axes target) dx dy)))))]
 
           (letfn [;; where the pointer of `event` is in the view box of
@@ -283,14 +314,14 @@
                         (follow! drag event)
                         (when-let [axis (dds/drag-axis (:client drag) [(.-clientX event) (.-clientY event)])]
                           (let [{:keys [objects]} (mf/ref-val context-ref)
-                                hit (d/seek #(dvs/takes-gesture? (dvs/container-axes objects (get objects (:id %))) axis)
+                                hit (d/seek #(dvs/takes-gesture? (axes-of objects (:view drag) (:id %)) axis)
                                             (:under drag))]
                             (if (nil? hit)
                               ;; not one of its containers': the screen's
                               (end-drag!)
                               (let [id      (:id hit)
                                     frame   (get objects id)
-                                    axes    (dvs/container-axes objects frame)
+                                    axes    (axes-of objects (:view drag) id)
                                     [mx my] (dvs/scroll-range objects frame axes)
                                     origin  (dvs/clamp-offset [mx my]
                                                               (or (dm/get-in (shown-scroll (:screen-id drag)) [id :offset])
@@ -332,12 +363,13 @@
                     (when (and (zero? (.-button event))
                                (not= "touch" (.-pointerType event))
                                (dds/defer-taps?))
-                      (let [{:keys [objects frame size fixed-drop]} (mf/ref-val context-ref)
-                            under (containers-under objects (:id frame) (mf/ref-val viewport-ref)
-                                                    size fixed-drop event)]
+                      (let [{:keys [objects frame size fixed-drop overlays]} (mf/ref-val context-ref)
+                            view  (view-of event (mf/ref-val viewport-ref) (:id frame) size fixed-drop overlays)
+                            under (containers-under objects (:id frame) view event)]
                         (when (seq under)
                           (stop!)
                           (vreset! drag* {:screen-id (:id frame)
+                                          :view view
                                           :under under
                                           :down event
                                           :client [(.-clientX event) (.-clientY event)]})

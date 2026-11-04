@@ -167,7 +167,7 @@
   containers, scrolls them with WASM only."
   {::mf/wrap [mf/memo]}
   [{:keys [interactions-mode frame-offset size delta page frame base-frame is-fixed modifiers-ref scroll-ref
-           is-snapshot fixed-drop]}]
+           is-snapshot fixed-drop is-overlay]}]
   (let [;; NOTE: with `use-equal-memo` hook we ensure that all values
         ;; conserves the reference identity for avoid unnecessary
         ;; dummy rerenders.
@@ -225,6 +225,7 @@
                                         :is-snapshot is-snapshot
                                         :modifiers-ref modifiers-ref
                                         :scroll-ref scroll-ref
+                                        :is-overlay is-overlay
                                         :fixed-drop fixed-drop}]
 
       (some? modifiers-ref)

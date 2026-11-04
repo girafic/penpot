@@ -119,7 +119,7 @@
        [:defs
         (for [id containers]
           (let [outer (dvs/innermost-container objects containers id)
-                {:keys [x y width height]} (dm/get-in prepared [id :selrect])]
+                {:keys [x y width height]} (:selrect (dvs/design-box (get prepared id)))]
             [:clipPath {:key (dm/str id)
                         :id (clip-id id)
                         :clip-path (when (some? outer) (str "url(#" (clip-id outer) ")"))}
@@ -220,9 +220,12 @@
   it (see `interactions/viewport*`). On a screen `fixed-drop` px lower
   than its first one, its layers fixed when scrolling stay where their
   vertical constraint holds them (see `vpc/fixed-pins`). `scroll-ref`
-  holds the scroll of its containers (see `rwv/use-viewer-wasm-viewport!`)."
+  holds the scroll of its containers (see `rwv/use-viewer-wasm-viewport!`);
+  `is-overlay`, the root of an overlay, scrolls as one, drawn at its box
+  when the view mode grew it (see `dvs/scroll-entries`)."
   {::mf/wrap [mf/memo]}
-  [{:keys [page frame base offset size delta is-fixed modifiers-ref scroll-ref is-snapshot fixed-drop]}]
+  [{:keys [page frame base offset size delta is-fixed modifiers-ref scroll-ref is-snapshot fixed-drop
+           is-overlay]}]
   (let [;; the same point each render, or the layers would render again
         delta     (mf/with-memo [delta] (or delta (gpt/point 0 0)))
         vbox      (:vbox size)
@@ -303,7 +306,9 @@
      page-id objects size scale frame-id
      not-fixed-wasm-ref fixed-wasm-ref
      not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids pins
-     delta modifiers-ref scroll-ref nil (true? is-snapshot))
+     delta modifiers-ref scroll-ref
+     (when (and (true? is-overlay) (some? (dvs/screen-h (get objects frame-id)))) frame-id)
+     (true? is-snapshot))
 
     [:& (mf/provider shapes/base-frame-ctx) {:value (get prepared-all (:id base))}
      [:& (mf/provider shapes/frame-offset-ctx) {:value offset}
