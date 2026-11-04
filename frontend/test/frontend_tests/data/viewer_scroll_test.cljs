@@ -5,10 +5,14 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns frontend-tests.data.viewer-scroll-test
-  "A top board that scrolls through its content in the prototype: the
-  view mode shows it as high as its content goes, its box its first
-  screen."
+  "Boards that scroll through their content in the prototype: a top
+  board the view mode shows as high as its content goes, its box its
+  first screen; a container whose content moves inside its box, a move
+  given to WASM after it laid the shapes out."
   (:require
+   [app.common.data.macros :as dm]
+   [app.common.geom.matrix :as gmt]
+   [app.common.geom.point :as gpt]
    [app.common.test-helpers.compositions :as cthc]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
@@ -103,3 +107,137 @@
     (t/is (= 800 (dvd/board-first-screen-h (first frames))))
     (t/is (= [0 0 874 1600] (box turned :menu)) "as wide as the screen on its side, as high as its content")
     (t/is (= [0 314 874 88] (box turned :tabs)) "at the bottom of the screen it scrolls in")))
+
+;; --- Containers
+
+(defn- screen-file
+  "A page with the top board Screen 402 × 874 holding the container List
+  (24, 0, 354 × 400, `list` its other attributes) with rows down to
+  `bottom` and a layer fixed when scrolling, and the chip row Chips
+  (24, 600, 354 × 48) with chips across 800 px."
+  [bottom & {:as list}]
+  (-> (cthf/sample-file :file1)
+      (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
+      (cthc/add-frame :list (merge {:name "List" :parent-label :screen :x 24 :y 0 :width 354 :height 400
+                                    :scroll-overflow :vertical}
+                                   list))
+      (cths/add-sample-shape :row1 :parent-label :list :x 24 :y 0 :width 354 :height 80)
+      (cths/add-sample-shape :row2 :parent-label :list :x 24 :y (- bottom 80) :width 354 :height 80)
+      (cths/add-sample-shape :pin :parent-label :list :x 24 :y 360 :width 354 :height 40 :fixed-scroll true)
+      (cthc/add-frame :chips {:name "Chips" :parent-label :screen :x 24 :y 600 :width 354 :height 48
+                              :scroll-overflow :horizontal})
+      (cths/add-sample-shape :chip1 :parent-label :chips :x 24 :y 604 :width 120 :height 40)
+      (cths/add-sample-shape :chip2 :parent-label :chips :x 704 :y 604 :width 120 :height 40)))
+
+(defn- screen-objects
+  [& args]
+  (:objects (cthf/current-page (apply screen-file args))))
+
+(defn- shape
+  [objects label]
+  (get objects (cthi/id label)))
+
+(defn- move-of
+  "The translation of `matrix`, `[x y]` rounded."
+  [matrix]
+  [(js/Math.round (dm/get-prop matrix :e)) (js/Math.round (dm/get-prop matrix :f))])
+
+(t/deftest a-container-scrolls-as-far-as-its-content-goes-past-its-box
+  (let [objects (screen-objects 1890)]
+    (t/is (= #{:y} (dvs/container-axes objects (shape objects :list))))
+    (t/is (= #{:x} (dvs/container-axes objects (shape objects :chips))))
+    (t/is (= [0 1490] (dvs/scroll-range objects (shape objects :list) #{:y}))
+          "rows down to 1890 in a box 400 high, the fixed layer left out")
+    (t/is (= [446 0] (dvs/scroll-range objects (shape objects :chips) #{:x}))
+          "chips across 800 px in a box 354 wide")
+    (t/is (= [0 0] (dvs/scroll-range (screen-objects 300) (shape (screen-objects 300) :list) #{:y}))
+          "content that fits")
+    (let [padded (screen-objects 1890 :layout :flex :layout-flex-dir :column :layout-padding-type :multiple
+                                 :layout-padding {:p1 0 :p2 0 :p3 48 :p4 0})]
+      (t/is (= [0 1538] (dvs/scroll-range padded (shape padded :list) #{:y})) "its bottom padding counts"))
+    (t/is (= [0 0] (dvs/clamp-offset [0 0] [10 -5])))
+    (t/is (= [0 1490] (dvs/clamp-offset [0 1490] [-3 2000])))))
+
+(t/deftest a-top-board-is-a-container-only-as-the-root-of-an-overlay
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :sheet :name "Sheet" :x 0 :y 0 :width 402 :height 500
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :item :parent-label :sheet :x 0 :y 1120 :width 402 :height 80)
+                    (cthf/current-page)
+                    :objects
+                    (dvs/scroll-objects))
+        sheet   (shape objects :sheet)]
+    (t/is (nil? (dvs/container-axes objects sheet)) "as a screen it scrolls as a page does")
+    (t/is (= #{:y} (dvs/container-axes objects sheet :overlay-root? true)))
+    (t/is (= #{:y} (dvs/container-axes objects (assoc sheet :scroll-overflow :both) :overlay-root? true)))
+    (t/is (nil? (dvs/container-axes objects (assoc sheet :scroll-overflow :horizontal) :overlay-root? true)))
+    (t/is (= [0 700] (dvs/scroll-range objects sheet #{:y}))
+          "grown to 1200 by the view mode, it scrolls from its box of 500")))
+
+(t/deftest a-turned-or-tilted-board-does-not-scroll-its-content
+  (let [objects (screen-objects 1890)
+        tilted  (-> (screen-file 1890)
+                    (cthc/add-group :group :parent-label :screen :rotate-x 30)
+                    (cthc/add-frame :inner :parent-label :group :x 24 :y 700 :width 100 :height 100
+                                    :scroll-overflow :vertical)
+                    (cthf/current-page)
+                    :objects)]
+    (t/is (nil? (dvs/container-axes objects (assoc (shape objects :list) :transform (gmt/rotate-matrix 30)))))
+    (t/is (nil? (dvs/container-axes tilted (shape tilted :inner))) "drawn in 3D")))
+
+(t/deftest the-layers-of-a-container-move-back-by-its-offset
+  (let [objects (-> (screen-file 1890)
+                    (cthc/add-frame :inner :parent-label :list :x 24 :y 100 :width 354 :height 200
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :item :parent-label :inner :x 24 :y 100 :width 354 :height 400)
+                    (cthc/add-group :group :parent-label :list)
+                    (cths/add-sample-shape :deep :parent-label :group :x 24 :y 500 :width 50 :height 50)
+                    (cthf/current-page)
+                    :objects)
+        shifts  (dvs/scroll-shifts objects {(cthi/id :list) [0 100] (cthi/id :inner) [0 30] (cthi/id :chips) [0 0]})
+        at      #(some-> (get shifts (cthi/id %)) ((juxt :x :y)))]
+    (t/is (= [0 -100] (at :row1)))
+    (t/is (= [0 -100] (at :inner)))
+    (t/is (= [0 -130] (at :item)) "in two containers")
+    (t/is (= [0 -100] (at :deep)) "and all within a layer")
+    (t/is (nil? (at :pin)) "fixed when scrolling, it stays")
+    (t/is (nil? (at :chip1)) "an offset of 0 moves nothing")))
+
+(t/deftest the-scroll-goes-on-top-of-the-entries-wasm-laid-out
+  (let [objects (-> (screen-file 1890)
+                    (cthc/add-group :group :parent-label :list)
+                    (cths/add-sample-shape :deep :parent-label :group :x 24 :y 500 :width 50 :height 50)
+                    (cthf/current-page)
+                    :objects)
+        shifts  (dvs/scroll-shifts objects {(cthi/id :list) [0 100]})
+        board   (gmt/translate-matrix (gpt/point 5 0))
+        row     (gmt/translate-matrix (gpt/point 40 0))
+        entries [[(cthi/id :screen) board] [(cthi/id :row1) row]]
+        result  (into {} (dvs/scroll-entries objects entries shifts))]
+    (t/is (identical? entries (dvs/scroll-entries objects entries {})) "nothing scrolls: the same entries")
+    (t/is (= [5 0] (move-of (get result (cthi/id :screen)))) "the board stays")
+    (t/is (= [40 -100] (move-of (get result (cthi/id :row1)))) "its own move, then the scroll")
+    (t/is (= [5 -100] (move-of (get result (cthi/id :row2))))
+          "without an entry: what it took from the board, then the scroll")
+    (t/is (= [5 -100] (move-of (get result (cthi/id :group)))))
+    (t/is (not (contains? result (cthi/id :deep))) "within a layer it moves with it")
+    (t/is (not (contains? result (cthi/id :pin))) "fixed when scrolling, it takes the board's")
+    (t/is (not (contains? result (cthi/id :list))) "the container stays")))
+
+(t/deftest a-sheet-root-draws-back-at-its-box
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :sheet :name "Sheet" :x 0 :y 0 :width 402 :height 500
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :item :parent-label :sheet :x 0 :y 1120 :width 402 :height 80)
+                    (cths/add-sample-shape :top :parent-label :sheet :x 0 :y 0 :width 402 :height 80)
+                    (cthf/current-page)
+                    :objects
+                    (dvs/scroll-objects))
+        shifts  (dvs/scroll-shifts objects {(cthi/id :sheet) [0 200]})
+        result  (into {} (dvs/scroll-entries objects [] shifts :sheet-root (cthi/id :sheet)))
+        root    (get result (cthi/id :sheet))]
+    (t/is (= 500 (js/Math.round (* 1200 (dm/get-prop root :d)))) "shrunk from 1200 to its box")
+    (t/is (= [0 -200] (move-of (get result (cthi/id :item)))) "its layers scroll, not shrunk")
+    (t/is (= 1 (dm/get-prop (get result (cthi/id :top)) :d)))
+    (t/is (= result (into {} (dvs/scroll-entries objects [] shifts :sheet-root (cthi/id :sheet))))
+          "the same each frame")))

@@ -10,6 +10,7 @@
    [app.common.exceptions :as ex]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.render-wasm.wasm :as wasm]
+   [app.main.data.viewer.scroll :as dvs]
    [app.main.ui.viewer.viewport-common :as vpc]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.modifiers :as wasm.modifiers]
@@ -57,8 +58,10 @@
   properties, with the ones the frame before set (`prev`) back first. A
   nil `modif-tree` shows the shapes as they are. With `shown?` WASM
   shows `prev` still, and the shapes it leaves as they are need no
-  update. The attribute changes it made."
-  [objects prev shown? modif-tree]
+  update. The containers scroll as `scroll` says (`:shifts` and
+  `:sheet-root`, see `dvs/scroll-entries`), after WASM laid the shapes
+  out. The attribute changes it made."
+  [objects prev shown? modif-tree scroll]
   (let [changes (if (some? modif-tree)
                   (vec (wasm.modifiers/extract-property-changes modif-tree))
                   [])]
@@ -67,16 +70,20 @@
         (doseq [[id properties] shape-changes]
           (wasm.shape/set-shape-properties! (get changed id) properties))))
     (wasm.api/clean-modifiers)
-    (when (seq modif-tree)
-      (let [structure (wasm.modifiers/parse-structure-modifiers modif-tree)
-            geometry  (wasm.modifiers/parse-geometry-modifiers modif-tree)]
-        (when (seq structure)
-          (wasm.api/set-structure-modifiers structure))
-        (when (seq geometry)
-          (let [propagated (wasm.api/propagate-modifiers geometry false nil)
-                roots      (into [] (map (fn [[id data]] [id (:transform data)])) geometry)]
-            (wasm.api/set-modifiers (if (seq propagated) propagated roots)
-                                    :request-render? false)))))
+    (let [structure (when (seq modif-tree) (wasm.modifiers/parse-structure-modifiers modif-tree))
+          geometry  (when (seq modif-tree) (wasm.modifiers/parse-geometry-modifiers modif-tree))
+          _         (when (seq structure)
+                      (wasm.api/set-structure-modifiers structure))
+          entries   (if (seq geometry)
+                      (let [propagated (wasm.api/propagate-modifiers geometry false nil)]
+                        (if (seq propagated)
+                          propagated
+                          (into [] (map (fn [[id data]] [id (:transform data)])) geometry)))
+                      [])
+          entries   (dvs/scroll-entries objects entries (:shifts scroll)
+                                        :sheet-root (:sheet-root scroll))]
+      (when (seq entries)
+        (wasm.api/set-modifiers entries :request-render? false)))
     changes))
 
 (defn- draw-bitmap!
@@ -204,9 +211,9 @@
   shapes load into WASM once per page; `modifiers`, an animation at a
   time (a delay of its modif-tree), shows over them (see
   `show-animation!`), so playing it does not load them again at each
-  frame."
+  frame. `scroll`, how its containers scroll (see `show-animation!`)."
   [page-key page-objects canvas size scale object-id on-render
-   {:keys [include-ids clear-fills-ids modifiers] :or {clear-fills-ids #{}}}]
+   {:keys [include-ids clear-fills-ids modifiers scroll] :or {clear-fills-ids #{}}}]
   (p/create
    (fn [resolve _reject]
      (let [prev-disable @wasm/disable-request-render?
@@ -233,7 +240,7 @@
                           (let [;; no other writer used a shape since
                                 ;; the last frame (see `wasm/shape-uses`)
                                 shown? (= (:props-uses @viewer-snapshot) wasm/shape-uses)
-                                props  (show-animation! page-objects prev-props shown? (force modifiers))
+                                props  (show-animation! page-objects prev-props shown? (force modifiers) scroll)
                                 again? (and (some? render-key)
                                             (= render-key (:render-key @viewer-snapshot)))]
                             (swap! viewer-snapshot assoc :props props :props-uses wasm/shape-uses
@@ -351,6 +358,13 @@
           (.clearRect ctx 0 0 (.-width dst) (.-height dst))
           (.drawImage ctx src 0 0 (.-width dst) (.-height dst)))))))
 
+(defonce ^{:doc "Spike of the scroll containers (plan
+  2026-11-04-prototype-scroll-containers, Task 1): `{:offsets {id [x y]}
+  :sheet-root id}` set from the console scrolls them (see
+  `dvs/scroll-entries`). The scroll state of the view mode replaces it."}
+  dev-scroll
+  (atom nil))
+
 (defn- use-viewer-wasm-layers!
   [page-id page-objects size scale frame-id not-fixed-ref fixed-ref
    not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins delta dpr-key
@@ -384,11 +398,15 @@
                        (when ready?
                          (let [not-fixed-canvas (mf/ref-val not-fixed-ref)
                                fixed-canvas     (mf/ref-val fixed-ref)
+                               {:keys [offsets sheet-root]} @dev-scroll
+                               scroll           {:shifts (dvs/scroll-shifts page-objects offsets)
+                                                 :sheet-root sheet-root}
                                passes
                                (cond-> []
                                  not-fixed-canvas
                                  (conj {:canvas not-fixed-canvas
-                                        :opts   (cond-> {:modifiers modifiers}
+                                        :opts   (cond-> {:modifiers modifiers
+                                                         :scroll scroll}
                                                   (seq not-fixed-include-ids)
                                                   (assoc :include-ids not-fixed-include-ids))})
 
@@ -399,7 +417,8 @@
                                                          ;; screen lower than the board
                                                          :modifiers (if (seq fixed-pins)
                                                                       (delay (vpc/pin-modifiers (force modifiers) fixed-pins))
-                                                                      modifiers)}
+                                                                      modifiers)
+                                                         :scroll scroll}
                                                   (seq fixed-clear-fills-ids)
                                                   (assoc :clear-fills-ids fixed-clear-fills-ids))}))]
                            (when (seq passes)
@@ -426,7 +445,12 @@
       (when (some? modifiers-ref)
         (let [key (js/Symbol "viewer-wasm-layers")]
           (add-watch modifiers-ref key (fn [_ _ _ modifiers] (render! modifiers)))
-          #(remove-watch modifiers-ref key))))))
+          #(remove-watch modifiers-ref key))))
+
+    (mf/with-effect [render! modifiers-ref]
+      (let [key (js/Symbol "viewer-wasm-scroll")]
+        (add-watch dev-scroll key (fn [_ _ _ _] (render! (some-> modifiers-ref deref))))
+        #(remove-watch dev-scroll key)))))
 
 (defn use-viewer-wasm-viewport!
   "WASM render passes for the viewer viewport.
