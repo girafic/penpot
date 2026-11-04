@@ -81,3 +81,12 @@
 (t/deftest taps-act-on-release-only-on-a-touch-device
   (t/is (false? (dds/defer-taps?)) "no device shows")
   (t/is (false? (dds/dragged?))))
+
+(t/deftest a-press-goes-along-the-axis-it-dragged-more-along
+  (t/is (nil? (dds/drag-axis [100 100] [104 103])) "within the threshold, no axis yet")
+  (t/is (= :y (dds/drag-axis [100 100] [103 120])))
+  (t/is (= :x (dds/drag-axis [100 100] [80 104])) "a chip row dragged sideways"))
+
+(t/deftest a-board-of-the-screen-takes-the-press-from-it
+  (t/is (nil? (dds/claim!)) "without a touch device, nothing to take")
+  (t/is (not (dds/claimed?))))

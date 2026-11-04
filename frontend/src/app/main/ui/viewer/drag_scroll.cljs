@@ -168,7 +168,31 @@
   []
   (true? (:dragged? @state*)))
 
-(defn- swallow-click!
+(defn drag-axis
+  "The axis a press dragged from `[x0 y0]` to `[x y]` goes along, once it
+  moved further than `threshold`: the one it moved more along; nil
+  before."
+  [[x0 y0] [x y]]
+  (let [dx (mth/abs (- x x0))
+        dy (mth/abs (- y y0))]
+    (when (> (max dx dy) threshold)
+      (if (> dx dy) :x :y))))
+
+(defn claim!
+  "Take the press going on from the screen, for a board in it that
+  scrolls its content (see `app.main.ui.viewer.container-scroll`): the
+  screen leaves it from the move that claims it on, and it counts as
+  dragged, so it is no tap. A touch device showing only."
+  []
+  (when (some? @state*)
+    (swap! state* assoc :claimed true :dragged? true)))
+
+(defn claimed?
+  "Whether a board took the press going on (see `claim!`)."
+  []
+  (true? (:claimed @state*)))
+
+(defn swallow-click!
   "Keep the click that follows a drag from anything: it was no tap."
   []
   (letfn [(swallow [event]
@@ -270,11 +294,19 @@
               on-move
               (fn [event]
                 (when-let [gesture @gesture*]
-                  (if (zero? (.-buttons event))
+                  (cond
+                    ;; a board in the screen took it (see `claim!`)
+                    (claimed?)
+                    (do (vreset! gesture* nil)
+                        (set! (.. section -style -cursor) ""))
+
+                    (zero? (.-buttons event))
                     ;; let go where it went unheard
                     (do (vreset! gesture* nil)
                         (set! (.. section -style -cursor) "")
                         (when-not (zero? @offset*) (spring! @offset*)))
+
+                    :else
                     (let [gesture (move gesture (.-clientY event) (.-timeStamp event))]
                       (vreset! gesture* gesture)
                       (when (:dragging? gesture)
@@ -308,7 +340,7 @@
                   (stop!)
                   (some-> @rest* js/clearTimeout)
                   (vreset! past* 0)
-                  (swap! state* assoc :dragged? false)
+                  (swap! state* assoc :dragged? false :claimed false)
                   ;; caught past an end: the drag goes on from there
                   (let [offset @offset*
                         size   (.-clientHeight section)

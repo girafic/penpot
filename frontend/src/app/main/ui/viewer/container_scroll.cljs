@@ -12,7 +12,12 @@
   gesture keeps its target while it goes on, so the swing of a trackpad
   does not run on into the screen; past an end the container gives as the
   screen does (see `app.main.ui.viewer.drag-scroll`) and springs back once
-  the wheel rests."
+  the wheel rests.
+
+  On the screen of a touch device a press that drags along an axis of
+  the innermost container under it that takes it scrolls that one: it
+  takes the press from the screen (see `dds/claim!`) before the screen
+  moves, and keeps it to the end."
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
@@ -51,36 +56,53 @@
   (let [{:keys [board-id containers]} (dm/get-in @st/state [:viewer-local :scroll])]
     (when (= board-id screen-id) containers)))
 
+(def ^:private fixed-layer-svg
+  ":scope > div > [data-fixed-layer] > svg")
+
+(def ^:private scroll-layer-svg
+  ":scope > [data-scroll-layer] > svg")
+
+(defn- containers-under
+  "The containers of the board `screen-id` of `objects` under the pointer
+  of `event` in the element `viewport` (`size` its box, see
+  `app.main.ui.viewer/calculate-size`; `fixed-drop` how far its fixed
+  layers go up), the innermost first, those of its fixed layers before
+  (they show over the others): `[{:id :svg}]`, `:svg` the hotspots it
+  maps through."
+  [objects screen-id viewport size fixed-drop event]
+  (let [offsets (dvs/view-offsets objects (shown-scroll screen-id))
+        ids     (dvs/container-ids objects screen-id)
+        fixed?  #(vpc/screen-fixed? objects %)
+        pins    (vpc/fixed-pins objects screen-id fixed-drop)
+        ;; a container in a fixed layer shows where its pin holds it
+        extra   (into {}
+                      (keep (fn [id]
+                              (when-let [up (some #(get pins %) (cfh/get-parent-ids-seq objects id))]
+                                [id (gpt/point 0 (- up))])))
+                      (filter fixed? ids))
+        origin  (gpt/point (:x size) (:y size))
+        under   (fn [selector ids]
+                  (let [svg (some-> viewport (.querySelector selector))]
+                    (when-let [point (svg-point svg event)]
+                      (map #(hash-map :id % :svg svg)
+                           (dvs/container-at objects ids offsets (gpt/add point origin) :extra extra)))))]
+    (vec (concat (under fixed-layer-svg (filter fixed? ids))
+                 (under scroll-layer-svg (remove fixed? ids))))))
+
 (defn- target-under
   "The container that takes the wheel `event` moving `[dx dy]` over the
-  board `screen-id` of `objects` in the element `viewport` (`size` its
-  box, see `app.main.ui.viewer/calculate-size`; `fixed-drop` how far its
-  fixed layers go up): `{:id :axes}`, `:id` nil for the screen."
+  board `screen-id` (see `containers-under`): `{:id :axes}`, `:id` nil
+  for the screen."
   [objects screen-id viewport size fixed-drop event dx dy]
-  (let [offsets    (dvs/view-offsets objects (shown-scroll screen-id))
-        ids        (dvs/container-ids objects screen-id)
-        fixed?     #(vpc/screen-fixed? objects %)
-        pins       (vpc/fixed-pins objects screen-id fixed-drop)
-        ;; a container in a fixed layer shows where its pin holds it
-        extra      (into {}
-                         (keep (fn [id]
-                                 (when-let [up (some #(get pins %) (cfh/get-parent-ids-seq objects id))]
-                                   [id (gpt/point 0 (- up))])))
-                         (filter fixed? ids))
-        origin     (gpt/point (:x size) (:y size))
-        under      (fn [selector ids]
-                     (when-let [point (svg-point (some-> viewport (.querySelector selector)) event)]
-                       (dvs/container-at objects ids offsets (gpt/add point origin) :extra extra)))
-        axis       (dvs/gesture-axis [dx dy])
-        candidates (concat (under ":scope > div > [data-fixed-layer] > svg" (filter fixed? ids))
-                           (under ":scope > [data-scroll-layer] > svg" (remove fixed? ids)))
-        id         (d/seek (fn [id]
-                             (let [frame (get objects id)
-                                   axes  (dvs/container-axes objects frame)]
-                               (and (dvs/takes-gesture? axes axis)
-                                    (dvs/can-scroll? (dvs/scroll-range objects frame axes)
-                                                     (get offsets id [0 0]) axes [dx dy]))))
-                           candidates)]
+  (let [offsets (dvs/view-offsets objects (shown-scroll screen-id))
+        axis    (dvs/gesture-axis [dx dy])
+        id      (d/seek (fn [id]
+                          (let [frame (get objects id)
+                                axes  (dvs/container-axes objects frame)]
+                            (and (dvs/takes-gesture? axes axis)
+                                 (dvs/can-scroll? (dvs/scroll-range objects frame axes)
+                                                  (get offsets id [0 0]) axes [dx dy]))))
+                        (map :id (containers-under objects screen-id viewport size fixed-drop event)))]
     {:id id :axes (when (some? id) (dvs/container-axes objects (get objects id)))}))
 
 (defn use-container-scroll!
@@ -94,6 +116,8 @@
     (mf/with-effect [enabled?]
       (when-let [section (when enabled? (mf/ref-val section-ref))]
         (let [latch* (volatile! nil)
+              ;; the press going on, and the container it scrolls
+              drag*  (volatile! nil)
               ;; how far the wheel pushed the target past an end
               past*  (volatile! [0 0])
               rest*  (volatile! nil)
@@ -167,8 +191,84 @@
                       (.stopPropagation event)
                       (scroll! objects screen-id id (:axes target) dx dy)))))]
 
-          (.addEventListener section "wheel" on-wheel #js {:capture true :passive false})
-          (fn []
-            (.removeEventListener section "wheel" on-wheel #js {:capture true :passive false})
-            (some-> @rest* js/clearTimeout)
-            (stop!)))))))
+          (letfn [;; where the pointer of `event` is in the view box of
+                  ;; the hotspots the press maps through
+                  (drag-point [drag event]
+                    (svg-point (:svg drag) event))
+
+                  (follow! [drag event]
+                    (let [{:keys [objects]} (mf/ref-val context-ref)
+                          {:keys [screen-id id axes start origin]} drag
+                          frame (get objects id)
+                          range (dvs/scroll-range objects frame axes)
+                          point (drag-point drag event)
+                          [ox oy] origin
+                          dx    (if (contains? axes :x) (- (:x start) (:x point)) 0)
+                          dy    (if (contains? axes :y) (- (:y start) (:y point)) 0)]
+                      (st/emit! (dv/scroll-container screen-id id (dvs/clamp-offset range [(+ ox dx) (+ oy dy)]) [0 0]))))
+
+                  (on-drag-move [^js event]
+                    (when-let [drag @drag*]
+                      (if (some? (:id drag))
+                        (follow! drag event)
+                        (when-let [axis (dds/drag-axis (:client drag) [(.-clientX event) (.-clientY event)])]
+                          (let [{:keys [objects]} (mf/ref-val context-ref)
+                                hit (d/seek #(dvs/takes-gesture? (dvs/container-axes objects (get objects (:id %))) axis)
+                                            (:under drag))]
+                            (if (nil? hit)
+                              ;; not one of its containers': the screen's
+                              (end-drag!)
+                              (let [id     (:id hit)
+                                    frame  (get objects id)
+                                    axes   (dvs/container-axes objects frame)
+                                    origin (dvs/clamp-offset (dvs/scroll-range objects frame axes)
+                                                             (or (dm/get-in (shown-scroll (:screen-id drag)) [id :offset])
+                                                                 [0 0]))
+                                    drag   (assoc drag :id id :axes axes :svg (:svg hit) :origin origin
+                                                  :start (svg-point (:svg hit) (:down drag)))]
+                                (dds/claim!)
+                                (set! (.. section -style -cursor) "grabbing")
+                                (vreset! drag* drag)
+                                (follow! drag event))))))))
+
+                  (on-drag-up [_]
+                    (let [drag @drag*]
+                      (end-drag!)
+                      (when (some? (:id drag))
+                        (set! (.. section -style -cursor) "")
+                        (dds/swallow-click!))))
+
+                  (end-drag! []
+                    (vreset! drag* nil)
+                    (.removeEventListener js/window "pointermove" on-drag-move true)
+                    (.removeEventListener js/window "pointerup" on-drag-up true)
+                    (.removeEventListener js/window "pointercancel" on-drag-up true))
+
+                  ;; in the capture phase: its moves come before the
+                  ;; screen's, which leaves them once a container claims
+                  ;; the press (see `dds/claim!`)
+                  (on-down [^js event]
+                    (when (and (zero? (.-button event))
+                               (not= "touch" (.-pointerType event))
+                               (dds/defer-taps?))
+                      (let [{:keys [objects frame size fixed-drop]} (mf/ref-val context-ref)
+                            under (containers-under objects (:id frame) (mf/ref-val viewport-ref)
+                                                    size fixed-drop event)]
+                        (when (seq under)
+                          (stop!)
+                          (vreset! drag* {:screen-id (:id frame)
+                                          :under under
+                                          :down event
+                                          :client [(.-clientX event) (.-clientY event)]})
+                          (.addEventListener js/window "pointermove" on-drag-move true)
+                          (.addEventListener js/window "pointerup" on-drag-up true)
+                          (.addEventListener js/window "pointercancel" on-drag-up true)))))]
+
+            (.addEventListener section "wheel" on-wheel #js {:capture true :passive false})
+            (.addEventListener section "pointerdown" on-down true)
+            (fn []
+              (.removeEventListener section "wheel" on-wheel #js {:capture true :passive false})
+              (.removeEventListener section "pointerdown" on-down true)
+              (end-drag!)
+              (some-> @rest* js/clearTimeout)
+              (stop!))))))))
