@@ -1145,6 +1145,16 @@
                         (start!)))
                (start!)))))))
 
+    ;; With WASM an overlay that comes in with an animation waits hidden
+    ;; until it is drawn, its layers fixed when scrolling too, as a board
+    ;; that comes in does (see below).
+    (mf/with-layout-effect [current-animations]
+      (when wasm?
+        (doseq [{:keys [kind overlay-id]} (vals current-animations)]
+          (when (= kind :open-overlay)
+            (some-> (dom/get-element (str "overlay-" overlay-id))
+                    (dom/set-style! "visibility" "hidden"))))))
+
     (mf/use-effect
      (mf/deps current-animations)
      (fn []
@@ -1170,12 +1180,18 @@
                                                               (or overlay-drop 0)))))]
              (case (:kind animation-vals)
                :open-overlay
-               (interactions/animate-open-overlay
-                (:animation animation-vals)
-                overlay-viewport
-                wrapper-size
-                overlay-size
-                overlay-position)
+               (let [start! #(interactions/animate-open-overlay
+                              (:animation animation-vals)
+                              overlay-viewport
+                              wrapper-size
+                              overlay-size
+                              overlay-position)]
+                 (if (and wasm? (some? overlay-viewport))
+                   (.then (rwv/when-frame-rendered overlay-viewport overlay-frame-id wasm-transition-wait-ms)
+                          (fn [_]
+                            (dom/set-style! overlay-viewport "visibility" "")
+                            (start!)))
+                   (start!)))
 
                :close-overlay
                (interactions/animate-close-overlay
