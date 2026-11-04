@@ -58,10 +58,11 @@
 (defn scroll-height
   "How high the view mode shows the board `frame` of `objects`: as far
   as its content goes (see `content-bottom`) when it is a top board
-  that scrolls vertically, not turned; nil when it is not, or when its
+  that scrolls vertically (`:vertical`, or `:both`: a screen scrolls
+  vertically only), not turned; nil when it is not, or when its
   content fits in it."
   [objects frame]
-  (when (and (= :vertical (:scroll-overflow frame))
+  (when (and (contains? #{:vertical :both} (:scroll-overflow frame))
              (cfh/root-frame? frame)
              (let [transform (:transform frame)]
                (or (nil? transform) (gmt/unit? transform))))

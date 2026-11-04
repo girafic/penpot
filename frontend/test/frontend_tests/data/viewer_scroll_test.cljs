@@ -241,3 +241,8 @@
     (t/is (= 1 (dm/get-prop (get result (cthi/id :top)) :d)))
     (t/is (= result (into {} (dvs/scroll-entries objects [] shifts :sheet-root (cthi/id :sheet))))
           "the same each frame")))
+
+(t/deftest a-top-board-with-both-scrolls-vertically-as-a-screen
+  (t/is (= [0 0 402 1300] (box (dvs/scroll-objects (menu-objects 874 1300 :scroll-overflow :both)) :menu)))
+  (let [side (menu-objects 874 1300 :scroll-overflow :horizontal)]
+    (t/is (identical? side (dvs/scroll-objects side)) "sideways it does not scroll as a screen")))

@@ -104,9 +104,10 @@
                                        (dissoc shape :counterpart)))))))))
 
 (defn set-scroll-overflow
-  "Make the top board `id` scroll in the prototype as `overflow` says
-  (see `app.main.data.viewer.scroll`): `:vertical` through its content
-  below its bottom edge, nil not past its box."
+  "Make the board `id` scroll in the prototype as `overflow` says (see
+  `app.main.data.viewer.scroll`): a top board `:vertical` through its
+  content below its bottom edge, a board inside another `:vertical`,
+  `:horizontal` or `:both` its content inside its box; nil not at all."
   [id overflow]
   (ptk/reify ::set-scroll-overflow
     ptk/WatchEvent

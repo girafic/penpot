@@ -8799,8 +8799,24 @@ msgid "workspace.options.scrolling"
 msgstr "Scrolling"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.both"
+msgstr "Both"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.scrolling.hint"
 msgstr "In the prototype, the board scrolls through the content below its bottom edge"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.hint-inner"
+msgstr "In the prototype, its content scrolls inside it"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.hint-screen-only"
+msgstr "A screen scrolls vertically only"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.horizontal"
+msgstr "Horizontal"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.scrolling.none"

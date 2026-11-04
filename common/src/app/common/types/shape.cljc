@@ -392,11 +392,13 @@
    ;; top board that stands the other way, or its own id for itself
    ;; turned by its constraints; absent, the board named as it.
    [:counterpart {:optional true} ::sm/uuid]
-   ;; How a top board scrolls in the prototype (Penpot Motion, see
-   ;; `app.main.data.viewer.scroll`): `:vertical` through what its content
-   ;; holds below its bottom edge, its box staying the first screen;
-   ;; absent, as high as it is.
-   [:scroll-overflow {:optional true} [::sm/one-of #{:vertical}]]])
+   ;; How a board scrolls in the prototype (Penpot Motion, see
+   ;; `app.main.data.viewer.scroll`): a top board through what its
+   ;; content holds below its bottom edge, its box staying the first
+   ;; screen (`:vertical`, and `:both` as a screen); a board inside
+   ;; another its content inside its box, along the axes it names;
+   ;; absent, not at all.
+   [:scroll-overflow {:optional true} [::sm/one-of #{:vertical :horizontal :both}]]])
 
 (def ^:private schema:nilable-geom-attrs
   "`schema:shape-geom-attrs`, but nilable.

@@ -422,11 +422,17 @@
   [shape]
   (when (and (cfh/frame-shape? shape)
              (not (cgc/svg-markup? shape)))
-    (cond
-      ;; a top board that scrolls through its content in the prototype
-      ;; (Penpot Motion, see `app.main.data.viewer.scroll`)
-      (= :vertical (:scroll-overflow shape)) "hidden auto"
-      (not (:show-content shape)) "hidden")))
+    (let [scroll (:scroll-overflow shape)
+          ;; how it scrolls in the prototype (Penpot Motion, see
+          ;; `app.main.data.viewer.scroll`): a top board vertically only
+          scroll (if (cfh/root-frame? shape)
+                   (when (contains? #{:vertical :both} scroll) :vertical)
+                   scroll)]
+      (case scroll
+        :vertical   "hidden auto"
+        :horizontal "auto hidden"
+        :both       "auto"
+        (when-not (:show-content shape) "hidden")))))
 
 (defn- get-flex-direction
   [shape]

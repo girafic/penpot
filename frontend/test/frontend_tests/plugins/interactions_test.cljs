@@ -7,6 +7,7 @@
 (ns frontend-tests.plugins.interactions-test
   (:require
    [app.common.test-helpers.files :as cthf]
+   [app.main.data.workspace.interactions :as dwi]
    [app.main.store :as st]
    [app.plugins.api :as api]
    [app.plugins.format :as format]
@@ -181,7 +182,7 @@
                                     :animation #js {:type type :direction "up" :duration 400}})
             (t/is (= "linear" (.. i -action -animation -easing)) "linear without an easing")))))))
 
-(t/deftest a-top-board-scrolls-through-its-content
+(t/deftest a-board-scrolls-in-the-prototype
   ;; Penpot Motion: `scrollOverflow`, see `app.main.data.viewer.scroll`
   (thw/with-wasm-mocks*
     (fn []
@@ -198,8 +199,16 @@
         (set! (.-scrollOverflow menu) "vertical")
         (t/is (= "vertical" (.-scrollOverflow menu)))
         (t/is (= :vertical (:scroll-overflow (stored menu))))
-        (t/is (throws? #(set! (.-scrollOverflow menu) "horizontal")) "vertically only, for now")
-        (t/is (throws? #(set! (.-scrollOverflow inner) "vertical")) "a board in a board does not")
+        (t/is (throws? #(set! (.-scrollOverflow menu) "horizontal")) "a top board scrolls vertically only")
+        (t/is (throws? #(set! (.-scrollOverflow menu) "both")))
+        (t/is (throws? #(set! (.-scrollOverflow inner) "sideways")))
         (t/is (= "none" (.-scrollOverflow inner)))
+        (set! (.-scrollOverflow inner) "horizontal")
+        (t/is (= "horizontal" (.-scrollOverflow inner)) "a board in a board scrolls its content")
+        (t/is (= :horizontal (:scroll-overflow (stored inner))))
+        (set! (.-scrollOverflow inner) "both")
+        (t/is (= "both" (.-scrollOverflow inner)))
+        (ptk/emit! store (dwi/set-scroll-overflow (aget menu "$id") :both))
+        (t/is (= "both" (.-scrollOverflow menu)) "a top board shows what it has, moved out of a board")
         (set! (.-scrollOverflow menu) "none")
         (t/is (not (contains? (stored menu) :scroll-overflow)) "none is no attribute")))))

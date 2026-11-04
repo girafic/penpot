@@ -2263,18 +2263,19 @@
                 {:name "scrollOverflow"
                  :get
                  (fn [self]
-                   (if (= :vertical (-> self u/proxy->shape :scroll-overflow))
-                     "vertical"
+                   (if-let [value (-> self u/proxy->shape :scroll-overflow)]
+                     (name value)
                      "none"))
 
                  :set
                  (fn [self value]
                    (cond
-                     (not (contains? #{"none" "vertical"} value))
+                     (not (contains? #{"none" "vertical" "horizontal" "both"} value))
                      (u/not-valid plugin-id :scrollOverflow value)
 
-                     (not (cfh/root-frame? (u/proxy->shape self)))
-                     (u/not-valid plugin-id :scrollOverflow "Only a board at the top of a page scrolls in the prototype")
+                     (and (contains? #{"horizontal" "both"} value)
+                          (cfh/root-frame? (u/proxy->shape self)))
+                     (u/not-valid plugin-id :scrollOverflow "A board at the top of a page scrolls vertically only")
 
                      (not (r/check-permission plugin-id "content:write"))
                      (u/not-valid plugin-id :scrollOverflow "Plugin doesn't have 'content:write' permission")
@@ -2283,7 +2284,7 @@
                      (u/not-valid plugin-id :scrollOverflow "Cannot modify a page that is not currently active")
 
                      :else
-                     (st/emit! (dwi/set-scroll-overflow id (when (= value "vertical") :vertical)))))}
+                     (st/emit! (dwi/set-scroll-overflow id (when (not= value "none") (keyword value))))))}
 
                 {:name "perspective"
                  :get

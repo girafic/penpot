@@ -813,21 +813,34 @@
        (tr "workspace.options.counterpart.hint")]]]))
 
 (mf/defc scrolling*
-  "How the top board `shape` scrolls in the prototype (see
-  `app.main.data.viewer.scroll`): not past its box, or vertically through
-  its content below its bottom edge."
+  "How the board `shape` scrolls in the prototype (see
+  `app.main.data.viewer.scroll`): a top board vertically through its
+  content below its bottom edge, a board inside another its content
+  inside its box, vertically, sideways or both. A top board that has
+  one of the other two (moved out of a board) shows it too: as a screen
+  it scrolls vertically only."
   {::mf/private true}
   [{:keys [shape]}]
   (let [id      (:id shape)
-        value   (if (= :vertical (:scroll-overflow shape)) "vertical" "none")
-        options (mf/with-memo []
-                  [{:value "none" :label (tr "workspace.options.scrolling.none")}
-                   {:value "vertical" :label (tr "workspace.options.scrolling.vertical")}])
+        top?    (cfh/root-frame? shape)
+        stored  (:scroll-overflow shape)
+        value   (if (some? stored) (name stored) "none")
+        options (mf/with-memo [top? stored]
+                  (cond-> [{:value "none" :label (tr "workspace.options.scrolling.none")}
+                           {:value "vertical" :label (tr "workspace.options.scrolling.vertical")}]
+                    (or (not top?) (= stored :horizontal))
+                    (conj {:value "horizontal" :label (tr "workspace.options.scrolling.horizontal")})
+                    (or (not top?) (= stored :both))
+                    (conj {:value "both" :label (tr "workspace.options.scrolling.both")})))
+        hint    (cond
+                  (not top?) (tr "workspace.options.scrolling.hint-inner")
+                  (contains? #{:horizontal :both} stored) (tr "workspace.options.scrolling.hint-screen-only")
+                  :else (tr "workspace.options.scrolling.hint"))
         on-change
         (mf/use-fn
          (mf/deps id)
          (fn [value]
-           (st/emit! (dwi/set-scroll-overflow id (when (= value "vertical") :vertical)))))]
+           (st/emit! (dwi/set-scroll-overflow id (when (not= value "none") (keyword value))))))]
     [:div {:class (stl/css :section)}
      [:div {:class (stl/css :title)}
       [:> title-bar* {:collapsable false
@@ -843,7 +856,7 @@
                     :options options
                     :on-change on-change}]]]
       [:p {:class (stl/css :counterpart-hint)}
-       (tr "workspace.options.scrolling.hint")]]]))
+       hint]]]))
 
 (mf/defc interactions*
   [{:keys [interactions shape]}]
@@ -912,9 +925,8 @@
           [:> shape-flows* {:flows flows
                             :shape shape}]
           (when (cfh/root-frame? shape)
-            [:*
-             [:> counterpart* {:shape shape}]
-             [:> scrolling* {:shape shape}]])])
+            [:> counterpart* {:shape shape}])
+          [:> scrolling* {:shape shape}]])
        [:*
         (when flows
           [:> page-flows* {:flows flows}])
