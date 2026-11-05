@@ -355,10 +355,13 @@
                      :still true}))))
 
         sticky-boxes
-        (mf/with-memo [sticky-masks prepared frame-id scale]
+        (mf/with-memo [sticky-masks objects prepared frame-id scale]
           (mapv (fn [[id mask]]
                   {:id id
                    :mask mask
+                   ;; its hotspots follow the scroll of the containers
+                   ;; only with one in it: each step would render them
+                   :scrolls? (boolean (some #(dvs/container-axes objects (get objects %)) mask))
                    :span (vpc/sticky-span prepared frame-id id scale)
                    :ref (fn [node]
                           (let [canvases (mf/ref-val sticky-canvases)]
@@ -419,7 +422,7 @@
 
        ;; The layers that stick at the top of the screen, over what
        ;; scrolls, under what stays (see `wasm-sticky-box*`)
-       (for [{:keys [id mask span ref]} sticky-boxes]
+       (for [{:keys [id mask span ref scrolls?]} sticky-boxes]
          [:> wasm-sticky-box*
           {:key (dm/str id)
            :id id
@@ -430,6 +433,7 @@
            :scale scale
            :layer-props (mf/spread-props not-fixed-props
                                          {:canvas-ref ref
+                                          :scroll-ref (when scrolls? scroll-ref)
                                           :pass (dm/str "sticky:" id)
                                           :scrolls true
                                           :class (stl/css :not-fixed)
