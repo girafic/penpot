@@ -26,8 +26,8 @@
 
 (def ^:private time-constant
   "How fast, ms, a coast slows down: it keeps a third of its speed after
-  as long."
-  325)
+  as long. As iOS does, which keeps 0.998 of it each ms (-1 / ln 0.998)."
+  500)
 
 (def min-speed
   "The speed, px/ms, a coast stops at."

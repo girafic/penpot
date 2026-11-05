@@ -38,7 +38,7 @@
         [d2 v2] (dds/coast v1 16)]
     (t/is (< 0 d2 d1 16) "less far each frame")
     (t/is (< 0 v2 v1 1))
-    (t/is (mth/close? 325 (first (dds/coast 1 1e9)) 0.001) "as far as the time constant at most")
+    (t/is (mth/close? 500 (first (dds/coast 1 1e9)) 0.001) "as far as the time constant at most, as on iOS")
     (t/is (neg? (first (dds/coast -1 16))) "back up too")))
 
 (t/deftest past-an-end-the-screen-gives-like-rubber
