@@ -161,3 +161,21 @@
           "not in a group in the board")
     (t/is (false? (cfh/sticky-scroll? (layer :sticky-scroll true :parent-id uuid/zero :frame-id uuid/zero)))
           "not a top board")))
+
+(t/deftest a-layer-scrolls-with-its-board-fixed-or-sticky
+  (let [board (uuid/next)
+        group (uuid/next)
+        layer (fn [& {:as attrs}]
+                (merge {:id (uuid/next) :parent-id board :frame-id board} attrs))]
+    (t/is (= :scroll (cfh/scroll-behavior (layer))) "a layer never set scrolls with its board")
+    (t/is (= :scroll (cfh/scroll-behavior (layer :fixed-scroll false :sticky-scroll false))) "nor one set back")
+    (t/is (= :fixed (cfh/scroll-behavior (layer :fixed-scroll true))))
+    (t/is (= :sticky (cfh/scroll-behavior (layer :sticky-scroll true))))
+    (t/is (= :fixed (cfh/scroll-behavior (layer :fixed-scroll true :sticky-scroll true))) "fixed wins")
+    (t/is (nil? (cfh/scroll-behavior (layer :fixed-scroll true :parent-id group))) "not in a group in the board")
+    (t/is (nil? (cfh/scroll-behavior (layer :parent-id uuid/zero :frame-id uuid/zero))) "not a top board"))
+  (let [layer {:id (uuid/next) :fixed-scroll true}]
+    (t/is (= {:id (:id layer) :sticky-scroll true} (cfh/apply-scroll-behavior layer :sticky))
+          "fixed and sticky exclude each other")
+    (t/is (= layer (cfh/apply-scroll-behavior (dissoc layer :fixed-scroll) :fixed)))
+    (t/is (= {:id (:id layer)} (cfh/apply-scroll-behavior layer :scroll)) "with its board: neither key")))

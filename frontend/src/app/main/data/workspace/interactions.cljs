@@ -121,18 +121,13 @@
 (defn set-scroll-behavior
   "Make the layers `ids` scroll in the prototype as `behavior` says:
   `:fixed` they stay in place, `:sticky` they stop at the edge of what
-  scrolls them (see `cfh/sticky-scroll?`), else they scroll with their
-  board. The first two exclude each other."
+  scrolls them, `:scroll` with their board (see
+  `cfh/apply-scroll-behavior`)."
   [ids behavior]
   (ptk/reify ::set-scroll-behavior
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (dwsh/update-shapes ids
-                                 (fn [shape]
-                                   (case behavior
-                                     :fixed  (-> shape (assoc :fixed-scroll true) (dissoc :sticky-scroll))
-                                     :sticky (-> shape (assoc :sticky-scroll true) (dissoc :fixed-scroll))
-                                     (dissoc shape :fixed-scroll :sticky-scroll))))))))
+      (rx/of (dwsh/update-shapes ids #(cfh/apply-scroll-behavior % behavior))))))
 
 (defn update-flow
   [page-id flow-id update-fn]

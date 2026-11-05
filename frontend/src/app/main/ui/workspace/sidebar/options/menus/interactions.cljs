@@ -814,21 +814,15 @@
 
 (defn scroll-behavior
   "How the layers `shapes` scroll in the prototype: `:scroll` with their
-  board, `:fixed` or `:sticky` (see `cfh/sticky-scroll?`), `:multiple`
+  board, `:fixed` or `:sticky` (see `cfh/scroll-behavior`), `:multiple`
   when they differ; nil when one of them is not right in a board, where
   only that holds."
   [shapes]
-  (when (and (seq shapes)
-             (every? #(and (= (:parent-id %) (:frame-id %))
-                           (not= (:frame-id %) uuid/zero))
-                     shapes))
-    (let [values (into #{}
-                       (map #(cond
-                               (true? (:fixed-scroll %))  :fixed
-                               (true? (:sticky-scroll %)) :sticky
-                               :else                      :scroll))
-                       shapes)]
-      (if (= 1 (count values)) (first values) :multiple))))
+  (let [values (into #{} (map cfh/scroll-behavior) shapes)]
+    (cond
+      (or (empty? values) (contains? values nil)) nil
+      (= 1 (count values))                        (first values)
+      :else                                       :multiple)))
 
 (mf/defc scrolling*
   "How things scroll in the prototype: the content of the board `shape`

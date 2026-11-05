@@ -165,6 +165,12 @@
 
             (t/is (thrown? js/Error (set! (.-stickyWhenScrolling shape) "fail")))
             (t/is (= (.-stickyWhenScrolling shape) false))
+            (set! (.-stickyWhenScrolling shape) false)
+            (t/is (= (.-fixedWhenScrolling shape) true) "setting sticky back keeps fixed")
+
+            (set! (.-stickyWhenScrolling shape) true)
+            (set! (.-stickyWhenScrolling shape) false)
+            (t/is (not (contains? (get-in @store (pop (get-shape-path nil))) :sticky-scroll)) "set back: no attribute")
             (set! (.-fixedWhenScrolling shape) false))
 
           (t/testing " - borderRadius"

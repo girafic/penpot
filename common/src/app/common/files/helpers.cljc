@@ -867,17 +867,36 @@
        (= (:parent-id shape) (:frame-id shape))
        (not= (:frame-id shape) uuid/zero)))
 
+(defn scroll-behavior
+  "How the layer `shape` scrolls in the view mode: `:fixed`, it stays in
+  place (see `fixed-scroll?`); `:sticky`, it sticks at the edge of what
+  scrolls, as CSS `position: sticky` does; `:scroll`, with its board.
+  Fixed wins. Nil for a layer not right in a board (a top board, a layer
+  in a group), which scrolls with what it is in."
+  [shape]
+  (when (and (= (:parent-id shape) (:frame-id shape))
+             (not= (:frame-id shape) uuid/zero))
+    (cond
+      (:fixed-scroll shape)          :fixed
+      (true? (:sticky-scroll shape)) :sticky
+      :else                          :scroll)))
+
+(defn apply-scroll-behavior
+  "The layer `shape` set to scroll in the view mode as `behavior` says
+  (see `scroll-behavior`): fixed and sticky exclude each other, and
+  `:scroll` takes both away."
+  [shape behavior]
+  (case behavior
+    :fixed  (-> shape (assoc :fixed-scroll true) (dissoc :sticky-scroll))
+    :sticky (-> shape (assoc :sticky-scroll true) (dissoc :fixed-scroll))
+    (dissoc shape :fixed-scroll :sticky-scroll)))
+
 (defn sticky-scroll?
   "Whether the layer `shape` sticks at the edge of what scrolls in the
-  view mode, as CSS `position: sticky` does: set so, directly in a board
-  as a layer fixed when scrolling is (see `fixed-scroll?`), and not fixed,
-  which wins."
+  view mode (see `scroll-behavior`)."
   [shape]
   ^boolean
-  (and (true? (:sticky-scroll shape))
-       (not (:fixed-scroll shape))
-       (= (:parent-id shape) (:frame-id shape))
-       (not= (:frame-id shape) uuid/zero)))
+  (= :sticky (scroll-behavior shape)))
 
 (defn fixed?
   [objects shape-id]

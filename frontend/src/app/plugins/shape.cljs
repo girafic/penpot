@@ -588,8 +588,9 @@
                 :else
                 (let [id (obj/get self "$id")]
                   ;; fixed and sticky exclude each other (Penpot Motion)
-                  (st/emit! (dwsh/update-shapes [id] #(cond-> (assoc % :fixed-scroll value)
-                                                        value (dissoc :sticky-scroll)))))))}
+                  (st/emit! (dwsh/update-shapes [id] #(if value
+                                                        (cfh/apply-scroll-behavior % :fixed)
+                                                        (assoc % :fixed-scroll false)))))))}
 
            :stickyWhenScrolling
            {:this true
@@ -605,8 +606,9 @@
 
                 :else
                 (let [id (obj/get self "$id")]
-                  (st/emit! (dwsh/update-shapes [id] #(cond-> (assoc % :sticky-scroll value)
-                                                        value (dissoc :fixed-scroll)))))))}
+                  (st/emit! (dwsh/update-shapes [id] #(if value
+                                                        (cfh/apply-scroll-behavior % :sticky)
+                                                        (dissoc % :sticky-scroll)))))))}
 
            :borderRadius
            {:this true
