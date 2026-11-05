@@ -13,6 +13,7 @@
    [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.interactions :as dwi]
+   [app.main.ui.workspace.sidebar.options.menus.interactions :as menu]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.state :as ths]))
 
@@ -117,3 +118,66 @@
        (fn [new-state]
          (t/is (empty? (page-flows new-state))
                "non flow-origin interactions do not create a flow"))))))
+
+;; ---------------------------------------------------------------------------
+;; set-scroll-behavior (Penpot Motion): how a layer scrolls in the prototype,
+;; as the select of the prototype tab sets and shows it.
+;; ---------------------------------------------------------------------------
+
+(t/deftest a-layer-scrolls-with-its-board-fixed-or-sticky
+  (t/async
+    done
+    (let [file     (-> (cthf/sample-file :file1)
+                       (ctho/add-frame :board)
+                       (cths/add-sample-shape :a :parent-label :board)
+                       (cths/add-sample-shape :b :parent-label :board))
+          a        (cthi/id :a)
+          b        (cthi/id :b)
+          objects  #(get-in % [:files (:current-file-id %) :data :pages-index (:current-page-id %) :objects])
+          behavior (fn [state & ids] (menu/scroll-behavior (map (objects state) ids)))
+          store    (ths/setup-store file)]
+      (t/is (= :scroll (menu/scroll-behavior (map #(cths/get-shape file %) [:a :b])))
+            "a layer never set scrolls with its board")
+      (t/is (nil? (menu/scroll-behavior [(cths/get-shape file :board)])) "a top board is not in a board")
+      (t/is (nil? (menu/scroll-behavior (map #(cths/get-shape file %) [:a :board]))))
+      (ths/run-store
+       store done [(dwi/set-scroll-behavior [a] :sticky)]
+       (fn [state]
+         (t/is (true? (:sticky-scroll (get (objects state) a))))
+         (t/is (= :multiple (behavior state a b))))))))
+
+(t/deftest fixed-and-sticky-exclude-each-other
+  (t/async
+    done
+    (let [file    (-> (cthf/sample-file :file1)
+                      (ctho/add-frame :board)
+                      (cths/add-sample-shape :a :parent-label :board :sticky-scroll true)
+                      (cths/add-sample-shape :b :parent-label :board))
+          a       (cthi/id :a)
+          b       (cthi/id :b)
+          objects #(get-in % [:files (:current-file-id %) :data :pages-index (:current-page-id %) :objects])
+          store   (ths/setup-store file)]
+      (ths/run-store
+       store done [(dwi/set-scroll-behavior [a b] :fixed)]
+       (fn [state]
+         (t/is (= :fixed (menu/scroll-behavior (map (objects state) [a b]))))
+         (t/is (not (contains? (get (objects state) a) :sticky-scroll))))))))
+
+(t/deftest scrolling-with-its-board-takes-both-keys-away
+  (t/async
+    done
+    (let [file    (-> (cthf/sample-file :file1)
+                      (ctho/add-frame :board)
+                      (cths/add-sample-shape :a :parent-label :board :fixed-scroll true)
+                      (cths/add-sample-shape :b :parent-label :board :sticky-scroll true))
+          a       (cthi/id :a)
+          b       (cthi/id :b)
+          objects #(get-in % [:files (:current-file-id %) :data :pages-index (:current-page-id %) :objects])
+          store   (ths/setup-store file)]
+      (ths/run-store
+       store done [(dwi/set-scroll-behavior [a b] :scroll)]
+       (fn [state]
+         (t/is (= :scroll (menu/scroll-behavior (map (objects state) [a b]))))
+         (t/is (not-any? (fn [id] (some #(contains? (get (objects state) id) %) [:fixed-scroll :sticky-scroll]))
+                         [a b])
+               "neither key"))))))
