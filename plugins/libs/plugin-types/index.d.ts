@@ -7154,9 +7154,10 @@ export interface ShapeBase extends PluginData {
    * the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
    * in a board that scrolls sideways): it scrolls with the rest, stops at
    * the top of the screen or of the board that scrolls it, and goes on
-   * once the end of its board, or the next sticky shape of its board,
-   * pushes it on. Only for a shape directly in a board. Setting it to
-   * `true` sets `fixedWhenScrolling` to `false`.
+   * once the end of its board pushes it on. Unlike CSS, the next sticky
+   * shape of its board pushes it on too. Only for a shape directly in a
+   * board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+   * setting it to `false` leaves `fixedWhenScrolling` as it is.
    *
    * @example
    * ```js

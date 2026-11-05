@@ -1634,9 +1634,10 @@ Board:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -3073,9 +3074,10 @@ VariantContainer:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -4295,9 +4297,10 @@ Boolean:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -7704,9 +7707,10 @@ Ellipse:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -10462,9 +10466,10 @@ Group:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -12123,9 +12128,10 @@ Image:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -16243,9 +16249,10 @@ Path:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -17712,9 +17719,10 @@ Rectangle:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -22293,9 +22301,10 @@ ShapeBase:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -23558,9 +23567,10 @@ SvgRaw:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
@@ -24631,9 +24641,10 @@ Text:
         the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
         in a board that scrolls sideways): it scrolls with the rest, stops at
         the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board, or the next sticky shape of its board,
-        pushes it on. Only for a shape directly in a board. Setting it to
-        `true` sets `fixedWhenScrolling` to `false`.
+        once the end of its board pushes it on. Unlike CSS, the next sticky
+        shape of its board pushes it on too. Only for a shape directly in a
+        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
+        setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
