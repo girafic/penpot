@@ -91,7 +91,6 @@ where
         return Ok(None);
     }
 
-    let filter_id = SurfaceId::Filter;
     let (filter_width, filter_height) = render_state.surfaces.filter_size();
     let bounds_width = bounds.width().ceil().max(1.0) as i32;
     let bounds_height = bounds.height().ceil().max(1.0) as i32;
@@ -118,6 +117,59 @@ where
     // Combine overflow-fit scale with caller-requested extra downscale
     let scale = (fit_scale * extra_downscale).max(MIN_COMBINED_SCALE);
 
+    Ok(Some(render_into_filter_surface_scaled(
+        render_state,
+        bounds,
+        scale,
+        draw_fn,
+    )?))
+}
+
+/// Whether `bounds` fit the filter surface at `scale` px a unit (see
+/// `render_into_filter_surface_at`).
+pub fn fits_filter_surface(render_state: &RenderState, bounds: Rect, scale: f32) -> bool {
+    let (filter_width, filter_height) = render_state.surfaces.filter_size();
+    bounds.is_finite()
+        && bounds.width() > 0.0
+        && bounds.height() > 0.0
+        && scale > 0.0
+        && (bounds.width() * scale).ceil() as i32 <= filter_width
+        && (bounds.height() * scale).ceil() as i32 <= filter_height
+}
+
+/// `render_into_filter_surface` at `scale` px a unit, the scale of the
+/// render for a picture as sharp as it draws, when `bounds` fit the filter
+/// surface so (see `fits_filter_surface`); None when they do not.
+pub fn render_into_filter_surface_at<F>(
+    render_state: &mut RenderState,
+    bounds: Rect,
+    scale: f32,
+    draw_fn: F,
+) -> Result<Option<(skia::Surface, f32)>>
+where
+    F: FnOnce(&mut RenderState, SurfaceId) -> Result<()>,
+{
+    if !fits_filter_surface(render_state, bounds, scale) {
+        return Ok(None);
+    }
+    Ok(Some(render_into_filter_surface_scaled(
+        render_state,
+        bounds,
+        scale,
+        draw_fn,
+    )?))
+}
+
+fn render_into_filter_surface_scaled<F>(
+    render_state: &mut RenderState,
+    bounds: Rect,
+    scale: f32,
+    draw_fn: F,
+) -> Result<(skia::Surface, f32)>
+where
+    F: FnOnce(&mut RenderState, SurfaceId) -> Result<()>,
+{
+    let filter_id = SurfaceId::Filter;
     {
         let canvas = render_state.surfaces.canvas(filter_id);
         canvas.clear(skia::Color::TRANSPARENT);
@@ -132,5 +184,5 @@ where
     render_state.surfaces.canvas(filter_id).restore();
 
     let filter_surface = render_state.surfaces.surface_clone(filter_id);
-    Ok(Some((filter_surface, scale)))
+    Ok((filter_surface, scale))
 }

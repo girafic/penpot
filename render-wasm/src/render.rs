@@ -652,6 +652,8 @@ pub(crate) struct RenderState {
     pub drop_shadows_ops_warmed: bool,
     /// Filter-surface snapshots for drop shadows, reused across tiles.
     drop_shadow_filter_cache: shadows::DropShadowFilterCache,
+    /// The drop shadows of shapes that only move, reused across renders.
+    moving_shadow_cache: shadows::MovingShadowCache,
     /// The tilts the shapes are drawn through this pass (see
     /// `tilt_projection`).
     tilt_projections: HashMap<Uuid, Option<Matrix>>,
@@ -877,6 +879,7 @@ impl RenderState {
             tile_atlas_flushed: false,
             drop_shadows_ops_warmed: false,
             drop_shadow_filter_cache: shadows::DropShadowFilterCache::new(),
+            moving_shadow_cache: shadows::MovingShadowCache::new(),
             tilt_projections: HashMap::default(),
             unit_distances: HashMap::default(),
             scene: scene::SceneCache::default(),
@@ -3693,6 +3696,7 @@ impl RenderState {
                     scale,
                     inherited_layer_blur,
                     target_surface,
+                    false,
                 )?;
             } else {
                 let paint = skia::Paint::default();
@@ -3878,6 +3882,7 @@ impl RenderState {
             pass.scale,
             pass.extra_layer_blur,
             pass.target_surface,
+            false,
         )?;
 
         if !shape.is_recursive() {
@@ -3907,6 +3912,10 @@ impl RenderState {
     ///
     /// Creates a black shadow by converting the original shadow color to black,
     /// scaling the blur radius, and rendering the shape with the shadow offset applied.
+    /// `own_shadow`, the shadow of `shape` itself, which the caller composites
+    /// under the clip of its containers: it may be the one kept from an earlier
+    /// render (see `shadows::MovingShadowCache`). A silhouette of a shape in
+    /// another one's shadow is cut by `clip_bounds` as it draws.
     #[allow(clippy::too_many_arguments)]
     fn render_drop_black_shadow(
         &mut self,
@@ -3918,6 +3927,7 @@ impl RenderState {
         scale: f32,
         extra_layer_blur: Option<Blur>,
         target_surface: SurfaceId,
+        own_shadow: bool,
     ) -> Result<()> {
         // A group has no geometry of its own, so a masked group would
         // contribute nothing here. Draw its masked silhouette instead.
@@ -4067,6 +4077,63 @@ impl RenderState {
         shadow_paint.set_blend_mode(skia::BlendMode::SrcOver);
 
         let layer_rec = skia::canvas::SaveLayerRec::default().paint(&shadow_paint);
+
+        // A rectangle or an ellipse blurs its shadow once and moves it with
+        // itself across renders (see `shadows::MovingShadowCache`), as sharp
+        // as the render draws: whole, the clip of its containers cuts it as
+        // it composites.
+        if own_shadow && !tilted && shadows::shadow_moves_with(shape) {
+            let layer_blur_value = combined_blur.map(|b| b.value).unwrap_or(0.0);
+            let key = shadows::MovingShadowKey::for_shape(shape, shadow, scale, layer_blur_value);
+            let anchor = shadows::shadow_anchor(shape);
+            if let Some(moved) = self.moving_shadow_cache.lookup(&key) {
+                shadows::blit_moved_drop_shadow(
+                    &mut self.surfaces,
+                    moved,
+                    blur_filter.clone(),
+                    anchor,
+                );
+                return Ok(());
+            }
+            let filter_result = filters::render_into_filter_surface_at(
+                self,
+                bounds,
+                scale,
+                |state, temp_surface| {
+                    state.surfaces.canvas(temp_surface).save_layer(&layer_rec);
+                    state.with_nested_blurs_suppressed(|state| {
+                        state.render_shape(
+                            &plain_shape,
+                            None,
+                            temp_surface,
+                            temp_surface,
+                            temp_surface,
+                            temp_surface,
+                            false,
+                            Some(shadow.offset), // Offset is geometric
+                            None,
+                            spread_outset,
+                            target_surface,
+                            false,
+                        )
+                    })?;
+                    state.surfaces.canvas(temp_surface).restore();
+                    Ok(())
+                },
+            )?;
+            if let Some((mut surface, filter_scale)) = filter_result {
+                let cached =
+                    shadows::CachedDropShadowFilter::new(bounds, filter_scale, &mut surface);
+                let moved = self.moving_shadow_cache.store(key, cached, anchor);
+                shadows::blit_moved_drop_shadow(
+                    &mut self.surfaces,
+                    moved,
+                    blur_filter.clone(),
+                    anchor,
+                );
+                return Ok(());
+            }
+        }
 
         // Low zoom path: use blur filter but apply offset and spread geometrically
         if use_low_zoom_path {
@@ -4249,6 +4316,7 @@ impl RenderState {
                     scale,
                     None,
                     target_surface,
+                    true,
                 )?;
                 if !element.container_fill_covers_shadow_descendants(tree) {
                     self.render_drop_shadow_child_silhouettes(

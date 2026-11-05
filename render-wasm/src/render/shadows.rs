@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use super::filters;
 use super::{RenderState, SurfaceId};
@@ -120,6 +122,171 @@ impl DropShadowFilterCache {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Drop shadows kept across renders, for shapes that only move
+// ---------------------------------------------------------------------------
+
+/// How many drop shadows `MovingShadowCache` keeps, and how many pixels of
+/// them, before it starts again.
+const MOVING_SHADOWS_MAX: usize = 512;
+const MOVING_SHADOWS_MAX_PIXELS: i64 = 16 * 1024 * 1024;
+
+/// What the drop shadow `shadow` of a shape blurs the same for at a
+/// `scale` and under a layer blur: all that shapes its silhouette but where
+/// the shape is (see `shadow_moves_with`), so a shape that only moved, a
+/// container scrolling or a move keyframe, finds it again.
+#[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
+pub(crate) struct MovingShadowKey {
+    shape_id: Uuid,
+    /// its blur, spread and offset
+    shadow: u64,
+    /// the size, turn and corners of the shape and whether it has fills
+    silhouette: u64,
+    scale_bits: u32,
+    layer_blur_bits: u32,
+}
+
+fn hash_bits(values: &[f32]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    values.iter().for_each(|v| v.to_bits().hash(&mut hasher));
+    hasher.finish()
+}
+
+impl MovingShadowKey {
+    pub(crate) fn for_shape(shape: &Shape, shadow: &Shadow, scale: f32, layer_blur: f32) -> Self {
+        let selrect = shape.selrect();
+        let transform = shape.transform;
+        // the turn, scale and skew of the shape, not its move
+        let mut geometry = vec![
+            selrect.width(),
+            selrect.height(),
+            transform[0],
+            transform[1],
+            transform[3],
+            transform[4],
+            if shape.has_fills() { 1.0 } else { 0.0 },
+        ];
+        if let Some(corners) = shape.shape_type.corners() {
+            corners
+                .iter()
+                .for_each(|corner| geometry.extend([corner.x, corner.y]));
+        }
+        let mut hasher = DefaultHasher::new();
+        std::mem::discriminant(&shape.shape_type).hash(&mut hasher);
+        hash_bits(&geometry).hash(&mut hasher);
+        Self {
+            shape_id: shape.id,
+            shadow: hash_bits(&[shadow.blur, shadow.spread, shadow.offset.0, shadow.offset.1]),
+            silhouette: hasher.finish(),
+            scale_bits: scale.to_bits(),
+            layer_blur_bits: layer_blur.to_bits(),
+        }
+    }
+
+    /// The place of the shadow in `MovingShadowCache`: one for each shape
+    /// and shadow, whatever its shape and scale come to.
+    fn slot(&self) -> (Uuid, u64) {
+        (self.shape_id, self.shadow)
+    }
+}
+
+/// Whether the silhouette the drop shadows of `shape` blur goes with it as
+/// it moves, all of it in `MovingShadowKey`: a rectangle or an ellipse
+/// without strokes (the rect of a board draws through
+/// `render_direct_frame_drop_shadow`).
+pub(crate) fn shadow_moves_with(shape: &Shape) -> bool {
+    matches!(shape.shape_type, Type::Rect(_) | Type::Circle)
+        && shape.visible_strokes().next().is_none()
+}
+
+/// Where `shape` is, for how far it moved since its shadow was kept.
+pub(crate) fn shadow_anchor(shape: &Shape) -> (f32, f32) {
+    let selrect = shape.selrect();
+    (selrect.left, selrect.top)
+}
+
+/// A drop shadow kept across renders: its blur, and where its shape was.
+pub(crate) struct MovingShadow {
+    key: MovingShadowKey,
+    cached: CachedDropShadowFilter,
+    anchor: (f32, f32),
+}
+
+impl MovingShadow {
+    fn pixels(&self) -> i64 {
+        self.cached.image.width() as i64 * self.cached.image.height() as i64
+    }
+}
+
+/// The drop shadows of the shapes that only move, kept across renders
+/// (unlike `DropShadowFilterCache`, which a render starts empty): one for
+/// each shape and shadow, the last it blurred, so a shape that changes
+/// takes the place it had. It starts again once it holds too many.
+pub(crate) struct MovingShadowCache {
+    entries: HashMap<(Uuid, u64), MovingShadow>,
+    pixels: i64,
+}
+
+impl MovingShadowCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::default(),
+            pixels: 0,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.pixels = 0;
+    }
+
+    pub(crate) fn lookup(&self, key: &MovingShadowKey) -> Option<&MovingShadow> {
+        self.entries
+            .get(&key.slot())
+            .filter(|moved| moved.key == *key)
+    }
+
+    /// Keeps `cached`, blurred for `key` with its shape at `anchor`.
+    pub(crate) fn store(
+        &mut self,
+        key: MovingShadowKey,
+        cached: CachedDropShadowFilter,
+        anchor: (f32, f32),
+    ) -> &MovingShadow {
+        let moved = MovingShadow {
+            key,
+            cached,
+            anchor,
+        };
+        let pixels = moved.pixels();
+        if !self.entries.contains_key(&key.slot())
+            && (self.entries.len() >= MOVING_SHADOWS_MAX
+                || self.pixels + pixels > MOVING_SHADOWS_MAX_PIXELS)
+        {
+            self.clear();
+        }
+        self.pixels += pixels;
+        if let Some(old) = self.entries.insert(key.slot(), moved) {
+            self.pixels -= old.pixels();
+        }
+        &self.entries[&key.slot()]
+    }
+}
+
+/// `moved` blitted where its shape is now, `anchor` (see `shadow_anchor`).
+pub(crate) fn blit_moved_drop_shadow(
+    surfaces: &mut super::Surfaces,
+    moved: &MovingShadow,
+    layer_blur: Option<skia::ImageFilter>,
+    anchor: (f32, f32),
+) {
+    let canvas = surfaces.canvas(SurfaceId::DropShadows);
+    canvas.save();
+    canvas.translate((anchor.0 - moved.anchor.0, anchor.1 - moved.anchor.1));
+    blit_cached_drop_shadow_filter(surfaces, &moved.cached, layer_blur);
+    surfaces.canvas(SurfaceId::DropShadows).restore();
+}
+
 /// Renders a direct frame drop shadow: inline blur on the tile when the kernel
 /// fits the margin, otherwise a cached filter-surface pass shared across tiles.
 ///
@@ -132,6 +299,9 @@ pub(crate) fn render_direct_frame_drop_shadow(
     shadow: &Shadow,
     scale: f32,
 ) -> Result<()> {
+    if render_moving_frame_shadow(state, frame, shape_bounds, shadow, scale)? {
+        return Ok(());
+    }
     let margin = state.surfaces.margins().width as f32;
     let sigma_device = radius_to_sigma(shadow.blur) * scale;
     if sigma_device <= margin / 3.0 {
@@ -249,7 +419,7 @@ pub(crate) fn blit_cached_drop_shadow_filter(
 
     drop_canvas.save();
     drop_canvas.save();
-    if cached.filter_scale < 1.0 {
+    if cached.filter_scale != 1.0 {
         drop_canvas.scale((1.0 / cached.filter_scale, 1.0 / cached.filter_scale));
         drop_canvas.translate((
             cached.bounds.left * cached.filter_scale,
@@ -296,6 +466,58 @@ fn render_inline_frame_shadow(
     }
 
     Ok(())
+}
+
+/// The drop shadow of the rect of `frame` from the shadows kept across
+/// renders (see `MovingShadowCache`), blurred once at the scale of the
+/// render and moved with the frame since. False when it does not fit the
+/// filter surface so: the other ways draw it.
+fn render_moving_frame_shadow(
+    state: &mut RenderState,
+    frame: &Shape,
+    shape_bounds: &Rect,
+    shadow: &Shadow,
+    scale: f32,
+) -> Result<bool> {
+    let key = MovingShadowKey::for_shape(frame, shadow, scale, 0.0);
+    let anchor = shadow_anchor(frame);
+    if let Some(moved) = state.moving_shadow_cache.lookup(&key) {
+        blit_moved_drop_shadow(&mut state.surfaces, moved, None, anchor);
+        return Ok(true);
+    }
+
+    let world_offset = shadow_world_offset(frame, shadow);
+    let Some(bounds) = shadow_filter_bounds(shadow, shape_bounds, world_offset) else {
+        return Ok(true);
+    };
+    let antialias = frame_shadow_antialias(state, frame, scale);
+    let layer_paint = blur_layer_paint(shadow.blur, 1.0);
+    let layer_rec = skia::canvas::SaveLayerRec::default().paint(&layer_paint);
+    let shadow_draw_matrix = frame_shadow_draw_matrix(frame, shadow);
+    let filter_result =
+        filters::render_into_filter_surface_at(state, bounds, scale, |state, temp_surface| {
+            {
+                let canvas = state.surfaces.canvas(temp_surface);
+                canvas.save();
+                canvas.concat(&shadow_draw_matrix);
+                canvas.save_layer(&layer_rec);
+            }
+            draw_frame_shadow_rect(&mut state.surfaces, temp_surface, frame, shadow, antialias);
+            {
+                let canvas = state.surfaces.canvas(temp_surface);
+                canvas.restore();
+                canvas.restore();
+            }
+            Ok(())
+        })?;
+
+    let Some((mut surface, filter_scale)) = filter_result else {
+        return Ok(false);
+    };
+    let cached = CachedDropShadowFilter::new(bounds, filter_scale, &mut surface);
+    let moved = state.moving_shadow_cache.store(key, cached, anchor);
+    blit_moved_drop_shadow(&mut state.surfaces, moved, None, anchor);
+    Ok(true)
 }
 
 fn render_cached_filter_frame_shadow(
@@ -617,5 +839,155 @@ mod tests {
         let pixels = cached.image.peek_pixels().unwrap();
         assert_eq!(pixels.get_color((5, 6)), skia::Color::RED);
         assert_eq!(pixels.get_color((0, 0)), skia::Color::TRANSPARENT);
+    }
+
+    use crate::shapes::{Rect as RectType, ShadowStyle, StrokeStyle};
+
+    fn card(x: f32, y: f32) -> Shape {
+        let mut shape = Shape::new(Uuid::nil());
+        shape.set_shape_type(Type::Rect(RectType::default()));
+        shape.set_selrect(x, y, x + 300.0, y + 212.0);
+        shape.set_corners((28.0, 28.0, 28.0, 28.0));
+        shape
+    }
+
+    fn drop(blur: f32) -> Shadow {
+        Shadow::new(
+            skia::Color::BLACK,
+            blur,
+            0.0,
+            (0.0, 10.0),
+            ShadowStyle::Drop,
+            false,
+        )
+    }
+
+    fn kept(width: i32, height: i32) -> CachedDropShadowFilter {
+        let mut surface = skia::surfaces::raster_n32_premul((width, height)).unwrap();
+        CachedDropShadowFilter::new(
+            Rect::from_xywh(0.0, 0.0, width as f32, height as f32),
+            1.0,
+            &mut surface,
+        )
+    }
+
+    #[test]
+    fn a_shadow_keeps_its_key_as_its_shape_moves() {
+        let key = MovingShadowKey::for_shape(&card(24.0, 254.0), &drop(22.0), 0.96, 0.0);
+        assert_eq!(
+            key,
+            MovingShadowKey::for_shape(&card(-209.7, 254.0), &drop(22.0), 0.96, 0.0),
+            "moved"
+        );
+
+        let mut wider = card(24.0, 254.0);
+        wider.set_selrect(24.0, 254.0, 340.0, 466.0);
+        let mut round = card(24.0, 254.0);
+        round.set_corners((12.0, 12.0, 12.0, 12.0));
+        let mut turned = card(24.0, 254.0);
+        turned.apply_transform(&skia::Matrix::rotate_deg(30.0));
+        for (other, what) in [
+            (
+                MovingShadowKey::for_shape(&wider, &drop(22.0), 0.96, 0.0),
+                "resized",
+            ),
+            (
+                MovingShadowKey::for_shape(&round, &drop(22.0), 0.96, 0.0),
+                "rounder",
+            ),
+            (
+                MovingShadowKey::for_shape(&turned, &drop(22.0), 0.96, 0.0),
+                "turned",
+            ),
+            (
+                MovingShadowKey::for_shape(&card(24.0, 254.0), &drop(30.0), 0.96, 0.0),
+                "more blur",
+            ),
+            (
+                MovingShadowKey::for_shape(&card(24.0, 254.0), &drop(22.0), 2.0, 0.0),
+                "zoomed",
+            ),
+            (
+                MovingShadowKey::for_shape(&card(24.0, 254.0), &drop(22.0), 0.96, 4.0),
+                "under a layer blur",
+            ),
+        ] {
+            assert_ne!(key, other, "{what}");
+        }
+        assert_eq!(
+            key.slot(),
+            MovingShadowKey::for_shape(&wider, &drop(22.0), 2.0, 0.0).slot(),
+            "one place for the shape and its shadow"
+        );
+    }
+
+    #[test]
+    fn a_rect_or_an_ellipse_without_strokes_moves_its_shadow() {
+        let mut ellipse = card(0.0, 0.0);
+        ellipse.set_shape_type(Type::Circle);
+        assert!(shadow_moves_with(&card(0.0, 0.0)));
+        assert!(shadow_moves_with(&ellipse));
+
+        let mut stroked = card(0.0, 0.0);
+        stroked.add_stroke(Stroke::new_center_stroke(
+            2.0,
+            StrokeStyle::Solid,
+            None,
+            None,
+            None,
+            None,
+        ));
+        assert!(!shadow_moves_with(&stroked), "its strokes shape the shadow");
+        let mut group = card(0.0, 0.0);
+        group.set_shape_type(Type::Group(Default::default()));
+        assert!(
+            !shadow_moves_with(&group),
+            "what it holds shapes the shadow"
+        );
+    }
+
+    #[test]
+    fn the_moving_shadows_keep_one_place_a_shape() {
+        let mut cache = MovingShadowCache::new();
+        let key = MovingShadowKey::for_shape(&card(24.0, 254.0), &drop(22.0), 0.96, 0.0);
+        cache.store(key, kept(40, 30), (24.0, 254.0));
+        assert!(cache.lookup(&key).is_some());
+        assert_eq!(cache.lookup(&key).unwrap().anchor, (24.0, 254.0));
+
+        let mut wider = card(24.0, 254.0);
+        wider.set_selrect(24.0, 254.0, 340.0, 466.0);
+        let resized = MovingShadowKey::for_shape(&wider, &drop(22.0), 0.96, 0.0);
+        assert!(
+            cache.lookup(&resized).is_none(),
+            "a resized shape blurs again"
+        );
+        cache.store(resized, kept(50, 30), (24.0, 254.0));
+        assert_eq!(cache.entries.len(), 1, "in the place it had");
+        assert_eq!(cache.pixels, 50 * 30);
+        assert!(cache.lookup(&key).is_none());
+    }
+
+    #[test]
+    fn the_moving_shadows_start_again_when_full() {
+        let mut cache = MovingShadowCache::new();
+        for i in 0..MOVING_SHADOWS_MAX {
+            let mut shape = card(0.0, 0.0);
+            shape.id = Uuid::from_u64_pair(0, i as u64 + 1);
+            cache.store(
+                MovingShadowKey::for_shape(&shape, &drop(22.0), 1.0, 0.0),
+                kept(4, 4),
+                (0.0, 0.0),
+            );
+        }
+        assert_eq!(cache.entries.len(), MOVING_SHADOWS_MAX);
+        let mut one_more = card(0.0, 0.0);
+        one_more.id = Uuid::from_u64_pair(1, 0);
+        cache.store(
+            MovingShadowKey::for_shape(&one_more, &drop(22.0), 1.0, 0.0),
+            kept(4, 4),
+            (0.0, 0.0),
+        );
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.pixels, 16);
     }
 }
