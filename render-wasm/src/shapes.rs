@@ -2578,10 +2578,29 @@ impl Shape {
         }
 
         if self.clip_content {
-            return !self.descendants_have_drop_shadows(tree);
+            return !self.descendants_have_drop_shadows(tree)
+                || self.opaque_box_hides_nested_shadows();
         }
 
         self.descendants_contained_for_frame_shadow(tree, self.selrect())
+    }
+
+    /// Whether the silhouettes of what a clipping board holds, which its drop
+    /// shadows draw cut to its box moved by their offset and shrunk by their
+    /// blur (see `NodeRenderState::get_nested_shadow_clip_bounds`), lie under
+    /// the board, which covers them: an opaque fill at full opacity, no
+    /// strokes, each shadow no further off than its blur. Then its own rect is
+    /// all its shadows show.
+    fn opaque_box_hides_nested_shadows(&self) -> bool {
+        self.opacity >= 1.0
+            && self.visible_strokes().next().is_none()
+            && self
+                .fills
+                .iter()
+                .any(|fill| matches!(fill, Fill::Solid(_)) && fill.opacity() >= 1.0)
+            && self.drop_shadows_visible().all(|shadow| {
+                shadow.offset.0.abs() <= shadow.blur && shadow.offset.1.abs() <= shadow.blur
+            })
     }
 
     /// When true, the container's own fill shadow mask is enough and descendant
@@ -3674,8 +3693,11 @@ mod tests {
 
     #[test]
     fn clipped_frame_with_child_drop_shadow_rejects_direct_path() {
-        let (mut pool, frame_id) =
-            frame_with_fill_and_child(Fill::Solid(SolidColor(skia::Color::WHITE)), 1.0);
+        // see-through: the silhouette of the child shows through it
+        let (mut pool, frame_id) = frame_with_fill_and_child(
+            Fill::Solid(SolidColor(skia::Color::from_argb(128, 255, 255, 255))),
+            1.0,
+        );
         let child_id = pool.get(&frame_id).expect("frame").children[0];
 
         {
@@ -3692,6 +3714,57 @@ mod tests {
 
         let frame = pool.get(&frame_id).expect("frame");
         assert!(!frame.uses_direct_container_drop_shadow(&pool));
+    }
+
+    #[test]
+    fn an_opaque_clipped_frame_hides_the_shadows_of_what_it_holds() {
+        let shadow = |offset: (f32, f32)| {
+            Shadow::new(
+                skia::Color::BLACK,
+                22.0,
+                0.0,
+                offset,
+                ShadowStyle::Drop,
+                false,
+            )
+        };
+        let direct = |change: &dyn Fn(&mut Shape)| {
+            let (mut pool, frame_id) =
+                frame_with_fill_and_child(Fill::Solid(SolidColor(skia::Color::WHITE)), 1.0);
+            let child_id = pool.get(&frame_id).expect("frame").children[0];
+            pool.get_mut(&child_id)
+                .expect("child")
+                .add_shadow(shadow((0.0, 8.0)));
+            {
+                let frame = pool.get_mut(&frame_id).expect("frame");
+                frame.set_clip(true);
+                frame.add_shadow(shadow((0.0, 10.0)));
+                change(frame);
+            }
+            pool.get(&frame_id)
+                .expect("frame")
+                .uses_direct_container_drop_shadow(&pool)
+        };
+        assert!(direct(&|_| {}), "a card over a child with a shadow");
+        assert!(
+            !direct(&|frame| frame.opacity = 0.5),
+            "but not when the child shows through it"
+        );
+        assert!(
+            !direct(&|frame| frame.add_shadow(shadow((0.0, 30.0)))),
+            "nor with a shadow further off than its blur"
+        );
+        assert!(
+            !direct(&|frame| frame.add_stroke(Stroke::new_center_stroke(
+                4.0,
+                StrokeStyle::Solid,
+                None,
+                None,
+                None,
+                None
+            ))),
+            "nor with strokes, which widen its box"
+        );
     }
 
     #[test]
