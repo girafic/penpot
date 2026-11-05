@@ -204,7 +204,7 @@
                              :pins pins
                              :sheet-root sheet-root}]]))
 
-(defn- layer-masks
+(defn layer-masks
   "What each render pass of the board `frame-id` of `objects` draws (see
   `rwv/use-viewer-wasm-viewport!`): `:fixed-mask-set`, the layers fixed
   when scrolling (with `has-fixed?`, see `vpc/frame-fixed-mask-ids`);
@@ -229,6 +229,30 @@
                    frame-id)))
      :fixed-include-ids (when has-fixed? (vec (conj fixed-mask-set frame-id)))
      :fixed-clear-fills-ids (when has-fixed? #{frame-id})}))
+
+(defn render-passes
+  "The render passes of the board `frame-id` (see
+  `rwv/use-viewer-wasm-viewport!`) for what `layer-masks` gave it,
+  without their canvases: what scrolls, all of the board but what the
+  others draw; each layer that sticks at the top of the screen
+  (`:layer`) with its board, whose fills it clears; the fixed layers so,
+  held on a lower screen by `pins`. All but the first are still: a
+  scroll of the containers leaves them as they are."
+  [{:keys [sticky-masks not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids]} frame-id pins]
+  (cond-> (into [{:tag "scroll" :include not-fixed-include-ids}]
+                (map (fn [[id mask]]
+                       {:tag (dm/str "sticky:" id)
+                        :layer id
+                        :include (into [frame-id] mask)
+                        :clear #{frame-id}
+                        :still true}))
+                sticky-masks)
+    (seq fixed-include-ids)
+    (conj {:tag "fixed"
+           :include fixed-include-ids
+           :clear fixed-clear-fills-ids
+           :pins pins
+           :still true})))
 
 (mf/defc wasm-sticky-box*
   "A layer that sticks at the top of the screen (see
@@ -335,24 +359,12 @@
 
         passes
         (mf/with-memo [masks frame-id pins]
-          (let [{:keys [not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids]} masks]
-            (cond-> (into [{:tag "scroll"
-                            :canvas #(mf/ref-val not-fixed-wasm-ref)
-                            :include not-fixed-include-ids}]
-                          (map (fn [[id mask]]
-                                 {:tag (dm/str "sticky:" id)
-                                  :canvas #(get (mf/ref-val sticky-canvases) id)
-                                  :include (into [frame-id] mask)
-                                  :clear #{frame-id}
-                                  :still true}))
-                          (:sticky-masks masks))
-              (seq fixed-include-ids)
-              (conj {:tag "fixed"
-                     :canvas #(mf/ref-val fixed-wasm-ref)
-                     :include fixed-include-ids
-                     :clear fixed-clear-fills-ids
-                     :pins pins
-                     :still true}))))
+          (mapv (fn [{:keys [tag layer] :as pass}]
+                  (assoc pass :canvas (case tag
+                                        "scroll" #(mf/ref-val not-fixed-wasm-ref)
+                                        "fixed"  #(mf/ref-val fixed-wasm-ref)
+                                        #(get (mf/ref-val sticky-canvases) layer))))
+                (render-passes masks frame-id pins)))
 
         sticky-boxes
         (mf/with-memo [sticky-masks objects prepared frame-id scale]

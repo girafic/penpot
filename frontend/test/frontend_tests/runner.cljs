@@ -222,8 +222,9 @@
    [frontend-tests.viewer-background-test]
    [frontend-tests.viewer-fixed-pins-test]
    [frontend-tests.viewer-hotspots-test]
-   [frontend-tests.viewer-sticky-boxes-test]
    [frontend-tests.viewer-overlay-test]
+   [frontend-tests.viewer-render-passes-test]
+   [frontend-tests.viewer-sticky-boxes-test]
    [frontend-tests.viewer-turn-test]
    [frontend-tests.worker-snap-test]
    [frontend-tests.worker.exports-test]
@@ -466,6 +467,7 @@
    'frontend-tests.viewer-hotspots-test
    'frontend-tests.viewer-sticky-boxes-test
    'frontend-tests.viewer-overlay-test
+   'frontend-tests.viewer-render-passes-test
    'frontend-tests.viewer-turn-test
    'frontend-tests.worker-snap-test])
 

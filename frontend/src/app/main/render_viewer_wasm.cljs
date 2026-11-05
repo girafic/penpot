@@ -386,6 +386,30 @@
         (mf/set-ref-val! cache-ref [objects scroll result])
         result))))
 
+(defn moving-passes
+  "The tags of the passes of `passes` with a container of `objects` in
+  them (see `dvs/container-axes`): a scroll of it moves what they draw."
+  [objects passes]
+  (into #{}
+        (comp (filter (fn [{:keys [include]}]
+                        (some #(dvs/container-axes objects (get objects %)) include)))
+              (map :tag))
+        passes))
+
+(defn due-passes
+  "The passes of `passes` a render draws: all, but for a still one (see
+  `app.main.ui.viewer.viewport-wasm/render-passes`) when only the
+  containers scrolled (`scroll-only?`), it drew last (in `drawn`, their
+  tags) and no container scrolls in it (in `moving`, see
+  `moving-passes`)."
+  [passes {:keys [drawn moving scroll-only?]}]
+  (filterv (fn [{:keys [tag still]}]
+             (or (not still)
+                 (not scroll-only?)
+                 (contains? moving tag)
+                 (not (contains? drawn tag))))
+           passes))
+
 (defn- use-viewer-wasm-layers!
   [page-id page-objects size scale frame-id passes delta dpr-key
    modifiers-ref scroll-ref sheet-root frozen?]
@@ -409,12 +433,7 @@
         ;; of chips)
         drawn-ref      (mf/use-ref #{})
         moving         (mf/with-memo [page-objects passes]
-                         (into #{}
-                               (comp (filter (fn [{:keys [include]}]
-                                               (some #(dvs/container-axes page-objects (get page-objects %))
-                                                     include)))
-                                     (map :tag))
-                               passes))
+                         (moving-passes page-objects passes))
 
         ;; Render the layers with `modifiers`, the animation at a time (a
         ;; delay of its modif-tree), or nil; `scroll-only?` when only the
@@ -427,12 +446,7 @@
            (when (and (not frozen?) (get page-objects frame-id))
              (let [generation (inc (mf/ref-val generation-ref))
                    drawn      (mf/ref-val drawn-ref)
-                   due        (filterv (fn [{:keys [tag still]}]
-                                         (or (not still)
-                                             (not scroll-only?)
-                                             (contains? moving tag)
-                                             (not (contains? drawn tag))))
-                                       passes)]
+                   due        (due-passes passes {:drawn drawn :moving moving :scroll-only? scroll-only?})]
                (mf/set-ref-val! generation-ref generation)
                (mf/set-ref-val! drawn-ref (reduce disj drawn (map :tag due)))
                (->> @wasm.api/module
