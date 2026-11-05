@@ -92,14 +92,15 @@
 (defn screen-sticky-ids
   "The layers of the board `frame-id` of `objects` that stick at the top
   of the screen (see `screen-sticky-layer?`), in the order they draw; not
-  one in another, which sticks with it."
+  one in another, which sticks with it, nor a hidden one or one in it."
   [objects frame-id]
   (letfn [(walk [ids]
             (mapcat (fn [id]
                       (when-let [shape (get objects id)]
-                        (if (screen-sticky-layer? objects shape)
-                          [id]
-                          (walk (:shapes shape)))))
+                        (cond
+                          (:hidden shape)                      nil
+                          (screen-sticky-layer? objects shape) [id]
+                          :else                                (walk (:shapes shape)))))
                     ids))]
     (vec (walk (dm/get-in objects [frame-id :shapes])))))
 

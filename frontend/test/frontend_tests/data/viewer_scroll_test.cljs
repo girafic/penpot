@@ -13,10 +13,12 @@
    [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.test-helpers.compositions :as cthc]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.test-helpers.shapes :as cths]
+   [app.common.uuid :as uuid]
    [app.main.data.viewer.devices :as dvd]
    [app.main.data.viewer.scroll :as dvs]
    [app.main.data.viewer.turn :as dvt]
@@ -334,8 +336,9 @@
 (defn- sticky-list
   "A page with the container List (24, 100, 354 × 400) scrolling down
   through three sticky headers at 100, 500 and 900, a board with a label
-  in it the second, and rows between down to 1500; the section Section
-  of the container Sections beside it, a header in it."
+  in it the second, a hidden one at 300, and rows between down to 1500;
+  the section Section of the container Sections beside it, a header in
+  it."
   []
   (-> (cthf/sample-file :file1)
       (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
@@ -343,6 +346,8 @@
                       :scroll-overflow :vertical)
       (cths/add-sample-shape :h1 :parent-label :list :x 24 :y 100 :width 354 :height 40 :sticky-scroll true)
       (cths/add-sample-shape :row1 :parent-label :list :x 24 :y 140 :width 354 :height 360)
+      (cths/add-sample-shape :ghost :parent-label :list :x 24 :y 300 :width 354 :height 40 :sticky-scroll true
+                             :hidden true)
       (cthc/add-frame :h2 :parent-label :list :x 24 :y 500 :width 354 :height 40 :sticky-scroll true)
       (cths/add-sample-shape :label :parent-label :h2 :x 30 :y 505 :width 100 :height 30)
       (cths/add-sample-shape :row2 :parent-label :list :x 24 :y 540 :width 354 :height 360)
@@ -368,6 +373,24 @@
     (t/is (= -400 (at 450 :h2)) "then stays at the top itself")
     (t/is (= -400 (at 450 :label)) "with what is in it")
     (t/is (= -90 (at 450 :h1)))))
+
+(t/deftest a-hidden-sticky-layer-neither-sticks-nor-pushes
+  (let [objects (sticky-list)
+        at      (fn [offset label]
+                  (some-> (get (dvs/scroll-shifts objects {(cthi/id :list) [0 offset]}) (cthi/id label))
+                          :y js/Math.round))]
+    (t/is (= 0 (at 250 :h1)) "the first header stays past the hidden one")
+    (t/is (= -250 (at 250 :ghost)) "which scrolls as any other layer")))
+
+(t/deftest a-sticky-line-is-not-pushed-on-by-itself
+  (let [area    (uuid/next)
+        line    (uuid/next)
+        objects {area {:id area :type :frame :parent-id uuid/zero :frame-id uuid/zero :shapes [line]
+                       :selrect (grc/make-rect 0 0 402 800)}
+                 ;; as flat as a path can be, not as a rect is made
+                 line {:id line :type :path :parent-id area :frame-id area :sticky-scroll true
+                       :selrect {:x 0 :y 300 :width 402 :height 0 :x1 0 :y1 300 :x2 402 :y2 300}}}]
+    (t/is (nil? (dvs/sticky-end objects (get objects line) area :y)) "nothing comes after it")))
 
 (t/deftest a-sticky-layer-leaves-with-its-board
   (let [objects (sticky-list)

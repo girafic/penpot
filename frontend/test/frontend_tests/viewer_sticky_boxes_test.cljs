@@ -30,6 +30,7 @@
 (def ^:private sheet-id (uuid/custom 11 15))
 (def ^:private sheet-title (uuid/custom 11 16))
 (def ^:private sheet-more (uuid/custom 11 17))
+(def ^:private ghost (uuid/custom 11 18))
 
 (defn- shape
   [id type parent-id x y w h & {:as attrs}]
@@ -38,12 +39,13 @@
 
 (def ^:private objects
   (->> [(shape board-id :frame uuid/zero 0 0 402 1814 :frame-id uuid/zero
-               :shapes [heading-1 section-1 section-2 heading-2 chips card holder above status-bar])
+               :shapes [heading-1 section-1 section-2 ghost heading-2 chips card holder above status-bar])
         (shape status-bar :rect board-id 0 0 402 54 :fixed-scroll true)
         (shape heading-1 :rect board-id 0 100 402 40 :sticky-scroll true)
         (shape section-1 :frame board-id 0 200 402 700 :shapes [section-head])
         (shape section-head :rect section-1 0 200 402 50 :sticky-scroll true)
         (shape section-2 :frame board-id 0 900 402 700)
+        (shape ghost :rect board-id 0 1200 402 40 :sticky-scroll true :hidden true)
         (shape heading-2 :rect board-id 0 1650 402 40 :sticky-scroll true)
         (shape chips :frame board-id 0 1700 402 40 :scroll-overflow :horizontal :shapes [chip])
         (shape chip :rect chips 0 1700 80 40 :sticky-scroll true)
@@ -60,7 +62,7 @@
 
 (t/deftest the-sticky-layers-of-a-screen-get-a-box-of-their-own
   (t/is (= [heading-1 section-head heading-2 card] (vpc/screen-sticky-ids objects board-id))
-        "in the order they draw: not one in a container, in another one, holding a fixed one, nor above the board")
+        "in the order they draw: not one in a container, in another one, holding a fixed one, above the board, nor a hidden one")
   (t/is (not (vpc/screen-sticky-layer? objects (get objects chip))) "it sticks in its container")
   (t/is (not (vpc/screen-sticky-layer? objects (get objects holder))) "it holds a layer that stays on screen")
   (t/is (not (vpc/screen-sticky-layer? objects (get objects above))) "it would stick at once")
@@ -70,7 +72,7 @@
 (t/deftest a-sticky-box-sticks-in-the-span-of-its-board
   (t/is (= {:edge 200 :height 80 :top 0 :bottom 3300}
            (vpc/sticky-span objects board-id heading-1 2))
-        "on the screen itself: until the next sticky layer pushes it on")
+        "on the screen itself: until the next sticky layer pushes it on, not a hidden one")
   (t/is (= {:edge 400 :height 100 :top 400 :bottom 1800}
            (vpc/sticky-span objects board-id section-head 2))
         "in a section: it leaves with it")

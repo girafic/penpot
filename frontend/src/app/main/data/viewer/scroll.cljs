@@ -292,14 +292,17 @@
   "Where the sticky layer `shape` of `objects`, in the area `area-id` (the
   board it scrolls in), stops sticking along `axis` (`:x` or `:y`): the
   end of its board when that is not the area (it leaves with its board),
-  and the start of the nearest sticky layer of its board past its own end
-  (the next one pushes it on); nil without either."
+  and the start of the nearest other sticky layer of its board past its
+  own end, not a hidden one (the next one pushes it on); nil without
+  either."
   [objects shape area-id axis]
   (let [[lo hi] (if (= axis :x) [:x1 :x2] [:y1 :y2])
         parent  (get objects (:parent-id shape))
         own-end (dm/get-in shape [:selrect hi])
         ends    (into []
                       (comp (keep #(get objects %))
+                            (remove :hidden)
+                            (remove #(= (:id %) (:id shape)))
                             (filter cfh/sticky-scroll?)
                             (map #(dm/get-in % [:selrect lo]))
                             (filter #(>= % own-end)))
@@ -326,13 +329,13 @@
 (defn- sticky-layers
   "The sticky layers of `objects` the container `id` is the innermost
   container of: in what it scrolls, not in a layer fixed in it nor in a
-  container in it (one of those may be sticky itself)."
+  container in it (one of those may be sticky itself), and not hidden."
   [objects id]
   (letfn [(walk [ids]
             (mapcat (fn [child-id]
                       (let [shape (get objects child-id)]
                         (cond
-                          (nil? shape)
+                          (or (nil? shape) (:hidden shape))
                           nil
 
                           (and (= (:parent-id shape) id) (cfh/fixed-scroll? shape))
