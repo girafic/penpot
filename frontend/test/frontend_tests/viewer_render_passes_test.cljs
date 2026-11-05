@@ -7,8 +7,9 @@
 (ns frontend-tests.viewer-render-passes-test
   "The render passes of a board in the view mode: what scrolls, each
   layer that sticks at the top of the screen and the fixed layers, each
-  on a canvas of its own, and which of them a render draws (Penpot
-  Motion)."
+  on a canvas of its own, and which of them a render draws: as the
+  containers scroll, or a frame of the animation that changes nothing
+  of theirs, the still ones show what they drew last (Penpot Motion)."
   (:require
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
@@ -24,6 +25,9 @@
 (def ^:private row (uuid/custom 12 5))
 (def ^:private chips (uuid/custom 12 6))
 (def ^:private chip (uuid/custom 12 7))
+(def ^:private section (uuid/custom 12 8))
+(def ^:private item (uuid/custom 12 9))
+(def ^:private badge (uuid/custom 12 10))
 
 (defn- shape
   [id type parent-id x y w h & {:as attrs}]
@@ -82,3 +86,47 @@
           "and one not drawn yet, or whose render a later one skipped")
     (t/is (= #{"scroll" sticky} (tags (rwv/due-passes all {:drawn #{sticky "fixed"} :moving #{sticky} :scroll-only? true})))
           "and one a container scrolls in")))
+
+(def ^:private listed
+  "The board with its heading in a section whose layout places it, an
+  item under it and a badge placed absolutely."
+  (-> objects
+      (assoc-in [board-id :shapes] [section row chips tabs])
+      (assoc section (shape section :frame board-id 0 100 402 400 :layout :flex :layout-flex-dir :column
+                            :shapes [heading item badge]))
+      (assoc-in [heading :parent-id] section)
+      (assoc-in [heading :frame-id] section)
+      (assoc item (shape item :rect section 0 140 402 300))
+      (assoc badge (shape badge :rect section 350 110 20 20 :layout-item-absolute true))))
+
+(t/deftest a-frame-of-the-animation-touches-the-passes-it-changes-a-layer-of
+  (let [sticky  (str "sticky:" heading)
+        reach   (rwv/pass-reach objects (passes objects true))
+        touched #(rwv/touched-passes reach (zipmap % (repeat {})))]
+    (t/is (= #{} (touched [row chip])) "not by what scrolls")
+    (t/is (= #{sticky} (touched [label])) "by a layer in a sticky one")
+    (t/is (= #{"fixed"} (touched [tabs])) "by a fixed one")
+    (t/is (= #{sticky "fixed"} (touched [board-id])) "by the board, which all draw")
+    (t/is (= #{} (rwv/touched-passes reach nil)) "nothing at rest"))
+  (let [sticky  (str "sticky:" heading)
+        reach   (rwv/pass-reach listed (passes listed true))
+        touched #(rwv/touched-passes reach (zipmap % (repeat {})))]
+    (t/is (= #{sticky} (touched [item])) "by a layer in the layout that places it, which may move it")
+    (t/is (= #{sticky} (touched [section])) "by the board around it")
+    (t/is (= #{} (touched [row])) "not by a layer out of that layout")))
+
+(t/deftest a-frame-of-the-animation-leaves-the-still-passes-it-does-not-touch
+  (let [all    (passes objects true)
+        sticky (str "sticky:" heading)
+        drawn  #{sticky "fixed"}
+        tags   #(set (map :tag %))]
+    (t/is (= #{"scroll"} (tags (rwv/due-passes all {:drawn drawn :posed #{} :touched #{}})))
+          "it changes none of their layers: they show it as they are")
+    (t/is (= #{"scroll" sticky} (tags (rwv/due-passes all {:drawn drawn :posed #{} :touched #{sticky}})))
+          "the one it changes draws")
+    (t/is (= #{"scroll" "fixed"} (tags (rwv/due-passes all {:drawn drawn :posed #{"fixed"} :touched #{}})))
+          "and one that shows a pose of the frame before, which goes back to rest")
+    (t/is (= #{"scroll" sticky} (tags (rwv/due-passes all {:drawn #{"fixed"} :posed #{} :touched #{}})))
+          "and one not drawn yet, or owed")
+    (t/is (= #{"scroll" sticky "fixed"} (tags (rwv/due-passes all {:drawn drawn})))
+          "all without knowing what it touches")))

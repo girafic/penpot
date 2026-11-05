@@ -8,8 +8,10 @@
   "WASM offscreen rendering for the shared viewer (snapshot + fixed layers)."
   (:require
    [app.common.exceptions :as ex]
+   [app.common.files.helpers :as cfh]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.render-wasm.wasm :as wasm]
+   [app.common.types.shape.layout :as ctl]
    [app.main.data.viewer.scroll :as dvs]
    [app.main.ui.viewer.viewport-common :as vpc]
    [app.render-wasm.api :as wasm.api]
@@ -396,18 +398,65 @@
               (map :tag))
         passes))
 
+(defn- flow-root
+  "The outermost board whose layout places the layer `id` of `objects`,
+  through boards the layouts around them place in turn: a change of any
+  layer in it may move that one. Nil when no layout places it."
+  [objects id]
+  (loop [id id root nil]
+    (let [shape  (get objects id)
+          parent (get objects (:parent-id shape))]
+      (if (and (some? parent)
+               (ctl/any-layout? parent)
+               (not (ctl/position-absolute? shape)))
+        (recur (:id parent) (:id parent))
+        root))))
+
+(defn pass-reach
+  "The layers of `objects` whose animation changes what each still pass
+  of `passes` draws, by tag: its layers (`:include`), those around them,
+  and all in the outermost board whose layout places one of them (see
+  `flow-root`), which may move it."
+  [objects passes]
+  (into {}
+        (comp (filter :still)
+              (map (fn [{:keys [tag include]}]
+                     (let [roots (into #{} (keep #(flow-root objects %)) include)]
+                       [tag (-> (set include)
+                                (into (mapcat #(cfh/get-parent-ids objects %)) include)
+                                (into (mapcat #(cfh/get-children-ids-with-self objects %)) roots))]))))
+        passes))
+
+(defn touched-passes
+  "The tags of the still passes the animation `modif-tree` (a frame of
+  it) changes a layer in the reach of (`reach`, see `pass-reach`)."
+  [reach modif-tree]
+  (if (empty? modif-tree)
+    #{}
+    (let [ids (keys modif-tree)]
+      (into #{}
+            (keep (fn [[tag layers]]
+                    (when (some #(contains? layers %) ids)
+                      tag)))
+            reach))))
+
 (defn due-passes
-  "The passes of `passes` a render draws: all, but for a still one (see
-  `app.main.ui.viewer.viewport-wasm/render-passes`) when only the
-  containers scrolled (`scroll-only?`), it drew last (in `drawn`, their
-  tags) and no container scrolls in it (in `moving`, see
-  `moving-passes`)."
-  [passes {:keys [drawn moving scroll-only?]}]
+  "The passes of `passes` a render draws: what scrolls, and a still one
+  (see `app.main.ui.viewer.viewport-wasm/render-passes`) that does not
+  show what it would draw: not drawn yet, or owed (not in `drawn`, their
+  tags); when only the containers scrolled (`scroll-only?`), one a
+  container scrolls in (in `moving`, see `moving-passes`); else one that
+  shows a pose of the animation (in `posed`), or that it changes (in
+  `touched`, see `touched-passes`; nil: any)."
+  [passes {:keys [drawn moving posed touched scroll-only?]}]
   (filterv (fn [{:keys [tag still]}]
              (or (not still)
-                 (not scroll-only?)
-                 (contains? moving tag)
-                 (not (contains? drawn tag))))
+                 (not (contains? drawn tag))
+                 (if scroll-only?
+                   (contains? moving tag)
+                   (or (nil? touched)
+                       (contains? posed tag)
+                       (contains? touched tag)))))
            passes))
 
 (defn- use-viewer-wasm-layers!
@@ -426,14 +475,18 @@
         ;; renderer did not get to are skipped, not queued.
         generation-ref (mf/use-ref 0)
         scroll-cache   (mf/use-ref nil)
-        ;; the still passes that show what they drew last: a scroll of the
-        ;; containers leaves those as they are (fixed and sticky layers),
-        ;; so a render it alone asks for draws them not, unless one that
-        ;; would was skipped, or a container scrolls in them (a fixed bar
-        ;; of chips)
+        ;; the still passes that show what they drew last (fixed and
+        ;; sticky layers, see `due-passes`): a scroll of the containers
+        ;; leaves those as they are, unless one scrolls in them (a fixed
+        ;; bar of chips), and so does a frame of the animation that
+        ;; changes nothing of theirs (`reach`), unless they show a pose
+        ;; of it (`posed-ref`)
         drawn-ref      (mf/use-ref #{})
+        posed-ref      (mf/use-ref #{})
         moving         (mf/with-memo [page-objects passes]
                          (moving-passes page-objects passes))
+        reach          (mf/with-memo [page-objects passes]
+                         (pass-reach page-objects passes))
 
         ;; Render the layers with `modifiers`, the animation at a time (a
         ;; delay of its modif-tree), or nil; `scroll-only?` when only the
@@ -441,39 +494,56 @@
         render!
         (mf/use-fn
          (mf/deps page-id page-objects render-size scale frame-id passes
-                  scroll-ref sheet-root frozen? moving)
+                  scroll-ref sheet-root frozen? moving reach)
          (fn [modifiers scroll-only?]
            (when (and (not frozen?) (get page-objects frame-id))
-             (let [generation (inc (mf/ref-val generation-ref))
-                   drawn      (mf/ref-val drawn-ref)
-                   due        (due-passes passes {:drawn drawn :moving moving :scroll-only? scroll-only?})]
+             (let [generation (inc (mf/ref-val generation-ref))]
                (mf/set-ref-val! generation-ref generation)
-               (mf/set-ref-val! drawn-ref (reduce disj drawn (map :tag due)))
+               ;; the ones a container scrolls in owe a render, should a
+               ;; later one come first
+               (when scroll-only?
+                 (mf/set-ref-val! drawn-ref (reduce disj (mf/ref-val drawn-ref) moving)))
                (->> @wasm.api/module
                     (p/fmap
                      (fn [ready?]
                        (when ready?
-                         (let [scroll (scroll-of scroll-cache page-objects
-                                                 (some-> scroll-ref deref) sheet-root)
-                               draws
-                               (into []
-                                     (keep (fn [{:keys [canvas include clear pins]}]
-                                             (when-let [canvas (canvas)]
-                                               {:canvas canvas
-                                                :opts   (cond-> {;; held at the bottom of a
-                                                                 ;; screen lower than the board
-                                                                 :modifiers (if (seq pins)
-                                                                              (delay (vpc/pin-modifiers (force modifiers) pins))
-                                                                              modifiers)
-                                                                 :scroll scroll}
-                                                          (seq include) (assoc :include-ids include)
-                                                          (seq clear)   (assoc :clear-fills-ids clear))})))
-                                     due)]
-                           (when (seq draws)
-                             (enqueue-wasm-render!
-                              (fn []
-                                (if (not= generation (mf/ref-val generation-ref))
-                                  ;; a later frame is on its way, and draws
+                         (enqueue-wasm-render!
+                          (fn []
+                            (if (not= generation (mf/ref-val generation-ref))
+                              ;; a later frame is on its way, and draws
+                              (p/resolved nil)
+                              (let [touched (touched-passes reach (some-> modifiers force))
+                                    due     (due-passes passes {:drawn (mf/ref-val drawn-ref)
+                                                                :moving moving
+                                                                :posed (mf/ref-val posed-ref)
+                                                                :touched touched
+                                                                :scroll-only? scroll-only?})
+                                    scroll  (scroll-of scroll-cache page-objects
+                                                       (some-> scroll-ref deref) sheet-root)
+                                    draws
+                                    (into []
+                                          (keep (fn [{:keys [tag still canvas include clear pins]}]
+                                                  (when-let [canvas (canvas)]
+                                                    {:tag    tag
+                                                     :still  still
+                                                     :canvas canvas
+                                                     :opts   (cond-> {;; held at the bottom of a
+                                                                      ;; screen lower than the board
+                                                                      :modifiers (if (seq pins)
+                                                                                   (delay (vpc/pin-modifiers (force modifiers) pins))
+                                                                                   modifiers)
+                                                                      :scroll scroll}
+                                                               (seq include) (assoc :include-ids include)
+                                                               (seq clear)   (assoc :clear-fills-ids clear))})))
+                                          due)
+                                    still   (into #{} (comp (filter :still) (map :tag)) draws)]
+                                ;; what they show once drawn, as a later
+                                ;; render runs after these
+                                (mf/set-ref-val! drawn-ref (into (mf/ref-val drawn-ref) still))
+                                (mf/set-ref-val! posed-ref (into (reduce disj (mf/ref-val posed-ref) still)
+                                                                 (filter touched)
+                                                                 still))
+                                (if (empty? draws)
                                   (p/resolved nil)
                                   (-> (reduce (fn [chain {:keys [canvas opts]}]
                                                 (p/then chain
@@ -483,10 +553,12 @@
                                               (p/resolved nil)
                                               draws)
                                       (p/then (fn [_]
-                                                (mf/set-ref-val! drawn-ref (into (mf/ref-val drawn-ref) (map :tag due)))
                                                 (mark-rendered! (map :canvas draws) frame-id)))))))))))))))))]
 
+    ;; anything a render depends on changed: all passes draw again
     (mf/with-layout-effect [render! dpr-key modifiers-ref]
+      (mf/set-ref-val! drawn-ref #{})
+      (mf/set-ref-val! posed-ref #{})
       (render! (some-> modifiers-ref deref) false))
 
     ;; Each frame of the animation renders the layers from here, as the
