@@ -27,6 +27,9 @@
 (def ^:private holder (uuid/custom 11 12))
 (def ^:private held-bar (uuid/custom 11 13))
 (def ^:private above (uuid/custom 11 14))
+(def ^:private sheet-id (uuid/custom 11 15))
+(def ^:private sheet-title (uuid/custom 11 16))
+(def ^:private sheet-more (uuid/custom 11 17))
 
 (defn- shape
   [id type parent-id x y w h & {:as attrs}]
@@ -48,7 +51,11 @@
         (shape card-title :rect card 20 1740 200 20 :sticky-scroll true)
         (shape holder :frame board-id 220 1740 160 60 :sticky-scroll true :shapes [held-bar])
         (shape held-bar :rect holder 220 1740 160 20 :fixed-scroll true)
-        (shape above :rect board-id 0 -20 402 40 :sticky-scroll true)]
+        (shape above :rect board-id 0 -20 402 40 :sticky-scroll true)
+        (shape sheet-id :frame uuid/zero 500 0 402 600 :frame-id uuid/zero :scroll-overflow :vertical
+               :shapes [sheet-title])
+        (shape sheet-title :frame sheet-id 500 20 402 50 :sticky-scroll true :shapes [sheet-more])
+        (shape sheet-more :rect sheet-title 850 30 40 30)]
        (into {} (map (juxt :id identity)))))
 
 (t/deftest the-sticky-layers-of-a-screen-get-a-box-of-their-own
@@ -75,12 +82,16 @@
         "the last one: to the end of the screen"))
 
 (t/deftest an-overlay-goes-where-a-stuck-layer-shows
-  (t/is (nil? (vpc/screen-stuck-move objects heading-1 50)) "not stuck yet: at its place")
-  (t/is (= {:id heading-1 :dy 200} (vpc/screen-stuck-move objects heading-1 300))
+  (t/is (nil? (vpc/screen-stuck-move objects board-id heading-1 50)) "not stuck yet: at its place")
+  (t/is (= {:id heading-1 :dy 200} (vpc/screen-stuck-move objects board-id heading-1 300))
         "stuck at the top of the screen: as far down as the page scrolled past it")
-  (t/is (= {:id card :dy 60} (vpc/screen-stuck-move objects card-title 1800))
+  (t/is (= {:id card :dy 60} (vpc/screen-stuck-move objects board-id card-title 1800))
         "a layer in one goes with it")
-  (t/is (= {:id section-head :dy 650} (vpc/screen-stuck-move objects section-head 880))
+  (t/is (= {:id section-head :dy 650} (vpc/screen-stuck-move objects board-id section-head 880))
         "pushed on by the end of its section")
-  (t/is (nil? (vpc/screen-stuck-move objects chip 1800)) "one of a container sticks there")
-  (t/is (nil? (vpc/screen-stuck-move objects (uuid/custom 11 99) 300)) "none without it"))
+  (t/is (nil? (vpc/screen-stuck-move objects board-id chip 1800)) "one of a container sticks there")
+  (t/is (nil? (vpc/screen-stuck-move objects board-id (uuid/custom 11 99) 300)) "none without it")
+  (t/is (nil? (vpc/screen-stuck-move objects board-id sheet-more 300))
+        "one of an overlay over the screen: the page of the screen scrolls not under it")
+  (t/is (= {:id sheet-title :dy 280} (vpc/screen-stuck-move objects sheet-id sheet-more 300))
+        "as the screen itself it sticks"))

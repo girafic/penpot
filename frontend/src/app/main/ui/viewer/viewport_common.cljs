@@ -121,23 +121,27 @@
      :bottom (* scale (max end y2))}))
 
 (defn screen-stuck-move
-  "How far down from its place the sticky layer of a screen (see
-  `screen-sticky-layer?`) that is or holds the layer `id` of `objects`
-  shows, its page scrolled `scroll` units down, as its box sticks (see
-  `dvs/sticky-edge`): `{:id :dy}`, nil when it shows at its place."
-  [objects id scroll]
+  "How far down from its place the sticky layer of the screen `screen-id`
+  (see `screen-sticky-layer?`) that is or holds the layer `id` of
+  `objects` shows, its page scrolled `scroll` units down, as its box
+  sticks (see `dvs/sticky-edge`): `{:id :dy}`, nil when it shows at its
+  place. A layer of another top board, an overlay on it, sticks not to
+  the page of the screen (see
+  `app.main.ui.viewer.viewport-wasm/viewport-wasm*`)."
+  [objects screen-id id scroll]
   (when-let [sticky-id (when (contains? objects id)
                          (->> (cons id (cfh/get-parent-ids-seq objects id))
                               (filter #(screen-sticky-layer? objects (get objects %)))
                               (last)))]
     (let [shape (get objects sticky-id)
-          root  (cfh/get-root-frame objects sticky-id)
-          {:keys [y1 y2]} (:selrect shape)
-          shown (dvs/sticky-edge y1 (- y2 y1) scroll (dm/get-in root [:selrect :y1])
-                                 (dvs/sticky-end objects shape (:id root) :y))
-          dy    (- (+ shown scroll) y1)]
-      (when (> dy 0.01)
-        {:id sticky-id :dy dy}))))
+          root  (cfh/get-root-frame objects sticky-id)]
+      (when (= (:id root) screen-id)
+        (let [{:keys [y1 y2]} (:selrect shape)
+              shown (dvs/sticky-edge y1 (- y2 y1) scroll (dm/get-in root [:selrect :y1])
+                                     (dvs/sticky-end objects shape (:id root) :y))
+              dy    (- (+ shown scroll) y1)]
+          (when (> dy 0.01)
+            {:id sticky-id :dy dy}))))))
 
 (defn frame-fixed-mask-ids
   "Fixed-layer shape ids inside `frame-id` (same rules as
