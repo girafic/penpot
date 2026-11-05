@@ -64,6 +64,12 @@
 (def ^:private scroll-layer-svg
   ":scope > [data-scroll-layer] > svg")
 
+(defn- sticky-layer-svg
+  "The hotspots of the sticky layer `id` of a screen, in its box (see
+  `viewport-wasm/wasm-sticky-box*`)."
+  [id]
+  (dm/str ":scope [data-sticky-layer=\"" id "\"] [data-scroll-layer] > svg"))
+
 (defn- view-of
   "What the pointer of `event` is over: one of the open `overlays`
   (`{:id :origin}`, `:origin` where its view box starts on the page), its
@@ -93,8 +99,9 @@
 (defn- containers-under
   "The containers of `view` (see `view-of`) of the board `screen-id` of
   `objects` under the pointer of `event`, the innermost first, those of
-  its fixed layers before (they show over the others): `[{:id :svg}]`,
-  `:svg` the hotspots it maps through."
+  its fixed layers before, then those of its sticky layers, the last
+  drawn first (they show over the others, see `vpc/screen-sticky-ids`):
+  `[{:id :svg}]`, `:svg` the hotspots it maps through, where it shows."
   [objects screen-id view event]
   (let [{:keys [viewport root-id overlay-root origin fixed-drop]} view
         offsets (dvs/view-offsets objects (shown-scroll screen-id) :overlay-root overlay-root)
@@ -107,13 +114,23 @@
                               (when-let [up (some #(get pins %) (cfh/get-parent-ids-seq objects id))]
                                 [id (gpt/point 0 (- up))])))
                       (filter fixed? ids))
+        sticky  (when (nil? overlay-root) (vpc/screen-sticky-ids objects root-id))
+        ;; the sticky layer each container in one is in
+        held    (into {}
+                      (keep (fn [id]
+                              (when-let [sticky-id (d/seek (set sticky) (cfh/get-parent-ids-seq objects id))]
+                                [id sticky-id])))
+                      (when (seq sticky) ids))
         under   (fn [selector ids]
                   (let [svg (some-> viewport (.querySelector selector))]
                     (when-let [point (svg-point svg event)]
                       (map #(hash-map :id % :svg svg)
                            (dvs/container-at objects ids offsets (gpt/add point origin) :extra extra)))))]
     (vec (concat (under fixed-layer-svg (filter fixed? ids))
-                 (under scroll-layer-svg (remove fixed? ids))))))
+                 (mapcat (fn [sticky-id]
+                           (under (sticky-layer-svg sticky-id) (filter #(= sticky-id (get held %)) ids)))
+                         (reverse sticky))
+                 (under scroll-layer-svg (remove #(or (fixed? %) (contains? held %)) ids))))))
 
 (defn- target-under
   "The container of `view` that takes the wheel `event` moving `[dx dy]`

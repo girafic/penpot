@@ -120,6 +120,25 @@
      :top    (* scale (min y1 (dm/get-in objects [(:parent-id shape) :selrect :y1])))
      :bottom (* scale (max end y2))}))
 
+(defn screen-stuck-move
+  "How far down from its place the sticky layer of a screen (see
+  `screen-sticky-layer?`) that is or holds the layer `id` of `objects`
+  shows, its page scrolled `scroll` units down, as its box sticks (see
+  `dvs/sticky-edge`): `{:id :dy}`, nil when it shows at its place."
+  [objects id scroll]
+  (when-let [sticky-id (when (contains? objects id)
+                         (->> (cons id (cfh/get-parent-ids-seq objects id))
+                              (filter #(screen-sticky-layer? objects (get objects %)))
+                              (last)))]
+    (let [shape (get objects sticky-id)
+          root  (cfh/get-root-frame objects sticky-id)
+          {:keys [y1 y2]} (:selrect shape)
+          shown (dvs/sticky-edge y1 (- y2 y1) scroll (dm/get-in root [:selrect :y1])
+                                 (dvs/sticky-end objects shape (:id root) :y))
+          dy    (- (+ shown scroll) y1)]
+      (when (> dy 0.01)
+        {:id sticky-id :dy dy}))))
+
 (defn frame-fixed-mask-ids
   "Fixed-layer shape ids inside `frame-id` (same rules as
   `get-fixed-ids`): the layers that stay on screen as it scrolls (see

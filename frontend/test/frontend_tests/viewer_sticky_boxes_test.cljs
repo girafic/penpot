@@ -73,3 +73,14 @@
   (t/is (= {:edge 1740 :height 60 :top 0 :bottom 1814}
            (vpc/sticky-span objects board-id card 1))
         "the last one: to the end of the screen"))
+
+(t/deftest an-overlay-goes-where-a-stuck-layer-shows
+  (t/is (nil? (vpc/screen-stuck-move objects heading-1 50)) "not stuck yet: at its place")
+  (t/is (= {:id heading-1 :dy 200} (vpc/screen-stuck-move objects heading-1 300))
+        "stuck at the top of the screen: as far down as the page scrolled past it")
+  (t/is (= {:id card :dy 60} (vpc/screen-stuck-move objects card-title 1800))
+        "a layer in one goes with it")
+  (t/is (= {:id section-head :dy 650} (vpc/screen-stuck-move objects section-head 880))
+        "pushed on by the end of its section")
+  (t/is (nil? (vpc/screen-stuck-move objects chip 1800)) "one of a container sticks there")
+  (t/is (nil? (vpc/screen-stuck-move objects (uuid/custom 11 99) 300)) "none without it"))

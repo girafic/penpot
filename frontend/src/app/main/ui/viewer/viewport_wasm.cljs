@@ -61,34 +61,41 @@
             (some-> @timer js/clearTimeout)))))
     (when follow? (deref state*))))
 
+(defn- use-posed-objects
+  "The objects `prepared` of the board `frame` (see `vpc/prepare-objects`)
+  as the animation of `modifiers-ref` poses them, followed at most every
+  `hotspot-interval` ms (see `use-posed-modifiers`); as they are without
+  `follow?`. One for all the hotspots of a viewport: posing all its
+  shapes takes a while."
+  [modifiers-ref follow? prepared objects frame size delta]
+  (let [modifiers (use-posed-modifiers modifiers-ref follow?)]
+    (mf/with-memo [prepared modifiers objects frame size delta]
+      (if (and (seq modifiers) (some? objects))
+        (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
+             (vpc/prepare-objects frame size delta))
+        prepared))))
+
 (defonce ^:private no-scroll
   (atom nil))
 
 (mf/defc wasm-hotspots-svg*
   "The hotspots of the board, over its WASM picture, where its shapes
-  show: as the animation of `modifiers-ref` poses them (see
-  `use-posed-modifiers`), tilted and in depth (see `shapes/hotspot*`).
-  A board without hotspots does not follow the animation: posing all
-  its shapes takes a while. The layers of `pins` show that far up (see
-  `vpc/fixed-pins`). The layers in its containers follow their scroll
-  (`scroll-ref`) at once, the interactions they open from too, and the
-  hotspots there show within the boxes of their containers, which clip
-  them: one scrolled out of the box takes no click. `sheet-root`, the
-  root of an overlay that scrolls as one (see `dvs/scroll-entries`)."
-  [{:keys [vbox size class prepared prepared-all prepared-frame shape-filter
-           objects frame delta modifiers-ref scroll-ref pins sheet-root]}]
-  (let [hotspots?  (mf/with-memo [prepared prepared-frame shape-filter]
-                     (boolean (seq (shapes/hotspot-shapes prepared (:id prepared-frame) shape-filter))))
-        modifiers  (use-posed-modifiers modifiers-ref hotspots?)
-        scroll     (mf/deref (or scroll-ref no-scroll))
+  show: as the animation poses them (`posed`, see `use-posed-objects`),
+  tilted and in depth (see `shapes/hotspot*`). The layers of `pins` show
+  that far up (see `vpc/fixed-pins`). The layers in its containers
+  follow their scroll (`scroll-ref`) at once, the interactions they open
+  from too, and the hotspots there show within the boxes of their
+  containers, which clip them: one scrolled out of the box takes no
+  click. `sheet-root`, the root of an overlay that scrolls as one (see
+  `dvs/scroll-entries`)."
+  [{:keys [vbox size class posed prepared-all prepared-frame shape-filter
+           objects frame scroll-ref pins sheet-root]}]
+  (let [scroll     (mf/deref (or scroll-ref no-scroll))
         shifts     (mf/with-memo [objects scroll sheet-root]
                      (when (and (seq scroll) (some? objects))
                        (not-empty (dvs/view-shifts objects scroll :overlay-root sheet-root))))
-        prepared   (mf/with-memo [prepared modifiers objects frame size delta pins shifts]
-                     (cond-> (if (and (seq modifiers) (some? objects))
-                               (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
-                                    (vpc/prepare-objects frame size delta))
-                               prepared)
+        prepared   (mf/with-memo [posed pins shifts]
+                     (cond-> posed
                        (seq pins)   (vpc/pin-objects pins)
                        (seq shifts) (dvs/shift-objects shifts)))
         prepared-all (mf/with-memo [prepared-all shifts]
@@ -134,19 +141,18 @@
        :clips clips}]]))
 
 (mf/defc wasm-backdrops*
-  "Under the layers fixed when scrolling (`fixed-mask-set`), boxes that
-  blur the layers that scroll where a fixed one has a background blur:
-  the fixed layers draw on a canvas of their own, over the one of the
-  others, so their background blur there finds nothing under it (see
-  `vpc/backdrop-style`). The layers of `pins` that far up (see
-  `vpc/fixed-pins`)."
-  [{:keys [prepared fixed-mask-set size scale pins]}]
-  (let [shapes (mf/with-memo [prepared fixed-mask-set pins]
+  "Under the layers of `mask-set` that draw on a canvas of their own
+  (fixed when scrolling, or sticky), boxes that blur the layers that
+  scroll where one of them has a background blur: over the canvas of the
+  others, it finds nothing under it there (see `vpc/backdrop-style`).
+  The layers of `pins` that far up (see `vpc/fixed-pins`)."
+  [{:keys [prepared mask-set size scale pins]}]
+  (let [shapes (mf/with-memo [prepared mask-set pins]
                  (let [objects (cond-> prepared (seq pins) (vpc/pin-objects pins))]
                    (into []
                          (comp (keep #(get objects %))
                                (filter vpc/background-blur?))
-                         fixed-mask-set)))]
+                         mask-set)))]
     (when (seq shapes)
       [:div {:style {:position "absolute"
                      :top 0
@@ -167,8 +173,8 @@
   (`fixed-layer`) stay (the wheel over their containers maps through
   their hotspots, see `app.main.ui.viewer.container-scroll`)."
   [{:keys [canvas-ref pass scale size vbox
-           prepared prepared-all prepared-frame class shape-filter
-           objects frame delta modifiers-ref scroll-ref scrolls fixed-layer pins sheet-root]}]
+           posed prepared-all prepared-frame class shape-filter
+           objects frame scroll-ref scrolls fixed-layer pins sheet-root]}]
   (let [{:keys [width height]} (canvas-dimensions scale size)]
     [:div {:data-scroll-layer scrolls
            :data-fixed-layer fixed-layer
@@ -188,14 +194,12 @@
      [:> wasm-hotspots-svg* {:vbox vbox
                              :size size
                              :class class
-                             :prepared prepared
+                             :posed posed
                              :prepared-all prepared-all
                              :prepared-frame prepared-frame
                              :shape-filter shape-filter
                              :objects objects
                              :frame frame
-                             :delta delta
-                             :modifiers-ref modifiers-ref
                              :scroll-ref scroll-ref
                              :pins pins
                              :sheet-root sheet-root}]]))
@@ -232,8 +236,10 @@
   section as it scrolls, as CSS `position: sticky` does, in the span of
   its board (`span`, see `vpc/sticky-span`), with the picture of the
   layer as large as the board (`layer-props`, see `wasm-layer*`) hanging
-  from it. A scroll event would come a frame late."
-  [{:keys [id span layer-props]}]
+  from it, its hotspots and the boxes that blur what scrolls under its
+  layers (`mask`, see `wasm-backdrops*`). A scroll event would come a
+  frame late."
+  [{:keys [id span mask prepared size scale layer-props]}]
   (let [{:keys [edge height top bottom]} span]
     [:div {:style {:position "absolute"
                    :top top
@@ -252,6 +258,10 @@
                      :left 0
                      :width 0
                      :height 0}}
+       [:> wasm-backdrops* {:prepared prepared
+                            :mask-set mask
+                            :size size
+                            :scale scale}]
        [:> wasm-layer* layer-props]]]]))
 
 (mf/defc viewport-wasm*
@@ -314,6 +324,12 @@
 
         prepared-frame (get prepared frame-id)
 
+        ;; the posed shapes of all the hotspots: a board without hotspots
+        ;; does not follow the animation
+        hotspots? (mf/with-memo [prepared frame-id]
+                    (boolean (seq (shapes/hotspot-shapes prepared frame-id nil))))
+        posed     (use-posed-objects modifiers-ref hotspots? prepared objects frame size delta)
+
         pins (mf/with-memo [objects frame-id has-fixed? fixed-drop]
                (when has-fixed? (vpc/fixed-pins objects frame-id fixed-drop)))
 
@@ -353,13 +369,11 @@
                 sticky-masks))
 
         not-fixed-props
-        (mf/props {:prepared prepared
+        (mf/props {:posed posed
                    :prepared-all prepared-all
                    :prepared-frame prepared-frame
                    :objects objects
                    :frame frame
-                   :delta delta
-                   :modifiers-ref modifiers-ref
                    :scroll-ref scroll-ref
                    :sheet-root sheet-root
                    :canvas-ref not-fixed-wasm-ref
@@ -375,13 +389,11 @@
                                    #(not (contains? apart %)))})
 
         fixed-props
-        (mf/props {:prepared prepared
+        (mf/props {:posed posed
                    :prepared-all prepared-all
                    :prepared-frame prepared-frame
                    :objects objects
                    :frame frame
-                   :delta delta
-                   :modifiers-ref modifiers-ref
                    :scroll-ref scroll-ref
                    :sheet-root sheet-root
                    :canvas-ref fixed-wasm-ref
@@ -412,6 +424,10 @@
           {:key (dm/str id)
            :id id
            :span span
+           :mask mask
+           :prepared prepared
+           :size size
+           :scale scale
            :layer-props (mf/spread-props not-fixed-props
                                          {:canvas-ref ref
                                           :pass (dm/str "sticky:" id)
@@ -435,7 +451,7 @@
                         :height 0
                         :pointer-events "none"}}
           [:> wasm-backdrops* {:prepared prepared
-                               :fixed-mask-set fixed-mask-set
+                               :mask-set fixed-mask-set
                                :size size
                                :scale scale
                                :pins pins}]

@@ -8,7 +8,9 @@
   "The main container for a frame in viewer mode"
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.geom.tilt :as gtl]
    [app.common.types.shape.interactions :as ctsi]
@@ -81,6 +83,26 @@
           :page
           :layer)))))
 
+(defn- stuck-place
+  "Where an overlay placed by the layer `relative-to-id` of `objects` goes
+  when a sticky layer of the screen `base-frame` that is or holds it
+  sticks as its page scrolled (see `vpc/screen-stuck-move`): `:objects`
+  with that one where it shows, and the overlay holds to it (`:anchor`
+  `:layer`, its place on the first screen) on a board that shows as a
+  screen (see `app.main.ui.viewer/stays-on-screen?`), else to the page.
+  Nil when none sticks."
+  [objects relative-to-id base-frame]
+  (let [state   @st/state
+        zoom    (dm/get-in state [:viewer-local :zoom] 1)
+        scroll  (/ (or (dom/get-scroll-pos (dom/get-element "viewer-section")) 0) zoom)]
+    (when-let [{:keys [id dy]} (vpc/screen-stuck-move objects relative-to-id scroll)]
+      (let [screen? (or (some? (dv/device-shown state)) (some? (dvs/screen-h base-frame)))
+            move    (gpt/point 0 (if screen? (- dy scroll) dy))]
+        {:objects (dvs/shift-objects objects (into {}
+                                                   (map #(vector % move))
+                                                   (cfh/get-children-ids-with-self objects id)))
+         :anchor  (if screen? :layer :page)}))))
+
 (defn- ignore-frame-shape
   [shape objects manual?]
   (let [shape (cond-> shape ;; When the the interaction is not manual and its origin is a frame,
@@ -112,6 +134,10 @@
                                          (:frame-id shape)
                                          (:id shape))
                                        (:position-relative-to interaction))
+          ;; by a sticky layer of the screen where it sticks
+          stuck                      (stuck-place objects relative-to-id base-frame)
+          objects                    (or (:objects stuck) objects)
+          shape                      (get objects (:id shape) shape)
           relative-to-shape          (dvs/design-box (or (get objects relative-to-id) base-frame))
           close-click-outside        (:close-click-outside interaction)
           background-overlay         (:background-overlay interaction)
@@ -134,7 +160,8 @@
                                    background-overlay
                                    (:animation interaction)
                                    fixed-base?
-                                   (overlay-anchor objects relative-to-id base-frame overlays)))))
+                                   (or (:anchor stuck)
+                                       (overlay-anchor objects relative-to-id base-frame overlays))))))
 
     :toggle-overlay
     (let [manual?                    (= :manual (:overlay-pos-type interaction))
@@ -146,6 +173,9 @@
                                          (:frame-id shape)
                                          (:id shape))
                                        (:position-relative-to interaction))
+          stuck                      (stuck-place objects relative-to-id base-frame)
+          objects                    (or (:objects stuck) objects)
+          shape                      (get objects (:id shape) shape)
           relative-to-shape          (dvs/design-box (or (get objects relative-to-id) base-frame))
           overlays-ids               (set (map :id overlays))
           relative-to-base-frame     (find-relative-to-base-frame relative-to-shape objects overlays-ids base-frame)
@@ -168,7 +198,8 @@
                                      background-overlay
                                      (:animation interaction)
                                      fixed-base?
-                                     (overlay-anchor objects relative-to-id base-frame overlays)))))
+                                     (or (:anchor stuck)
+                                         (overlay-anchor objects relative-to-id base-frame overlays))))))
 
     :close-overlay
     (let [dest-frame-id (or (:destination interaction)
