@@ -401,7 +401,11 @@
         ;; whether the layers fixed when scrolling are owed a pass: a scroll
         ;; of the containers leaves them where they are, so a render it
         ;; alone asks for draws them not, unless one that would was skipped
+        ;; or a container scrolls among them (a fixed bar of chips)
         fixed-owed-ref (mf/use-ref true)
+        fixed-scrolls? (mf/with-memo [page-objects fixed-include-ids]
+                         (boolean (some #(dvs/container-axes page-objects (get page-objects %))
+                                        fixed-include-ids)))
 
         ;; Render the layers with `modifiers`, the animation at a time (a
         ;; delay of its modif-tree), or nil; `scroll-only?` when only the
@@ -410,11 +414,11 @@
         (mf/use-fn
          (mf/deps page-id page-objects render-size scale frame-id
                   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins
-                  scroll-ref sheet-root frozen?)
+                  scroll-ref sheet-root frozen? fixed-scrolls?)
          (fn [modifiers scroll-only?]
            (when (and (not frozen?) (get page-objects frame-id))
              (let [generation (inc (mf/ref-val generation-ref))
-                   fixed?     (or (not scroll-only?) (mf/ref-val fixed-owed-ref))]
+                   fixed?     (or (not scroll-only?) fixed-scrolls? (mf/ref-val fixed-owed-ref))]
                (mf/set-ref-val! generation-ref generation)
                (when fixed? (mf/set-ref-val! fixed-owed-ref true))
                (->> @wasm.api/module
