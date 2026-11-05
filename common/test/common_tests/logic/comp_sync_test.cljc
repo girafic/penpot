@@ -795,3 +795,41 @@
     (t/is (not= (geometry main-group) (geometry main-group')))
     (t/is (= (:shapes main-group) (:shapes main-group'')))
     (t/is (= (geometry main-group) (geometry main-group'')))))
+
+(defn- sync-sticky
+  "`file` with `copy-update` done to the child of the copy and the main child
+  set sticky, then synced (Penpot Motion)."
+  [file copy-update]
+  (let [page         (thf/current-page file)
+        changes1     (-> (pcb/empty-changes nil (:id page))
+                         (cond-> (some? copy-update)
+                           (cls/generate-update-shapes #{(thi/id :copy-child)} copy-update (:objects page) {}))
+                         (cls/generate-update-shapes #{(thi/id :main-child)}
+                                                     #(assoc % :sticky-scroll true)
+                                                     (:objects page)
+                                                     {}))
+        updated-file (thf/apply-changes file changes1)
+        changes2     (cll/generate-sync-file-changes (pcb/empty-changes)
+                                                     nil
+                                                     :components
+                                                     (:id updated-file)
+                                                     (thi/id :component1)
+                                                     (:id updated-file)
+                                                     {(:id updated-file) updated-file}
+                                                     (:id updated-file))]
+    (thf/apply-changes updated-file changes2)))
+
+(t/deftest test-sync-when-a-layer-gets-sticky
+  (let [file (-> (thf/sample-file :file1)
+                 (tho/add-simple-component-with-copy :component1
+                                                     :main-root
+                                                     :main-child
+                                                     :copy-root
+                                                     :copy-root-params {:children-labels [:copy-child]}))]
+    (let [copy-child' (ths/get-shape (sync-sticky file nil) :copy-child)]
+      (t/is (true? (:sticky-scroll copy-child')) "a copy follows its main")
+      (t/is (nil? (:touched copy-child'))))
+    (let [copy-child' (ths/get-shape (sync-sticky file #(assoc % :fixed-scroll true)) :copy-child)]
+      (t/is (nil? (:sticky-scroll copy-child')) "one whose scroll behavior was changed keeps it")
+      (t/is (true? (:fixed-scroll copy-child')))
+      (t/is (= #{:constraints-group} (:touched copy-child'))))))
