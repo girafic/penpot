@@ -183,6 +183,10 @@
   grid-column: span 5;
 }
 
+.interaction-row-wide {
+  grid-column: 1 / -1;
+}
+
 .interaction-row-checkbox {
   grid-column: 4 / span 5;
   min-block-size: $sz-32;

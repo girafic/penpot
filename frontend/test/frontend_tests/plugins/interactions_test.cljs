@@ -9,6 +9,7 @@
    [app.common.test-helpers.files :as cthf]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.store :as st]
+   [app.main.ui.workspace.sidebar.options.menus.interactions :as menu]
    [app.plugins.api :as api]
    [app.plugins.format :as format]
    [app.plugins.shape :as shape]
@@ -212,6 +213,35 @@
         (t/is (= "both" (.-scrollOverflow menu)) "a top board shows what it has, moved out of a board")
         (set! (.-scrollOverflow menu) "none")
         (t/is (not (contains? (stored menu) :scroll-overflow)) "none is no attribute")))))
+
+(t/deftest a-layer-scrolls-with-its-board-fixed-or-sticky
+  ;; Penpot Motion: the scroll behavior of the prototype tab
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js board   (.createBoard context)
+            ^js a       (.createRectangle context)
+            ^js b       (.createRectangle context)
+            id          #(aget % "$id")
+            stored      #(get-in @store [:files (id (. context -currentFile)) :data :pages-index
+                                         (id (. context -currentPage)) :objects (id %)])
+            behavior    #(menu/scroll-behavior (map stored %&))]
+        (.appendChild board a)
+        (.appendChild board b)
+        (t/is (= :scroll (behavior a b)) "a layer never set scrolls with its board")
+        (ptk/emit! store (dwi/set-scroll-behavior [(id a)] :sticky))
+        (t/is (true? (:sticky-scroll (stored a))))
+        (t/is (= :multiple (behavior a b)))
+        (ptk/emit! store (dwi/set-scroll-behavior [(id a) (id b)] :fixed))
+        (t/is (= :fixed (behavior a b)))
+        (t/is (not (contains? (stored a) :sticky-scroll)) "fixed and sticky exclude each other")
+        (ptk/emit! store (dwi/set-scroll-behavior [(id a) (id b)] :scroll))
+        (t/is (= :scroll (behavior a b)))
+        (t/is (not-any? #(contains? (stored %) :fixed-scroll) [a b]) "with its board: neither key")
+        (t/is (nil? (behavior board)) "a top board is not in a board")
+        (t/is (nil? (behavior a board)))))))
 
 (t/deftest an-overlay-opens-relative-to-a-layer
   ;; `relativeTo` went to a key the position of the overlay does not read

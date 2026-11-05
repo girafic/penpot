@@ -16,7 +16,6 @@
    [app.main.store :as st]
    [app.main.ui.components.select :refer [select]]
    [app.main.ui.components.title-bar :refer [title-bar*]]
-   [app.main.ui.icons :as deprecated-icon]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [cuerdas.core :as str]
@@ -80,9 +79,6 @@
 
         in-frame? (and (some? ids)
                        (not= (:parent-id values) uuid/zero))
-
-        first-level? (and in-frame?
-                          (= (:parent-id values) (:frame-id values)))
 
         constraints-h (or (get values :constraints-h) (gsh/default-constraints-h values))
         constraints-v (or (get values :constraints-v) (gsh/default-constraints-v values))
@@ -149,12 +145,6 @@
              (st/emit! (dwsh/update-shapes
                         ids
                         #(assoc % :constraints-v (keyword value)))))))
-
-        on-fixed-scroll-clicked
-        (mf/use-fn
-         (mf/deps ids)
-         (fn [_]
-           (st/emit! (dwsh/update-shapes ids #(update % :fixed-scroll not)))))
 
         options-h
         (mf/with-memo [constraints-h]
@@ -242,18 +232,4 @@
             [:& select
              {:default-value (if (not= constraints-v :multiple) (d/nilv (d/name constraints-v) "scale") "")
               :options options-v
-              :on-change on-constraint-v-select-changed}]]
-           (when first-level?
-             [:div {:class (stl/css :checkbox)}
-
-              [:label {:for "fixed-on-scroll"
-                       :class (stl/css-case :checked (:fixed-scroll values))}
-               [:span {:class (stl/css-case :check-mark true
-                                            :checked (:fixed-scroll values))}
-                (when (:fixed-scroll values)
-                  deprecated-icon/status-tick)]
-               (tr "workspace.options.constraints.fix-when-scrolling")
-               [:input {:type "checkbox"
-                        :id "fixed-on-scroll"
-                        :checked (:fixed-scroll values)
-                        :on-change on-fixed-scroll-clicked}]]])]])])))
+              :on-change on-constraint-v-select-changed}]]]])])))

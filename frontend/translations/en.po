@@ -8799,6 +8799,18 @@ msgid "workspace.options.scrolling"
 msgstr "Scrolling"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.behavior.fixed"
+msgstr "Fixed (stay in place)"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.behavior.scroll"
+msgstr "Scroll with parent"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.behavior.sticky"
+msgstr "Sticky (stop at top edge)"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.scrolling.both"
 msgstr "Both"
 
@@ -9007,10 +9019,6 @@ msgstr "Bottom"
 #: src/app/main/ui/workspace/sidebar/options/menus/constraints.cljs:167, src/app/main/ui/workspace/sidebar/options/menus/constraints.cljs:178
 msgid "workspace.options.constraints.center"
 msgstr "Center"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/constraints.cljs:255
-msgid "workspace.options.constraints.fix-when-scrolling"
-msgstr "Fix when scrolling"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/constraints.cljs:164
 msgid "workspace.options.constraints.left"

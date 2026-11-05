@@ -339,7 +339,8 @@
         (case options-mode
           :prototype
           [:div {:class (stl/css :element-options :interaction-options)}
-           [:> interactions-menu* {:shape (first shapes)}
+           [:> interactions-menu* {:shape (first shapes)
+                                   :shapes shapes}
             [:> prototype-background-menu*]]]
 
           :inspect

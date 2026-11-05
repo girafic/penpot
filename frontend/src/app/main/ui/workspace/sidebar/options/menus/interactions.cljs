@@ -812,51 +812,100 @@
       [:p {:class (stl/css :counterpart-hint)}
        (tr "workspace.options.counterpart.hint")]]]))
 
+(defn scroll-behavior
+  "How the layers `shapes` scroll in the prototype: `:scroll` with their
+  board, `:fixed` or `:sticky` (see `cfh/sticky-scroll?`), `:multiple`
+  when they differ; nil when one of them is not right in a board, where
+  only that holds."
+  [shapes]
+  (when (and (seq shapes)
+             (every? #(and (= (:parent-id %) (:frame-id %))
+                           (not= (:frame-id %) uuid/zero))
+                     shapes))
+    (let [values (into #{}
+                       (map #(cond
+                               (true? (:fixed-scroll %))  :fixed
+                               (true? (:sticky-scroll %)) :sticky
+                               :else                      :scroll))
+                       shapes)]
+      (if (= 1 (count values)) (first values) :multiple))))
+
 (mf/defc scrolling*
-  "How the board `shape` scrolls in the prototype (see
-  `app.main.data.viewer.scroll`): a top board vertically through its
-  content below its bottom edge, a board inside another its content
-  inside its box, vertically, sideways or both. A top board that has
-  one of the other two (moved out of a board) shows it too: as a screen
-  it scrolls vertically only."
+  "How things scroll in the prototype: the content of the board `shape`
+  (see `app.main.data.viewer.scroll`), a top board vertically through
+  its content below its bottom edge, a board inside another its content
+  inside its box, vertically, sideways or both (a top board that has one
+  of the other two, moved out of a board, shows it too: as a screen it
+  scrolls vertically only); and the layers `shapes`, right in a board,
+  with it, fixed or sticky (see `scroll-behavior`)."
   {::mf/private true}
-  [{:keys [shape]}]
-  (let [id      (:id shape)
-        top?    (cfh/root-frame? shape)
-        stored  (:scroll-overflow shape)
-        value   (if (some? stored) (name stored) "none")
-        options (mf/with-memo [top? stored]
-                  (cond-> [{:value "none" :label (tr "workspace.options.scrolling.none")}
-                           {:value "vertical" :label (tr "workspace.options.scrolling.vertical")}]
-                    (or (not top?) (= stored :horizontal))
-                    (conj {:value "horizontal" :label (tr "workspace.options.scrolling.horizontal")})
-                    (or (not top?) (= stored :both))
-                    (conj {:value "both" :label (tr "workspace.options.scrolling.both")})))
-        hint    (cond
-                  (not top?) (tr "workspace.options.scrolling.hint-inner")
-                  (contains? #{:horizontal :both} stored) (tr "workspace.options.scrolling.hint-screen-only")
-                  :else (tr "workspace.options.scrolling.hint"))
+  [{:keys [shape shapes]}]
+  (let [id       (:id shape)
+        board?   (cfh/frame-shape? shape)
+        top?     (cfh/root-frame? shape)
+        stored   (:scroll-overflow shape)
+        value    (if (some? stored) (name stored) "none")
+        options  (mf/with-memo [top? stored]
+                   (cond-> [{:value "none" :label (tr "workspace.options.scrolling.none")}
+                            {:value "vertical" :label (tr "workspace.options.scrolling.vertical")}]
+                     (or (not top?) (= stored :horizontal))
+                     (conj {:value "horizontal" :label (tr "workspace.options.scrolling.horizontal")})
+                     (or (not top?) (= stored :both))
+                     (conj {:value "both" :label (tr "workspace.options.scrolling.both")})))
+        hint     (cond
+                   (not top?) (tr "workspace.options.scrolling.hint-inner")
+                   (contains? #{:horizontal :both} stored) (tr "workspace.options.scrolling.hint-screen-only")
+                   :else (tr "workspace.options.scrolling.hint"))
+
+        ids      (mf/with-memo [shapes] (mapv :id shapes))
+        behavior (scroll-behavior shapes)
+        behaviors
+        (mf/with-memo [behavior]
+          (d/concat-vec
+           (when (= behavior :multiple)
+             [{:value "" :label (tr "settings.multiple")}])
+           [{:value "scroll" :label (tr "workspace.options.scrolling.behavior.scroll")}
+            {:value "fixed" :label (tr "workspace.options.scrolling.behavior.fixed")}
+            {:value "sticky" :label (tr "workspace.options.scrolling.behavior.sticky")}]))
+
         on-change
         (mf/use-fn
          (mf/deps id)
          (fn [value]
-           (st/emit! (dwi/set-scroll-overflow id (when (not= value "none") (keyword value))))))]
-    [:div {:class (stl/css :section)}
-     [:div {:class (stl/css :title)}
-      [:> title-bar* {:collapsable false
-                      :title (tr "workspace.options.scrolling")
-                      :class (stl/css :title-bar)}]]
-     [:div {:class (stl/css :content)}
-      [:div {:class (stl/css :interaction-row)}
-       [:div {:class (stl/css :interaction-row-label)}
-        [:div {:class (stl/css :interaction-row-name)}
-         (tr "workspace.options.scrolling.overflow")]]
-       [:div {:class (stl/css :interaction-row-select)}
-        [:& select {:default-value value
-                    :options options
-                    :on-change on-change}]]]
-      [:p {:class (stl/css :counterpart-hint)}
-       hint]]]))
+           (st/emit! (dwi/set-scroll-overflow id (when (not= value "none") (keyword value))))))
+
+        on-behavior-change
+        (mf/use-fn
+         (mf/deps ids)
+         (fn [value]
+           (when-not (str/empty? value)
+             (st/emit! (dwi/set-scroll-behavior ids (keyword value))))))]
+    (when (or board? (some? behavior))
+      [:div {:class (stl/css :section)}
+       [:div {:class (stl/css :title)}
+        [:> title-bar* {:collapsable false
+                        :title (tr "workspace.options.scrolling")
+                        :class (stl/css :title-bar)}]]
+       [:div {:class (stl/css :content)}
+        (when board?
+          [:*
+           [:div {:class (stl/css :interaction-row)}
+            [:div {:class (stl/css :interaction-row-label)}
+             [:div {:class (stl/css :interaction-row-name)}
+              (tr "workspace.options.scrolling.overflow")]]
+            [:div {:class (stl/css :interaction-row-select)}
+             [:& select {:default-value value
+                         :options options
+                         :on-change on-change}]]]
+           [:p {:class (stl/css :counterpart-hint)}
+            hint]])
+        ;; as wide as the section: its options say what they do
+        (when (some? behavior)
+          [:div {:class (stl/css :interaction-row) :data-testid "scroll-behavior-select"}
+           [:div {:class (stl/css :interaction-row-wide)}
+            [:& select {:default-value (if (= behavior :multiple) "" (name behavior))
+                        :options behaviors
+                        :on-change on-behavior-change}]]])]])))
 
 (mf/defc interactions*
   [{:keys [interactions shape]}]
@@ -911,22 +960,25 @@
                                  :remove-interaction remove-interaction}])])]))
 
 (mf/defc interactions-menu*
-  "The prototype tab: the flows and interactions of the shape `shape`;
-  with none, the flows of the page and `children` under them."
-  [{:keys [shape children]}]
+  "The prototype tab: the flows and interactions of the shape `shape`,
+  how the selected `shapes` scroll; with none, the flows of the page and
+  `children` under them."
+  [{:keys [shape shapes children]}]
   (let [interactions  (get shape :interactions [])
         flows         (mf/deref refs/workspace-page-flows)
         framed-shape? (and shape (not (cfh/unframed-shape? shape)))]
 
     [:div {:class (stl/css :wrapper)}
      (if shape
-       (when (cfh/frame-shape? shape)
-         [:*
-          [:> shape-flows* {:flows flows
-                            :shape shape}]
-          (when (cfh/root-frame? shape)
-            [:> counterpart* {:shape shape}])
-          [:> scrolling* {:shape shape}]])
+       [:*
+        (when (cfh/frame-shape? shape)
+          [:*
+           [:> shape-flows* {:flows flows
+                             :shape shape}]
+           (when (cfh/root-frame? shape)
+             [:> counterpart* {:shape shape}])])
+        [:> scrolling* {:shape shape
+                        :shapes shapes}]]
        [:*
         (when flows
           [:> page-flows* {:flows flows}])
