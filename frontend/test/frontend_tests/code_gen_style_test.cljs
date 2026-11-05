@@ -405,6 +405,50 @@
           objs (objects (frame pid :layout :flex) head)]
       (is (= ["sticky" "0px"] [(css/get-css-value objs head :position) (css/get-css-value objs head :top)])))))
 
+(deftest a-board-a-sticky-layer-sticks-past-clips-without-scrolling
+  (testing "a section of a list that scrolls: the header of the section sticks in the list"
+    (let [list-id    (uuid/next)
+          section-id (uuid/next)
+          head-id    (uuid/next)
+          head       (child head-id section-id :frame-id section-id :sticky-scroll true)
+          section    (frame section-id :parent-id list-id :frame-id list-id :layout :flex
+                            :layout-flex-dir :column :shapes [head-id])
+          scrolling  (frame list-id :layout :flex :layout-flex-dir :column :scroll-overflow :vertical
+                            :shapes [section-id])
+          objs       (objects scrolling section head)]
+      (is (= "clip" (css/get-css-value objs section :overflow))
+          "`hidden` would make the section the box it sticks in")
+      (is (= "hidden auto" (css/get-css-value objs scrolling :overflow)))
+      (is (= ["sticky" "0px"] [(css/get-css-value objs head :position) (css/get-css-value objs head :top)]))))
+  (testing "a top board that does not scroll: the header sticks at the top of the page"
+    (let [pid  (uuid/next)
+          hid  (uuid/next)
+          top  (frame pid :layout :flex :shapes [hid])
+          objs (objects top (child hid pid :frame-id pid :sticky-scroll true))]
+      (is (= "clip" (css/get-css-value objs top :overflow)))))
+  (testing "a board without one clips as it did, and one around a board that scrolls with one"
+    (let [pid       (uuid/next)
+          inner-id  (uuid/next)
+          cid       (uuid/next)
+          hid       (uuid/next)
+          plain     (frame cid :layout :flex :shapes [(uuid/next)])
+          top       (frame pid :layout :flex :shapes [inner-id])
+          inner     (frame inner-id :parent-id pid :frame-id pid :layout :flex :scroll-overflow :vertical
+                           :shapes [hid])
+          objs      (objects plain top inner (child hid inner-id :frame-id inner-id :sticky-scroll true))]
+      (is (= "hidden" (css/get-css-value objs plain :overflow)))
+      (is (= "hidden" (css/get-css-value objs top :overflow)) "the header sticks in the board in it"))))
+
+(deftest a-sticky-layer-goes-over-what-scrolls-under-it
+  (let [pid  (uuid/next)
+        head (child (uuid/next) pid :frame-id pid :sticky-scroll true)
+        own  (child (uuid/next) pid :frame-id pid :sticky-scroll true :layout-item-z-index 5)
+        row  (child (uuid/next) pid :frame-id pid)
+        objs (objects (frame pid :layout :flex :layout-flex-dir :column :scroll-overflow :vertical) head own row)]
+    (is (= 1 (css/get-css-value objs head :z-index)) "as in the prototype, though later rows paint after it")
+    (is (= 5 (css/get-css-value objs own :z-index)) "but for its own")
+    (is (nil? (css/get-css-value objs row :z-index)))))
+
 (deftest a-sticky-layer-placed-absolutely-keeps-its-place
   (let [pid  (uuid/next)
         head (child (uuid/next) pid :frame-id pid :name "Header" :sticky-scroll true

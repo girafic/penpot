@@ -157,6 +157,19 @@
               (cfh/get-parent-ids-seq objects (:id shape)))
         #{:y})))
 
+(defn- holds-sticky?
+  "Whether a layer in the board `shape` of `objects` sticks as CSS
+  `position: sticky` does (see `sticky-axes`) to a board around `shape`
+  or the page: one in a board in it that scrolls in the prototype sticks
+  there."
+  [shape objects]
+  (letfn [(holds? [id]
+            (when-let [child (get objects id)]
+              (or (some? (sticky-axes child objects))
+                  (and (nil? (prototype-scroll child))
+                       (some holds? (:shapes child))))))]
+    (boolean (some holds? (:shapes shape)))))
+
 (defn- get-position
   [shape objects]
   (cond
@@ -458,7 +471,7 @@
       opacity)))
 
 (defn- get-overflow
-  [shape]
+  [shape objects]
   (when (and (cfh/frame-shape? shape)
              (not (cgc/svg-markup? shape)))
     (let [scroll (prototype-scroll shape)]
@@ -466,7 +479,10 @@
         :vertical   "hidden auto"
         :horizontal "auto hidden"
         :both       "auto"
-        (when-not (:show-content shape) "hidden")))))
+        (when-not (:show-content shape)
+          ;; `hidden` would make it the box a sticky layer in it sticks
+          ;; in, which does not scroll: `clip` clips as well
+          (if (holds-sticky? shape objects) "clip" "hidden"))))))
 
 (defn- get-flex-direction
   [shape]
@@ -634,6 +650,10 @@
     (cfh/root-frame? shape)
     0
 
+    ;; over the layers that scroll under it, as in the prototype
+    (some? (sticky-axes shape objects))
+    (or layout-item-z-index 1)
+
     (ctl/any-layout-immediate-child? objects shape)
     layout-item-z-index))
 
@@ -754,7 +774,7 @@
     :box-shadow (get-box-shadow shape)
     :filter (get-filter shape objects)
     :backdrop-filter (get-backdrop-filter shape)
-    :overflow (get-overflow shape)
+    :overflow (get-overflow shape objects)
 
     ;; Display
     :display (get-display shape)
