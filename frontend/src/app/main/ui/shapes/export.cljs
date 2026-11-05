@@ -99,6 +99,7 @@
         (add! :constraints-h)
         (add! :constraints-v)
         (add! :fixed-scroll)
+        (add! :sticky-scroll)
 
         (cond-> frame?
           (-> (add! :show-content)

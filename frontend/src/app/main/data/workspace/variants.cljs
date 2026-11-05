@@ -705,7 +705,8 @@
                             (dwsh/update-shapes ids #(-> %
                                                          (assoc :constraints-h :left)
                                                          (assoc :constraints-v :top)
-                                                         (assoc :fixed-scroll false)))
+                                                         (assoc :fixed-scroll false)
+                                                         (assoc :sticky-scroll false)))
                             (dwsh/relocate-shapes #{variant-id} common-parent index)
                             (dwt/update-dimensions [variant-id] :width (+ (:width rect) 60))
                             (dwt/update-dimensions [variant-id] :height (+ (:height rect) 60))

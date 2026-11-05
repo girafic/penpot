@@ -115,6 +115,7 @@
             :constraints-h
             :constraints-v
             :fixed-scroll
+            :sticky-scroll
             :parent-id
             :frame-id
 
@@ -159,6 +160,7 @@
            :constraints-h
            :constraints-v
            :fixed-scroll
+           :sticky-scroll
            :parent-id
            :frame-id
 
@@ -222,6 +224,7 @@
              :constraints-h
              :constraints-v
              :fixed-scroll
+             :sticky-scroll
              :parent-id
              :frame-id
 
@@ -285,6 +288,7 @@
            :constraints-h
            :constraints-v
            :fixed-scroll
+           :sticky-scroll
            :parent-id
            :frame-id
 
@@ -348,6 +352,7 @@
            :constraints-h
            :constraints-v
            :fixed-scroll
+           :sticky-scroll
            :parent-id
            :frame-id
 
@@ -436,6 +441,7 @@
             :constraints-h
             :constraints-v
             :fixed-scroll
+            :sticky-scroll
             :parent-id
             :frame-id
 
@@ -478,6 +484,7 @@
               :constraints-h
               :constraints-v
               :fixed-scroll
+              :sticky-scroll
               :parent-id
               :frame-id
 
@@ -542,6 +549,7 @@
            :constraints-h
            :constraints-v
            :fixed-scroll
+           :sticky-scroll
            :parent-id
            :frame-id
 

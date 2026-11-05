@@ -155,6 +155,41 @@
     ;; The override is keept: The rect still has width 25 after the switch
     (t/is (= (:width rect01') 25))))
 
+(t/deftest test-switch-keeps-a-sticky-override
+  (let [;; ==== Setup
+        file      (-> (thf/sample-file :file1)
+                      (thv/add-variant-with-child
+                       :v01 :c01 :m01 :c02 :m02 :r01 :r02
+                       {:child1-params {:width 5}
+                        :child2-params  {:width 5}})
+
+                      (thc/instantiate-component :c01
+                                                 :copy01
+                                                 :children-labels [:copy-r01]))
+
+        page   (thf/current-page file)
+        copy01 (ths/get-shape file :copy01)
+        rect01 (get-in page [:objects (-> copy01 :shapes first)])
+
+        changes (cls/generate-update-shapes (pcb/empty-changes nil (:id page))
+                                            #{(:id rect01)}
+                                            (fn [shape]
+                                              (assoc shape :sticky-scroll true))
+                                            (:objects page)
+                                            {})
+
+        file   (thf/apply-changes file changes)
+
+        ;; ==== Action
+        file'     (tho/swap-component-in-shape file :copy01 :c02 {:keep-touched? true})
+
+        page'     (thf/current-page file')
+        copy01'   (ths/get-shape file' :copy01)
+        rect01'   (get-in page' [:objects (-> copy01' :shapes first)])]
+
+    ;; The rect of the copy sticks after the switch too
+    (t/is (true? (:sticky-scroll rect01')))))
+
 ;; ============================================================
 ;; SIMPLE ATTRIBUTE OVERRIDES (different variants)
 ;; ============================================================

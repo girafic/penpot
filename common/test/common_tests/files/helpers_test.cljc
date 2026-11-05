@@ -147,3 +147,17 @@
     (t/is (= #{a' b}
              (set (map :audio-id (vals (get-in relinked [:pages-index page-id :timelines board :audio-clips]))))))
     (t/is (= (:media data) (:media relinked)))))
+
+(t/deftest a-layer-sticks-when-set-so-in-a-board
+  (let [board (uuid/next)
+        group (uuid/next)
+        layer (fn [& {:as attrs}]
+                (merge {:id (uuid/next) :parent-id board :frame-id board} attrs))]
+    (t/is (true? (cfh/sticky-scroll? (layer :sticky-scroll true))) "in a board")
+    (t/is (false? (cfh/sticky-scroll? (layer))) "not set")
+    (t/is (false? (cfh/sticky-scroll? (layer :sticky-scroll true :fixed-scroll true)))
+          "fixed wins")
+    (t/is (false? (cfh/sticky-scroll? (layer :sticky-scroll true :parent-id group)))
+          "not in a group in the board")
+    (t/is (false? (cfh/sticky-scroll? (layer :sticky-scroll true :parent-id uuid/zero :frame-id uuid/zero)))
+          "not a top board")))

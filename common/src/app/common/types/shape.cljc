@@ -226,6 +226,8 @@
    [:constraints-v {:optional true}
     [::sm/one-of vertical-constraint-types]]
    [:fixed-scroll {:optional true} :boolean]
+   ;; sticks at the edge of what scrolls (see `cfh/sticky-scroll?`)
+   [:sticky-scroll {:optional true} :boolean]
    [:r1 {:optional true} ::sm/non-negative-safe-number]
    [:r2 {:optional true} ::sm/non-negative-safe-number]
    [:r3 {:optional true} ::sm/non-negative-safe-number]
@@ -620,7 +622,7 @@
   #{:page-id :component-id :component-file :component-root :main-instance
     :remote-synced :shape-ref :touched :blocked :collapsed :locked
     :hidden :masked-group :mask-mode :fills :proportion :proportion-lock :constraints-h
-    :constraints-v :fixed-scroll :r1 :r2 :r3 :r4 :rotation :rotate-x :rotate-y :backface-hidden
+    :constraints-v :fixed-scroll :sticky-scroll :r1 :r2 :r3 :r4 :rotation :rotate-x :rotate-y :backface-hidden
     :translate-z :preserve-depth
     :opacity :grids :exports
     :strokes :blend-mode :interactions :shadow :blur :background-blur :grow-type :applied-tokens

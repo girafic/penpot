@@ -867,6 +867,18 @@
        (= (:parent-id shape) (:frame-id shape))
        (not= (:frame-id shape) uuid/zero)))
 
+(defn sticky-scroll?
+  "Whether the layer `shape` sticks at the edge of what scrolls in the
+  view mode, as CSS `position: sticky` does: set so, directly in a board
+  as a layer fixed when scrolling is (see `fixed-scroll?`), and not fixed,
+  which wins."
+  [shape]
+  ^boolean
+  (and (true? (:sticky-scroll shape))
+       (not (:fixed-scroll shape))
+       (= (:parent-id shape) (:frame-id shape))
+       (not= (:frame-id shape) uuid/zero)))
+
 (defn fixed?
   [objects shape-id]
   (let [ids-to-check
