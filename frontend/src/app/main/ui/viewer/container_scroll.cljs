@@ -147,9 +147,6 @@
         (let [latch* (volatile! nil)
               ;; the press going on, and the container it scrolls
               drag*  (volatile! nil)
-              ;; how far the wheel pushed the target past an end
-              past*  (volatile! [0 0])
-              rest*  (volatile! nil)
               frame* (volatile! nil)
 
               stop
@@ -157,44 +154,16 @@
                 (some-> @frame* js/cancelAnimationFrame)
                 (vreset! frame* nil))
 
-              ;; the rubber band back to the end, once the wheel rests
-              spring
-              (fn [screen-id id offset [x0 y0]]
-                (stop)
-                (let [t0 (js/performance.now)]
-                  (letfn [(step [now]
-                            (let [t (- now t0)
-                                  x (dds/spring-back x0 t)
-                                  y (dds/spring-back y0 t)
-                                  done? (and (< (mth/abs x) 0.5) (< (mth/abs y) 0.5))]
-                              (st/emit! (dv/scroll-container screen-id id offset (if done? [0 0] [x y])))
-                              (vreset! frame* (when-not done? (js/requestAnimationFrame step)))))]
-                    (vreset! frame* (js/requestAnimationFrame step)))))
-
+              ;; the wheel and the trackpad scroll as far as an end, and
+              ;; stop there: only a drag gives past it
               scroll-by
               (fn [objects screen-id id axes dx dy]
                 (stop)
-                (some-> @rest* js/clearTimeout)
-                (let [frame   (get objects id)
-                      range   (dvs/scroll-range objects frame axes)
+                (let [range   (dvs/scroll-range objects (get objects id) axes)
                       [ox oy] (dvs/clamp-offset range (or (dm/get-in (shown-scroll screen-id) [id :offset]) [0 0]))
-                      [mx my] range
                       dx      (if (contains? axes :x) dx 0)
-                      dy      (if (contains? axes :y) dy 0)
-                      {:keys [width height]} (:selrect frame)
-                      height  (or (dvs/screen-h frame) height)
-                      [px py] @past*
-                      px      (dds/wheel-past px ox mx dx (* dds/wheel-reach width))
-                      py      (dds/wheel-past py oy my dy (* dds/wheel-reach height))
-                      offset  (dvs/clamp-offset range [(+ ox dx) (+ oy dy)])
-                      shown   [(- (dds/past-offset px width)) (- (dds/past-offset py height))]]
-                  (vreset! past* [px py])
-                  (st/emit! (dv/scroll-container screen-id id offset shown))
-                  (when (or (not (zero? px)) (not (zero? py)))
-                    (vreset! rest* (js/setTimeout (fn []
-                                                    (vreset! past* [0 0])
-                                                    (spring screen-id id offset shown))
-                                                  dds/wheel-rest-ms)))))
+                      dy      (if (contains? axes :y) dy 0)]
+                  (st/emit! (dv/scroll-container screen-id id (dvs/clamp-offset range [(+ ox dx) (+ oy dy)]) [0 0]))))
 
               on-wheel
               (fn [^js event]
@@ -211,11 +180,10 @@
                         latch     @latch*
                         target    (if (and (some? latch) (< (- now (:at latch)) latch-ms))
                                     latch
-                                    (do (vreset! past* [0 0])
-                                        (target-under objects screen-id
-                                                      (view-of event (mf/ref-val viewport-ref) screen-id
-                                                               size fixed-drop overlays)
-                                                      event dx dy)))]
+                                    (target-under objects screen-id
+                                                  (view-of event (mf/ref-val viewport-ref) screen-id
+                                                           size fixed-drop overlays)
+                                                  event dx dy))]
                     (vreset! latch* (assoc target :at now))
                     (when (or (some? (:id target)) (:eat target))
                       (.preventDefault event)
@@ -458,5 +426,4 @@
               (.removeEventListener section "touchend" on-touch-end #js {:capture true})
               (.removeEventListener section "touchcancel" on-touch-end #js {:capture true})
               (end-drag)
-              (some-> @rest* js/clearTimeout)
               (stop))))))))

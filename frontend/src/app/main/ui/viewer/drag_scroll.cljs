@@ -7,9 +7,9 @@
 (ns app.main.ui.viewer.drag-scroll
   "The screen of a touch device (see `app.main.data.viewer.devices/touch?`)
   scrolls when dragged, as a finger scrolls it: it follows the pointer,
-  then coasts on and slows down once let go. Dragged past an end, or
-  pushed past it with a wheel or a trackpad, it gives like rubber and
-  springs back; a coast that runs into an end bounces off it. A tap there acts when it is let go, and only if it did
+  then coasts on and slows down once let go. Dragged past an end, it
+  gives like rubber and springs back; a coast that runs into an end
+  bounces off it. A wheel or a trackpad scrolls it as far as an end. A tap there acts when it is let go, and only if it did
   not drag (see `defer-taps?`, read by the hotspots of
   `app.main.ui.viewer.shapes`)."
   (:require
@@ -107,39 +107,6 @@
     (neg? top)  {:scroll 0 :offset (rubber (- top) size)}
     (> top max) {:scroll max :offset (- (rubber (- top max) size))}
     :else       {:scroll top :offset 0}))
-
-(def wheel-reach
-  "How far, as a share of its height, a wheel or a trackpad pushes a
-  screen past an end at most, as a finger drags it no further than across
-  it: the swing of a trackpad goes on long after it is let go."
-  0.3)
-
-(defn wheel-past
-  "How far, px, a wheel or a trackpad has pushed a screen scrolled `top`
-  px of `limit` past an end, `past` before and `dy` more now, `reach` px
-  at most: less than 0 past the top, more past the bottom, 0 between the
-  ends."
-  [past top limit dy reach]
-  (cond
-    (neg? past) (mth/clamp (+ past dy) (- reach) 0)
-    (pos? past) (mth/clamp (+ past dy) 0 reach)
-    (and (<= top 0) (neg? dy)) (max (- reach) dy)
-    (and (>= top limit) (pos? dy)) (min reach dy)
-    :else 0))
-
-(defn past-offset
-  "How far the content of a screen `size` px high moves down (up when less
-  than 0) pushed `past` px past an end (see `wheel-past`)."
-  [past size]
-  (cond
-    (neg? past) (rubber (- past) size)
-    (pos? past) (- (rubber past size))
-    :else 0))
-
-(def wheel-rest-ms
-  "How long, ms, a wheel past an end stays still before the screen springs
-  back."
-  90)
 
 (defn spring-back
   "Where content moved `x0` px past an end is `t` ms after it is let go:
@@ -244,9 +211,6 @@
         (let [gesture* (volatile! nil)
               frame*   (volatile! nil)
               offset*  (volatile! 0)
-              ;; how far a wheel pushed past an end, and when it springs back
-              past*    (volatile! 0)
-              rest*    (volatile! nil)
 
               max-scroll #(- (.-scrollHeight section) (.-clientHeight section))
 
@@ -353,8 +317,6 @@
                 (when (and (zero? (.-button event))
                            (not= "touch" (.-pointerType event)))
                   (stop!)
-                  (some-> @rest* js/clearTimeout)
-                  (vreset! past* 0)
                   (swap! state* assoc :dragged? false :claimed false)
                   ;; caught past an end: the drag goes on from there
                   (let [offset @offset*
@@ -367,31 +329,20 @@
                   (.addEventListener js/window "pointerup" on-up true)
                   (.addEventListener js/window "pointercancel" on-up true)))
 
-              ;; a wheel or a trackpad past an end gives as a drag does, and
-              ;; springs back once it rests
+              ;; a wheel or a trackpad scrolls as the browser does, as far
+              ;; as an end: it stops a coast, and a screen a drag left
+              ;; past an end goes back to it at once
               on-wheel
-              (fn [event]
+              (fn [_]
                 (stop!)
-                (some-> @rest* js/clearTimeout)
-                (let [size (.-clientHeight section)
-                      past (wheel-past @past* (.-scrollTop section) (max-scroll) (.-deltaY event)
-                                       (* wheel-reach size))]
-                  (vreset! past* past)
-                  (offset! (past-offset past size))
-                  (when-not (zero? past)
-                    ;; the screen can scroll no further
-                    (.preventDefault event)
-                    (vreset! rest* (js/setTimeout (fn []
-                                                    (vreset! past* 0)
-                                                    (spring! @offset*))
-                                                  wheel-rest-ms)))))]
+                (when-not (zero? @offset*)
+                  (offset! 0)))]
 
           (.addEventListener section "pointerdown" on-down)
           (.addEventListener section "wheel" on-wheel #js {:passive false})
           (fn []
             (.removeEventListener section "pointerdown" on-down)
             (.removeEventListener section "wheel" on-wheel #js {:passive false})
-            (some-> @rest* js/clearTimeout)
             (.removeEventListener js/window "pointermove" on-move true)
             (.removeEventListener js/window "pointerup" on-up true)
             (.removeEventListener js/window "pointercancel" on-up true)

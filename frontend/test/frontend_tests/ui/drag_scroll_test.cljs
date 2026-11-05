@@ -54,20 +54,6 @@
   (t/is (mth/close? 250 (dds/unrubber (dds/rubber 250 800) 800) 0.001)
         "how far it was dragged, from how far it gave"))
 
-(t/deftest a-wheel-pushes-past-an-end-too
-  (t/is (zero? (dds/wheel-past 0 300 900 40 240)) "between the ends it scrolls")
-  (t/is (zero? (dds/wheel-past 0 0 900 40 240)) "down from the top too")
-  (t/is (= -40 (dds/wheel-past 0 0 900 -40 240)) "up at the top it pushes past")
-  (t/is (= 40 (dds/wheel-past 0 900 900 40 240)) "down at the bottom")
-  (t/is (= -70 (dds/wheel-past -40 0 900 -30 240)) "further")
-  (t/is (zero? (dds/wheel-past -40 0 900 100 240)) "back, never past the other way")
-  (t/is (= -240 (dds/wheel-past -220 0 900 -50 240)) "no further than its reach")
-  (t/is (= 240 (dds/wheel-past 0 900 900 5000 240))
-        "a trackpad swinging on keeps the screen in sight")
-  (t/is (pos? (dds/past-offset -70 800)) "past the top the content moves down")
-  (t/is (neg? (dds/past-offset 70 800)) "past the bottom up")
-  (t/is (zero? (dds/past-offset 0 800))))
-
 (t/deftest it-springs-back-and-bounces-off-an-end
   (t/is (= 40 (dds/spring-back 40 0)) "from where it was let go")
   (t/is (< 0 (dds/spring-back 40 200) 40) "back, never past the end")
