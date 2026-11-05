@@ -73,16 +73,18 @@
   `vpc/fixed-pins`). The layers in its containers follow their scroll
   (`scroll-ref`) at once, the interactions they open from too, and the
   hotspots there show within the boxes of their containers, which clip
-  them: one scrolled out of the box takes no click."
+  them: one scrolled out of the box takes no click. `sheet-root`, the
+  root of an overlay that scrolls as one (see `dvs/scroll-entries`)."
   [{:keys [vbox size class prepared prepared-all prepared-frame shape-filter
-           objects frame delta modifiers-ref scroll-ref pins]}]
+           objects frame delta modifiers-ref scroll-ref pins sheet-root]}]
   (let [hotspots?  (mf/with-memo [prepared prepared-frame shape-filter]
                      (boolean (seq (shapes/hotspot-shapes prepared (:id prepared-frame) shape-filter))))
         modifiers  (use-posed-modifiers modifiers-ref hotspots?)
         scroll     (mf/deref (or scroll-ref no-scroll))
-        shifts     (mf/with-memo [objects scroll]
+        shifts     (mf/with-memo [objects scroll sheet-root]
                      (when (and (seq scroll) (some? objects))
-                       (not-empty (dvs/scroll-shifts objects (dvs/view-offsets objects scroll)))))
+                       (not-empty (dvs/scroll-shifts objects (dvs/view-offsets objects scroll
+                                                                               :overlay-root sheet-root)))))
         prepared   (mf/with-memo [prepared modifiers objects frame size delta pins shifts]
                      (cond-> (if (and (seq modifiers) (some? objects))
                                (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
@@ -93,8 +95,9 @@
         prepared-all (mf/with-memo [prepared-all shifts]
                        (cond-> prepared-all (seq shifts) (dvs/shift-objects shifts)))
         prepared-frame (or (get prepared (:id prepared-frame)) prepared-frame)
-        containers (mf/with-memo [objects frame]
-                     (when (some? objects) (not-empty (dvs/container-ids objects (:id frame)))))
+        containers (mf/with-memo [objects frame sheet-root]
+                     (when (some? objects)
+                       (not-empty (dvs/container-ids objects (:id frame) :overlay-root? (some? sheet-root)))))
         prefix     (str "scroll-clip-" (str/replace (mf/use-id) #"[^A-Za-z0-9]" "") "-")
         clip-id    #(str prefix %)
         clips      (mf/with-memo [prepared prepared-frame shape-filter containers prefix]
@@ -165,7 +168,7 @@
   their hotspots, see `app.main.ui.viewer.container-scroll`)."
   [{:keys [canvas-ref scale size vbox
            prepared prepared-all prepared-frame class shape-filter
-           objects frame delta modifiers-ref scroll-ref scrolls fixed-layer pins]}]
+           objects frame delta modifiers-ref scroll-ref scrolls fixed-layer pins sheet-root]}]
   (let [{:keys [width height]} (canvas-dimensions scale size)]
     [:div {:data-scroll-layer scrolls
            :data-fixed-layer fixed-layer
@@ -190,7 +193,8 @@
                              :delta delta
                              :modifiers-ref modifiers-ref
                              :scroll-ref scroll-ref
-                             :pins pins}]]))
+                             :pins pins
+                             :sheet-root sheet-root}]]))
 
 (defn- fixed-scroll-layer-ids
   [objects frame-id has-fixed?]
@@ -236,6 +240,9 @@
 
         objects  (:objects page)
         frame-id (:id frame)
+        ;; the root of an overlay grown to its content scrolls as one
+        sheet-root (when (and (true? is-overlay) (some? (dvs/screen-h (get objects frame-id))))
+                     frame-id)
         scale    (vpc/viewer-scale size)
         page-id  (:id page)
 
@@ -273,6 +280,7 @@
                    :delta delta
                    :modifiers-ref modifiers-ref
                    :scroll-ref scroll-ref
+                   :sheet-root sheet-root
                    :canvas-ref not-fixed-wasm-ref
                    :scrolls (not is-fixed)
                    :scale scale
@@ -293,6 +301,7 @@
                    :delta delta
                    :modifiers-ref modifiers-ref
                    :scroll-ref scroll-ref
+                   :sheet-root sheet-root
                    :canvas-ref fixed-wasm-ref
                    :fixed-layer true
                    :scale scale
@@ -307,7 +316,7 @@
      not-fixed-wasm-ref fixed-wasm-ref
      not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids pins
      delta modifiers-ref scroll-ref
-     (when (and (true? is-overlay) (some? (dvs/screen-h (get objects frame-id)))) frame-id)
+     sheet-root
      (true? is-snapshot))
 
     [:& (mf/provider shapes/base-frame-ctx) {:value (get prepared-all (:id base))}
