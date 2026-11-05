@@ -377,3 +377,45 @@
       (is (= "hidden auto" (css/get-css-value objs down :overflow)))
       (is (= "hidden auto" (css/get-css-value objs top-both :overflow)))
       (is (= "hidden" (css/get-css-value objs top-side :overflow)) "it does not scroll: clipped as it is"))))
+
+;; --- Sticky layers (Penpot Motion) -------------------------------------------
+
+(deftest a-sticky-layer-of-a-layout-sticks-as-css-does
+  (let [pid  (uuid/next)
+        head (child (uuid/next) pid :frame-id pid :sticky-scroll true :selrect (grc/make-rect 0 40 50 50))
+        objs (objects (frame pid :layout :flex :layout-flex-dir :column :scroll-overflow :vertical) head)]
+    (is (= "sticky" (css/get-css-value objs head :position)))
+    (is (= "0px" (css/get-css-value objs head :top)) "at the top of what scrolls it, not where it is")
+    (is (nil? (css/get-css-value objs head :left))))
+  (testing "at the left of a board that scrolls sideways, at both edges of one that scrolls both ways"
+    (let [top-id  (uuid/next)
+          row-id  (uuid/next)
+          map-id  (uuid/next)
+          tag     (child (uuid/next) row-id :frame-id row-id :sticky-scroll true)
+          pin     (child (uuid/next) map-id :frame-id map-id :sticky-scroll true)
+          objs    (objects (frame top-id)
+                           (frame row-id :parent-id top-id :frame-id top-id :layout :flex :scroll-overflow :horizontal)
+                           (frame map-id :parent-id top-id :frame-id top-id :layout :flex :scroll-overflow :both)
+                           tag pin)]
+      (is (= ["0px" nil] [(css/get-css-value objs tag :left) (css/get-css-value objs tag :top)]))
+      (is (= ["0px" "0px"] [(css/get-css-value objs pin :left) (css/get-css-value objs pin :top)]))))
+  (testing "in a layout that does not scroll: at the top of the page"
+    (let [pid  (uuid/next)
+          head (child (uuid/next) pid :frame-id pid :sticky-scroll true)
+          objs (objects (frame pid :layout :flex) head)]
+      (is (= ["sticky" "0px"] [(css/get-css-value objs head :position) (css/get-css-value objs head :top)])))))
+
+(deftest a-sticky-layer-placed-absolutely-keeps-its-place
+  (let [pid  (uuid/next)
+        head (child (uuid/next) pid :frame-id pid :name "Header" :sticky-scroll true
+                    :selrect (grc/make-rect 0 40 50 50) :points (pts 0 40 50 50))
+        objs (objects (frame pid :scroll-overflow :vertical) head)
+        out  (css/get-shape-css-selector objs head)]
+    (is (= "absolute" (css/get-css-value objs head :position)))
+    (is (= "40px" (css/get-css-value objs head :top)))
+    (is (str/includes? out "/* Header: sticky when scrolling in the prototype */") "the CSS says it sticks there"))
+  (testing "fixed wins"
+    (let [pid  (uuid/next)
+          head (child (uuid/next) pid :frame-id pid :sticky-scroll true :fixed-scroll true)
+          objs (objects (frame pid :layout :flex :scroll-overflow :vertical) head)]
+      (is (nil? (css/get-css-value objs head :position))))))

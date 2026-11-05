@@ -7145,8 +7145,25 @@ export interface ShapeBase extends PluginData {
 
   /**
    * Indicates whether the shape stays fixed in place while scrolling.
+   * Setting it to `true` sets `stickyWhenScrolling` to `false`.
    */
   fixedWhenScrolling: boolean;
+
+  /**
+   * Indicates whether the shape sticks at the edge of what scrolls it in
+   * the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
+   * in a board that scrolls sideways): it scrolls with the rest, stops at
+   * the top of the screen or of the board that scrolls it, and goes on
+   * once the end of its board, or the next sticky shape of its board,
+   * pushes it on. Only for a shape directly in a board. Setting it to
+   * `true` sets `fixedWhenScrolling` to `false`.
+   *
+   * @example
+   * ```js
+   * header.stickyWhenScrolling = true;
+   * ```
+   */
+  stickyWhenScrolling: boolean;
 
   /**
    * The border radius of the shape.

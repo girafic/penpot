@@ -18,7 +18,7 @@
    [app.main.ui.shapes.text.styles :as sts]
    [app.util.code-gen.common :as cgc]
    [app.util.code-gen.style-css-formats :refer [format-value format-shadow->css]]
-   [app.util.code-gen.style-css-values :refer [get-value]]
+   [app.util.code-gen.style-css-values :as sv :refer [get-value]]
    [cuerdas.core :as str]))
 
 ;;
@@ -308,7 +308,10 @@ body {
 
        (str/join
         "\n"
-        (filter some? [(str/fmt "/* %s */" (:name shape))
+        (filter some? [(if (and (cfh/sticky-scroll? shape) (nil? (sv/sticky-axes shape objects)))
+                         ;; placed absolutely, out of the flow
+                         (str/fmt "/* %s: sticky when scrolling in the prototype */" (:name shape))
+                         (str/fmt "/* %s */" (:name shape)))
                        (when wrapper? (str/fmt ".%s-wrapper {\n%s\n}" selector wrapper-properties))
                        (when wrapper? (str/fmt ".%s-wrapper > * {\n%s\n}" selector wrapper-child-properties))
                        (when svg?     (str/fmt ".%s > svg {\n%s\n}" selector svg-child-props))

@@ -151,6 +151,22 @@
             (t/is (= (.-fixedWhenScrolling shape) false))
             (t/is (= (get-in @store (get-shape-path :fixed-scroll)) false)))
 
+          (t/testing " - stickyWhenScrolling"
+            (t/is (= (.-stickyWhenScrolling shape) false))
+            (set! (.-fixedWhenScrolling shape) true)
+            (set! (.-stickyWhenScrolling shape) true)
+            (t/is (= (.-stickyWhenScrolling shape) true))
+            (t/is (= (get-in @store (get-shape-path :sticky-scroll)) true))
+            (t/is (= (.-fixedWhenScrolling shape) false) "sticky clears fixed")
+
+            (set! (.-fixedWhenScrolling shape) true)
+            (t/is (= (.-stickyWhenScrolling shape) false) "fixed clears sticky")
+            (t/is (nil? (get-in @store (get-shape-path :sticky-scroll))))
+
+            (t/is (thrown? js/Error (set! (.-stickyWhenScrolling shape) "fail")))
+            (t/is (= (.-stickyWhenScrolling shape) false))
+            (set! (.-fixedWhenScrolling shape) false))
+
           (t/testing " - borderRadius"
             (set! (.-borderRadius shape) 10)
             (t/is (= (.-borderRadius shape) 10))

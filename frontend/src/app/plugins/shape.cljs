@@ -587,7 +587,26 @@
 
                 :else
                 (let [id (obj/get self "$id")]
-                  (st/emit! (dwsh/update-shapes [id] #(assoc % :fixed-scroll value))))))}
+                  ;; fixed and sticky exclude each other (Penpot Motion)
+                  (st/emit! (dwsh/update-shapes [id] #(cond-> (assoc % :fixed-scroll value)
+                                                        value (dissoc :sticky-scroll)))))))}
+
+           :stickyWhenScrolling
+           {:this true
+            :get #(-> % u/proxy->shape :sticky-scroll true?)
+            :set
+            (fn [self value]
+              (cond
+                (not (boolean? value))
+                (u/not-valid plugin-id :stickyWhenScrolling value)
+
+                (not (r/check-permission plugin-id "content:write"))
+                (u/not-valid plugin-id :stickyWhenScrolling "Plugin doesn't have 'content:write' permission")
+
+                :else
+                (let [id (obj/get self "$id")]
+                  (st/emit! (dwsh/update-shapes [id] #(cond-> (assoc % :sticky-scroll value)
+                                                        value (dissoc :fixed-scroll)))))))}
 
            :borderRadius
            {:this true

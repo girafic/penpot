@@ -195,6 +195,17 @@ describe('Shapes', () => {
       expect(r.fixedWhenScrolling).toBe(true);
     });
 
+    test('stickyWhenScrolling is readable and writable, and excludes fixedWhenScrolling', (ctx) => {
+      const r = rect(ctx);
+      expect(r.stickyWhenScrolling).toBe(false);
+      r.fixedWhenScrolling = true;
+      r.stickyWhenScrolling = true;
+      expect(r.stickyWhenScrolling).toBe(true);
+      expect(r.fixedWhenScrolling).toBe(false);
+      r.fixedWhenScrolling = true;
+      expect(r.stickyWhenScrolling).toBe(false);
+    });
+
     test('opacity is readable and writable', (ctx) => {
       const r = rect(ctx);
       r.opacity = 0.5;

@@ -125,9 +125,44 @@
 
 ;; SHAPE VALUES
 
+(defn- prototype-scroll
+  "How the board `shape` scrolls its content in the prototype (Penpot
+  Motion, see `app.main.data.viewer.scroll`): `:vertical`, `:horizontal`
+  or `:both`, a top board vertically only; nil."
+  [shape]
+  (let [scroll (:scroll-overflow shape)]
+    (if (cfh/root-frame? shape)
+      (when (contains? #{:vertical :both} scroll) :vertical)
+      scroll)))
+
+(defn sticky-axes
+  "The axes along which the layer `shape` of `objects`, sticky in the
+  prototype (see `cfh/sticky-scroll?`), sticks as CSS `position: sticky`
+  does in a flex or grid layout: those of the nearest board around it
+  that scrolls its content (see `prototype-scroll`), else the page's,
+  vertically. Nil for any other layer and for one placed absolutely: out
+  of the flow, it keeps its place."
+  [shape objects]
+  (when (and (cfh/sticky-scroll? shape)
+             (ctl/any-layout-immediate-child? objects shape)
+             (not (ctl/position-absolute? shape)))
+    (or (some (fn [id]
+                (let [board (get objects id)]
+                  (when (cfh/frame-shape? board)
+                    (case (prototype-scroll board)
+                      :vertical   #{:y}
+                      :horizontal #{:x}
+                      :both       #{:x :y}
+                      nil))))
+              (cfh/get-parent-ids-seq objects (:id shape)))
+        #{:y})))
+
 (defn- get-position
   [shape objects]
   (cond
+    (some? (sticky-axes shape objects))
+    :sticky
+
     (or (and (ctl/any-layout-immediate-child? objects shape)
              (not (ctl/position-absolute? shape))
              (or (cfh/group-like-shape? shape)
@@ -145,11 +180,15 @@
 
 (defn- get-left-position
   [shape objects]
-  (get-shape-position shape objects :x))
+  (if-let [axes (sticky-axes shape objects)]
+    (when (contains? axes :x) 0)
+    (get-shape-position shape objects :x)))
 
 (defn- get-top-position
   [shape objects]
-  (get-shape-position shape objects :y))
+  (if-let [axes (sticky-axes shape objects)]
+    (when (contains? axes :y) 0)
+    (get-shape-position shape objects :y)))
 
 (defn- get-flex
   [shape objects]
@@ -422,12 +461,7 @@
   [shape]
   (when (and (cfh/frame-shape? shape)
              (not (cgc/svg-markup? shape)))
-    (let [scroll (:scroll-overflow shape)
-          ;; how it scrolls in the prototype (Penpot Motion, see
-          ;; `app.main.data.viewer.scroll`): a top board vertically only
-          scroll (if (cfh/root-frame? shape)
-                   (when (contains? #{:vertical :both} scroll) :vertical)
-                   scroll)]
+    (let [scroll (prototype-scroll shape)]
       (case scroll
         :vertical   "hidden auto"
         :horizontal "auto hidden"
