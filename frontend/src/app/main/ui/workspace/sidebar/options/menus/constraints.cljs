@@ -23,7 +23,6 @@
 
 (def constraint-attrs [:constraints-h
                        :constraints-v
-                       :fixed-scroll
                        :parent-id
                        :frame-id])
 
@@ -37,8 +36,6 @@
                      (get new-values :constraints-h))
          (identical? (get old-values :constraints-v)
                      (get new-values :constraints-v))
-         (identical? (get old-values :fixed-scroll)
-                     (get new-values :fixed-scroll))
          (identical? (get old-values :parent-id)
                      (get new-values :parent-id))
          (identical? (get old-values :frame-id)
