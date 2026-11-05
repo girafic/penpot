@@ -201,12 +201,17 @@ desc: This Penpot user guide explains how to prototype interactions, connect boa
 </figure>
 
 <h2 id="prototyping-fix-scroll">Fix elements at scroll</h2>
-<p>You can fix the position of a layer when scrolling at the presentation view. This is tipically useful for prototyping fixed headers, navbars and floating buttons.</p>
+<p>You can fix the position of a layer when scrolling at the presentation view, or let it stick at the top edge. This is tipically useful for prototyping fixed headers, navbars, floating buttons and section headings.</p>
+<p>Select an element right inside a board and choose how it scrolls in the Scrolling section of the Prototype tab (right side):</p>
+<ul>
+  <li><strong>Scroll with parent</strong>: it scrolls with its board, as any other layer.</li>
+  <li><strong>Fixed (stay in place)</strong>: it stays where it is while its board scrolls under it.</li>
+  <li><strong>Sticky (stop at top edge)</strong>: it scrolls with its board until it reaches the top edge of what scrolls (the left edge of a board that scrolls sideways) and stays there, as CSS <code>position: sticky</code> does, until the end of the board it is in takes it along. Unlike CSS, the next sticky layer of its board pushes it on as well.</li>
+</ul>
 <figure>
-  <img src="/img/prototype/prototype-fix-scroll.webp" alt="Prototyping fix scroll">
+  <img src="/img/prototype/prototype-fix-scroll.webp" alt="The scroll behavior of a layer in the Scrolling section of the Prototype tab">
 </figure>
-<p>Select an element and check the option "Fix when scrolling" that you can find inside the Constraints section at the Design sidebar (right side).</p>
 <figure>
   <img src="/img/prototype/prototyping-scroll.gif" alt="Prototyping scroll">
 </figure>
-<p>Launch the View Mode to see the elements with a fixed scroll position.</p>
+<p>Launch the View Mode to see the elements with a fixed or sticky scroll position.</p>
