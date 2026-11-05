@@ -160,12 +160,13 @@
 
 (mf/defc wasm-layer*
   "The WASM picture of the layers of `shape-filter` and their hotspots,
-  those of `pins` that far up (see `vpc/fixed-pins`). The ones that
-  scroll (`scrolls`) move past an end of a touch screen (see
+  those of `pins` that far up (see `vpc/fixed-pins`), on the canvas of
+  the render pass `pass` (see `rwv/use-viewer-wasm-viewport!`). The ones
+  that scroll (`scrolls`) move past an end of a touch screen (see
   `.in-device[data-overscroll]` in the viewer styles); the fixed ones
   (`fixed-layer`) stay (the wheel over their containers maps through
   their hotspots, see `app.main.ui.viewer.container-scroll`)."
-  [{:keys [canvas-ref scale size vbox
+  [{:keys [canvas-ref pass scale size vbox
            prepared prepared-all prepared-frame class shape-filter
            objects frame delta modifiers-ref scroll-ref scrolls fixed-layer pins sheet-root]}]
   (let [{:keys [width height]} (canvas-dimensions scale size)]
@@ -176,10 +177,14 @@
                    :left 0
                    :width (:width size)
                    :height (:height size)}}
-     [:canvas {:ref canvas-ref :width width :height height :style {:width "100%"
-                                                                   :height "100%"
-                                                                   :background "transparent"
-                                                                   :pointer-events "none"}}]
+     [:canvas {:ref canvas-ref
+               :data-pass pass
+               :width width
+               :height height
+               :style {:width "100%"
+                       :height "100%"
+                       :background "transparent"
+                       :pointer-events "none"}}]
      [:> wasm-hotspots-svg* {:vbox vbox
                              :size size
                              :class class
@@ -195,26 +200,59 @@
                              :pins pins
                              :sheet-root sheet-root}]]))
 
-(defn- fixed-scroll-layer-ids
-  [objects frame-id has-fixed?]
-  (let [frame-subtree-ids (into #{} (cfh/get-children-ids-with-self objects frame-id))
-        fixed-mask-ids (when has-fixed? (vpc/frame-fixed-mask-ids objects frame-id))
-        fixed-mask-set (or fixed-mask-ids #{})
-        not-fixed-include-ids
-        (when has-fixed?
-          (into []
-                (distinct
-                 (conj (->> frame-subtree-ids
-                            (remove #(contains? fixed-mask-set %)))
-                       frame-id))))
-        fixed-include-ids
-        (when has-fixed?
-          (vec (conj (or fixed-mask-ids #{}) frame-id)))
-        fixed-clear-fills-ids (when has-fixed? #{frame-id})]
+(defn- layer-masks
+  "What each render pass of the board `frame-id` of `objects` draws (see
+  `rwv/use-viewer-wasm-viewport!`): `:fixed-mask-set`, the layers fixed
+  when scrolling (with `has-fixed?`, see `vpc/frame-fixed-mask-ids`);
+  `:sticky-masks`, `[id ids]` of each of the layers `sticky-ids` that
+  stick at the top of the screen, all within it; `:apart`, those the pass
+  of what scrolls leaves to the others, and the include and clear ids of
+  that one and the fixed one."
+  [objects frame-id has-fixed? sticky-ids]
+  (let [fixed-mask-set (or (when has-fixed? (vpc/frame-fixed-mask-ids objects frame-id)) #{})
+        sticky-masks   (mapv (fn [id] [id (into #{} (cfh/get-children-ids-with-self objects id))])
+                             sticky-ids)
+        apart          (into fixed-mask-set (mapcat second) sticky-masks)]
     {:fixed-mask-set fixed-mask-set
-     :not-fixed-include-ids not-fixed-include-ids
-     :fixed-include-ids fixed-include-ids
-     :fixed-clear-fills-ids fixed-clear-fills-ids}))
+     :sticky-masks sticky-masks
+     :apart apart
+     :not-fixed-include-ids
+     (when (seq apart)
+       (into []
+             (distinct)
+             (conj (->> (cfh/get-children-ids-with-self objects frame-id)
+                        (remove #(contains? apart %)))
+                   frame-id)))
+     :fixed-include-ids (when has-fixed? (vec (conj fixed-mask-set frame-id)))
+     :fixed-clear-fills-ids (when has-fixed? #{frame-id})}))
+
+(mf/defc wasm-sticky-box*
+  "A layer that sticks at the top of the screen (see
+  `vpc/screen-sticky-layer?`): a box the browser holds at the top of the
+  section as it scrolls, as CSS `position: sticky` does, in the span of
+  its board (`span`, see `vpc/sticky-span`), with the picture of the
+  layer as large as the board (`layer-props`, see `wasm-layer*`) hanging
+  from it. A scroll event would come a frame late."
+  [{:keys [id span layer-props]}]
+  (let [{:keys [edge height top bottom]} span]
+    [:div {:style {:position "absolute"
+                   :top top
+                   :left 0
+                   :width 0
+                   :height (- bottom top)
+                   :pointer-events "none"}}
+     [:div {:style {:height (- edge top)}}]
+     [:div {:data-sticky-layer (dm/str id)
+            :style {:position "sticky"
+                    :top 0
+                    :width 0
+                    :height height}}
+      [:div {:style {:position "absolute"
+                     :top (- edge)
+                     :left 0
+                     :width 0
+                     :height 0}}
+       [:> wasm-layer* layer-props]]]]))
 
 (mf/defc viewport-wasm*
   "The board `frame` of `page` rendered by WASM. `modifiers-ref` holds
@@ -236,6 +274,8 @@
 
         not-fixed-wasm-ref   (mf/use-ref nil)
         fixed-wasm-ref       (mf/use-ref nil)
+        ;; {id canvas} of the layers that stick at the top of the screen
+        sticky-canvases      (mf/use-ref {})
 
         objects  (:objects page)
         frame-id (:id frame)
@@ -261,14 +301,56 @@
         (mf/with-memo [objects size delta]
           (vpc/prepare-page-objects objects size delta))
 
-        {:keys [fixed-mask-set not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids]}
-        (mf/with-memo [objects frame-id has-fixed?]
-          (fixed-scroll-layer-ids objects frame-id has-fixed?))
+        ;; nothing of an overlay sticks to the section: the root of one
+        ;; that scrolls holds its sticky layers (see `dvs/view-shifts`)
+        sticky-ids
+        (mf/with-memo [objects frame-id is-fixed is-overlay]
+          (when-not (or is-fixed (true? is-overlay))
+            (not-empty (vpc/screen-sticky-ids objects frame-id))))
+
+        {:keys [fixed-mask-set sticky-masks apart] :as masks}
+        (mf/with-memo [objects frame-id has-fixed? sticky-ids]
+          (layer-masks objects frame-id has-fixed? sticky-ids))
 
         prepared-frame (get prepared frame-id)
 
         pins (mf/with-memo [objects frame-id has-fixed? fixed-drop]
                (when has-fixed? (vpc/fixed-pins objects frame-id fixed-drop)))
+
+        passes
+        (mf/with-memo [masks frame-id pins]
+          (let [{:keys [not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids]} masks]
+            (cond-> (into [{:tag "scroll"
+                            :canvas #(mf/ref-val not-fixed-wasm-ref)
+                            :include not-fixed-include-ids}]
+                          (map (fn [[id mask]]
+                                 {:tag (dm/str "sticky:" id)
+                                  :canvas #(get (mf/ref-val sticky-canvases) id)
+                                  :include (into [frame-id] mask)
+                                  :clear #{frame-id}
+                                  :still true}))
+                          (:sticky-masks masks))
+              (seq fixed-include-ids)
+              (conj {:tag "fixed"
+                     :canvas #(mf/ref-val fixed-wasm-ref)
+                     :include fixed-include-ids
+                     :clear fixed-clear-fills-ids
+                     :pins pins
+                     :still true}))))
+
+        sticky-boxes
+        (mf/with-memo [sticky-masks prepared frame-id scale]
+          (mapv (fn [[id mask]]
+                  {:id id
+                   :mask mask
+                   :span (vpc/sticky-span prepared frame-id id scale)
+                   :ref (fn [node]
+                          (let [canvases (mf/ref-val sticky-canvases)]
+                            (mf/set-ref-val! sticky-canvases
+                                             (if (some? node)
+                                               (assoc canvases id node)
+                                               (dissoc canvases id)))))})
+                sticky-masks))
 
         not-fixed-props
         (mf/props {:prepared prepared
@@ -281,15 +363,16 @@
                    :scroll-ref scroll-ref
                    :sheet-root sheet-root
                    :canvas-ref not-fixed-wasm-ref
+                   :pass "scroll"
                    :scrolls (not is-fixed)
                    :scale scale
                    :size size
                    :vbox vbox
-                   :class (if has-fixed?
+                   :class (if (seq apart)
                             (stl/css :not-fixed)
                             (when is-fixed (stl/css :fixed)))
-                   :shape-filter (when has-fixed?
-                                   #(not (contains? fixed-mask-set %)))})
+                   :shape-filter (when (seq apart)
+                                   #(not (contains? apart %)))})
 
         fixed-props
         (mf/props {:prepared prepared
@@ -302,6 +385,7 @@
                    :scroll-ref scroll-ref
                    :sheet-root sheet-root
                    :canvas-ref fixed-wasm-ref
+                   :pass "fixed"
                    :fixed-layer true
                    :scale scale
                    :size size
@@ -311,9 +395,7 @@
                    :pins pins})]
 
     (rwv/use-viewer-wasm-viewport!
-     page-id objects size scale frame-id
-     not-fixed-wasm-ref fixed-wasm-ref
-     not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids pins
+     page-id objects size scale frame-id passes
      delta modifiers-ref scroll-ref
      sheet-root
      (true? is-snapshot))
@@ -322,6 +404,20 @@
      [:& (mf/provider shapes/frame-offset-ctx) {:value offset}
       [:*
        [:> wasm-layer* not-fixed-props]
+
+       ;; The layers that stick at the top of the screen, over what
+       ;; scrolls, under what stays (see `wasm-sticky-box*`)
+       (for [{:keys [id mask span ref]} sticky-boxes]
+         [:> wasm-sticky-box*
+          {:key (dm/str id)
+           :id id
+           :span span
+           :layer-props (mf/spread-props not-fixed-props
+                                         {:canvas-ref ref
+                                          :pass (dm/str "sticky:" id)
+                                          :scrolls true
+                                          :class (stl/css :not-fixed)
+                                          :shape-filter #(contains? mask %)})}])
 
        ;; The layers fixed when scrolling: the scroll of the section moves
        ;; the others, this one sticks to its top left corner (the browser

@@ -139,12 +139,14 @@
   (wasm.api/clear-render-include-filter!)
   (when (seq include-ids)
     (wasm.api/set-render-include-filter! include-ids))
-  ;; the board under the layers fixed when scrolling: the pass below draws
-  ;; its fills and shadows, here they would cover what scrolls
+  ;; the board under the layers fixed when scrolling or sticky: the pass
+  ;; of what scrolls draws its fills, shadows and strokes, here they would
+  ;; cover it (and move with a sticky layer)
   (doseq [id clear-fills-ids]
     (wselect/use-shape id)
     (wasm.api/clear-shape-fills!)
-    (wasm.api/set-shape-shadows [])))
+    (wasm.api/set-shape-shadows [])
+    (wasm.api/set-shape-strokes id [] false)))
 
 (defn- viewer-restore-layer-mask!
   [page-objects clear-fills-ids]
@@ -152,7 +154,8 @@
   (doseq [id clear-fills-ids]
     (wselect/use-shape id)
     (wasm.api/set-shape-fills id (get-in page-objects [id :fills] []) false)
-    (wasm.api/set-shape-shadows (get-in page-objects [id :shadow] []))))
+    (wasm.api/set-shape-shadows (get-in page-objects [id :shadow] []))
+    (wasm.api/set-shape-strokes id (get-in page-objects [id :strokes] []) false)))
 
 (defn- viewer-do-render!
   "Render the board `object-id` into `os-canvas` and blit it onto
@@ -354,16 +357,19 @@
            (reset! timer (js/setTimeout done timeout-ms))))))))
 
 (defn copy-canvases!
-  "Draw what the canvases in `from` show onto the ones in `to`, in order:
+  "Draw what the canvases in `from` show onto the ones in `to`, each onto
+  the one of the same pass (`data-pass`, see `use-viewer-wasm-viewport!`):
   a viewport that shows a board WASM has not drawn on it yet shows the
-  picture of another, as it was."
+  picture of another, as it was. One without a counterpart is cleared."
   [^js from ^js to]
   (when (and from to)
-    (doseq [[^js src ^js dst] (map vector (dom/query-all from "canvas") (dom/query-all to "canvas"))]
-      (when (and (pos? (.-width src)) (pos? (.-height src)))
-        (let [ctx (.getContext dst "2d")]
+    (let [sources (into {} (map (fn [^js c] [(.. c -dataset -pass) c])) (dom/query-all from "canvas"))]
+      (doseq [^js dst (dom/query-all to "canvas")]
+        (let [^js src (get sources (.. dst -dataset -pass))
+              ctx     (.getContext dst "2d")]
           (.clearRect ctx 0 0 (.-width dst) (.-height dst))
-          (.drawImage ctx src 0 0 (.-width dst) (.-height dst)))))))
+          (when (and (some? src) (pos? (.-width src)) (pos? (.-height src)))
+            (.drawImage ctx src 0 0 (.-width dst) (.-height dst))))))))
 
 (defn- scroll-of
   "How the containers in `objects` scroll for `scroll` (`{id {:offset
@@ -381,8 +387,7 @@
         result))))
 
 (defn- use-viewer-wasm-layers!
-  [page-id page-objects size scale frame-id not-fixed-ref fixed-ref
-   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins delta dpr-key
+  [page-id page-objects size scale frame-id passes delta dpr-key
    modifiers-ref scroll-ref sheet-root frozen?]
   ;; The hot-areas SVG shifts every object by `-(size + delta)` so the frame
   ;; `selrect` lands flush against the overlay snap side, ignoring the extra
@@ -397,58 +402,60 @@
         ;; renderer did not get to are skipped, not queued.
         generation-ref (mf/use-ref 0)
         scroll-cache   (mf/use-ref nil)
-        ;; whether the layers fixed when scrolling are owed a pass: a scroll
-        ;; of the containers leaves them where they are, so a render it
-        ;; alone asks for draws them not, unless one that would was skipped
-        ;; or a container scrolls among them (a fixed bar of chips)
-        fixed-owed-ref (mf/use-ref true)
-        fixed-scrolls? (mf/with-memo [page-objects fixed-include-ids]
-                         (boolean (some #(dvs/container-axes page-objects (get page-objects %))
-                                        fixed-include-ids)))
+        ;; the still passes that show what they drew last: a scroll of the
+        ;; containers leaves those as they are (fixed and sticky layers),
+        ;; so a render it alone asks for draws them not, unless one that
+        ;; would was skipped, or a container scrolls in them (a fixed bar
+        ;; of chips)
+        drawn-ref      (mf/use-ref #{})
+        moving         (mf/with-memo [page-objects passes]
+                         (into #{}
+                               (comp (filter (fn [{:keys [include]}]
+                                               (some #(dvs/container-axes page-objects (get page-objects %))
+                                                     include)))
+                                     (map :tag))
+                               passes))
 
         ;; Render the layers with `modifiers`, the animation at a time (a
         ;; delay of its modif-tree), or nil; `scroll-only?` when only the
         ;; containers scrolled since.
         render!
         (mf/use-fn
-         (mf/deps page-id page-objects render-size scale frame-id
-                  not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins
-                  scroll-ref sheet-root frozen? fixed-scrolls?)
+         (mf/deps page-id page-objects render-size scale frame-id passes
+                  scroll-ref sheet-root frozen? moving)
          (fn [modifiers scroll-only?]
            (when (and (not frozen?) (get page-objects frame-id))
              (let [generation (inc (mf/ref-val generation-ref))
-                   fixed?     (or (not scroll-only?) fixed-scrolls? (mf/ref-val fixed-owed-ref))]
+                   drawn      (mf/ref-val drawn-ref)
+                   due        (filterv (fn [{:keys [tag still]}]
+                                         (or (not still)
+                                             (not scroll-only?)
+                                             (contains? moving tag)
+                                             (not (contains? drawn tag))))
+                                       passes)]
                (mf/set-ref-val! generation-ref generation)
-               (when fixed? (mf/set-ref-val! fixed-owed-ref true))
+               (mf/set-ref-val! drawn-ref (reduce disj drawn (map :tag due)))
                (->> @wasm.api/module
                     (p/fmap
                      (fn [ready?]
                        (when ready?
-                         (let [not-fixed-canvas (mf/ref-val not-fixed-ref)
-                               fixed-canvas     (mf/ref-val fixed-ref)
-                               scroll           (scroll-of scroll-cache page-objects
-                                                           (some-> scroll-ref deref) sheet-root)
-                               passes
-                               (cond-> []
-                                 not-fixed-canvas
-                                 (conj {:canvas not-fixed-canvas
-                                        :opts   (cond-> {:modifiers modifiers
-                                                         :scroll scroll}
-                                                  (seq not-fixed-include-ids)
-                                                  (assoc :include-ids not-fixed-include-ids))})
-
-                                 (and fixed? fixed-canvas (seq fixed-include-ids))
-                                 (conj {:canvas fixed-canvas
-                                        :opts   (cond-> {:include-ids fixed-include-ids
-                                                         ;; held at the bottom of a
-                                                         ;; screen lower than the board
-                                                         :modifiers (if (seq fixed-pins)
-                                                                      (delay (vpc/pin-modifiers (force modifiers) fixed-pins))
-                                                                      modifiers)
-                                                         :scroll scroll}
-                                                  (seq fixed-clear-fills-ids)
-                                                  (assoc :clear-fills-ids fixed-clear-fills-ids))}))]
-                           (when (seq passes)
+                         (let [scroll (scroll-of scroll-cache page-objects
+                                                 (some-> scroll-ref deref) sheet-root)
+                               draws
+                               (into []
+                                     (keep (fn [{:keys [canvas include clear pins]}]
+                                             (when-let [canvas (canvas)]
+                                               {:canvas canvas
+                                                :opts   (cond-> {;; held at the bottom of a
+                                                                 ;; screen lower than the board
+                                                                 :modifiers (if (seq pins)
+                                                                              (delay (vpc/pin-modifiers (force modifiers) pins))
+                                                                              modifiers)
+                                                                 :scroll scroll}
+                                                          (seq include) (assoc :include-ids include)
+                                                          (seq clear)   (assoc :clear-fills-ids clear))})))
+                                     due)]
+                           (when (seq draws)
                              (enqueue-wasm-render!
                               (fn []
                                 (if (not= generation (mf/ref-val generation-ref))
@@ -460,10 +467,10 @@
                                                                                canvas render-size scale frame-id
                                                                                nil opts)))
                                               (p/resolved nil)
-                                              passes)
+                                              draws)
                                       (p/then (fn [_]
-                                                (when fixed? (mf/set-ref-val! fixed-owed-ref false))
-                                                (mark-rendered! (map :canvas passes) frame-id)))))))))))))))))]
+                                                (mf/set-ref-val! drawn-ref (into (mf/ref-val drawn-ref) (map :tag due)))
+                                                (mark-rendered! (map :canvas draws) frame-id)))))))))))))))))]
 
     (mf/with-layout-effect [render! dpr-key modifiers-ref]
       (render! (some-> modifiers-ref deref) false))
@@ -491,14 +498,17 @@
   scroll of its containers (`{id {:offset :past}}`): it renders again at
   each step; `sheet-root`, the root of an overlay that scrolls as one
   (see `dvs/scroll-entries`). `frozen?` renders nothing: the canvases
-  keep the picture drawn on them (see `copy-canvases!`). The fixed
-  layers of `fixed-pins` show that far up (see `vpc/fixed-pins`)."
-  [page-id page-objects size scale frame-id
-   not-fixed-ref fixed-ref
-   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids fixed-pins
+  keep the picture drawn on them (see `copy-canvases!`).
+
+  `passes`, what it draws on its canvases, in order: `{:tag :canvas
+  :include :clear :pins :still}`, its name (the `data-pass` of its
+  canvas), a fn of its canvas, the ids it draws (all without), those of
+  them whose fills, shadows and strokes another pass draws (the board
+  under a masked pass), the layers of `pins` that far up (see
+  `vpc/fixed-pins`), and whether a scroll of the containers leaves it as
+  it is (but for containers in it)."
+  [page-id page-objects size scale frame-id passes
    delta modifiers-ref scroll-ref sheet-root frozen?]
   (let [dpr-key (use-viewer-dpr-key)]
-    (use-viewer-wasm-layers! page-id page-objects size scale frame-id
-                             not-fixed-ref fixed-ref
-                             not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
-                             fixed-pins delta dpr-key modifiers-ref scroll-ref sheet-root frozen?)))
+    (use-viewer-wasm-layers! page-id page-objects size scale frame-id passes
+                             delta dpr-key modifiers-ref scroll-ref sheet-root frozen?)))

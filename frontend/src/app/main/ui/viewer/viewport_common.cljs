@@ -75,6 +75,51 @@
                  (->> (cfh/get-parent-ids objects id)
                       (take-while #(and (not= % uuid/zero) (not (cfh/root-frame? objects %)))))))))
 
+(defn screen-sticky-layer?
+  "Whether the layer `shape` of `objects` sticks at the top of the screen
+  as it scrolls (see `cfh/sticky-scroll?`), in a box of its own (see
+  `sticky-span`): not in a container (it sticks in that one, see
+  `dvs/scroll-shifts`), not in or holding a layer that stays on screen
+  (see `screen-fixed?`), and not one that starts above its top board (it
+  would stick at once)."
+  [objects shape]
+  (and (cfh/sticky-scroll? shape)
+       (not (in-container? objects (:id shape)))
+       (not (screen-fixed? objects (:id shape)))
+       (let [root (cfh/get-root-frame objects (:id shape))]
+         (>= (dm/get-in shape [:selrect :y1]) (dm/get-in root [:selrect :y1])))))
+
+(defn screen-sticky-ids
+  "The layers of the board `frame-id` of `objects` that stick at the top
+  of the screen (see `screen-sticky-layer?`), in the order they draw; not
+  one in another, which sticks with it."
+  [objects frame-id]
+  (letfn [(walk [ids]
+            (mapcat (fn [id]
+                      (when-let [shape (get objects id)]
+                        (if (screen-sticky-layer? objects shape)
+                          [id]
+                          (walk (:shapes shape)))))
+                    ids))]
+    (vec (walk (dm/get-in objects [frame-id :shapes])))))
+
+(defn sticky-span
+  "Where the sticky layer `id` of the prepared `objects` of the board
+  `frame-id` (see `screen-sticky-layer?`) shows on its canvas, `scale` px
+  a unit: its `:edge` (top) and `:height`, and the span it sticks in, as
+  the box of CSS `position: sticky` does in its parent: from `:top`, the
+  top of its board, to `:bottom`, where it stops sticking (see
+  `dvs/sticky-end`), the bottom of the board `frame-id` at most."
+  [objects frame-id id scale]
+  (let [shape  (get objects id)
+        {:keys [y1 y2]} (:selrect shape)
+        limit  (dm/get-in objects [frame-id :selrect :y2])
+        end    (min limit (or (dvs/sticky-end objects shape frame-id :y) limit))]
+    {:edge   (* scale y1)
+     :height (* scale (- y2 y1))
+     :top    (* scale (min y1 (dm/get-in objects [(:parent-id shape) :selrect :y1])))
+     :bottom (* scale (max end y2))}))
+
 (defn frame-fixed-mask-ids
   "Fixed-layer shape ids inside `frame-id` (same rules as
   `get-fixed-ids`): the layers that stay on screen as it scrolls (see
