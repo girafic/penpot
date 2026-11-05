@@ -321,3 +321,81 @@
     (t/is (= [] (dvs/container-at objects ids {} (gpt/point 10 600))) "below its box, nothing")
     (t/is (= (get objects (cthi/id :item)) (dvs/design-box (get objects (cthi/id :item))))
           "any other layer as it is")))
+
+;; --- Sticky layers
+
+(t/deftest a-sticky-layer-moves-sticks-and-is-pushed-on
+  (t/is (= 200 (dvs/sticky-edge 300 50 100 0 nil)) "it moves with what scrolls")
+  (t/is (= 0 (dvs/sticky-edge 300 50 400 0 nil)) "and stops at the edge")
+  (t/is (= 0 (dvs/sticky-edge 300 50 400 0 600)) "until what comes next")
+  (t/is (= -30 (dvs/sticky-edge 300 50 580 0 600)) "pushes it on")
+  (t/is (= -110 (dvs/sticky-edge -10 50 100 0 nil)) "one above the edge moves as any other"))
+
+(defn- sticky-list
+  "A page with the container List (24, 100, 354 × 400) scrolling down
+  through three sticky headers at 100, 500 and 900, a board with a label
+  in it the second, and rows between down to 1500; the section Section
+  of the container Sections beside it, a header in it."
+  []
+  (-> (cthf/sample-file :file1)
+      (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
+      (cthc/add-frame :list :name "List" :parent-label :screen :x 24 :y 100 :width 354 :height 400
+                      :scroll-overflow :vertical)
+      (cths/add-sample-shape :h1 :parent-label :list :x 24 :y 100 :width 354 :height 40 :sticky-scroll true)
+      (cths/add-sample-shape :row1 :parent-label :list :x 24 :y 140 :width 354 :height 360)
+      (cthc/add-frame :h2 :parent-label :list :x 24 :y 500 :width 354 :height 40 :sticky-scroll true)
+      (cths/add-sample-shape :label :parent-label :h2 :x 30 :y 505 :width 100 :height 30)
+      (cths/add-sample-shape :row2 :parent-label :list :x 24 :y 540 :width 354 :height 360)
+      (cths/add-sample-shape :h3 :parent-label :list :x 24 :y 900 :width 354 :height 40 :sticky-scroll true)
+      (cths/add-sample-shape :row3 :parent-label :list :x 24 :y 940 :width 354 :height 560)
+      (cthc/add-frame :sections :name "Sections" :parent-label :screen :x 24 :y 520 :width 354 :height 300
+                      :scroll-overflow :vertical)
+      (cthc/add-frame :section :parent-label :sections :x 24 :y 520 :width 354 :height 500)
+      (cths/add-sample-shape :header :parent-label :section :x 24 :y 520 :width 354 :height 40 :sticky-scroll true)
+      (cths/add-sample-shape :after :parent-label :sections :x 24 :y 1020 :width 354 :height 600)
+      (cthf/current-page)
+      :objects))
+
+(t/deftest a-sticky-layer-of-a-container-stops-at-its-top
+  (let [objects (sticky-list)
+        at      (fn [offset label]
+                  (some-> (get (dvs/scroll-shifts objects {(cthi/id :list) [0 offset]}) (cthi/id label))
+                          :y js/Math.round))]
+    (t/is (= -50 (at 50 :row1)) "the rows scroll")
+    (t/is (= 0 (at 50 :h1)) "the first header, at the top of the list, stays")
+    (t/is (= -300 (at 300 :h2)) "the second one scrolls up to the top")
+    (t/is (= -20 (at 380 :h1)) "and pushes the first one on")
+    (t/is (= -400 (at 450 :h2)) "then stays at the top itself")
+    (t/is (= -400 (at 450 :label)) "with what is in it")
+    (t/is (= -90 (at 450 :h1)))))
+
+(t/deftest a-sticky-layer-leaves-with-its-board
+  (let [objects (sticky-list)
+        at      (fn [offset label]
+                  (some-> (get (dvs/scroll-shifts objects {(cthi/id :sections) [0 offset]}) (cthi/id label))
+                          :y js/Math.round))]
+    (t/is (= -100 (at 100 :section)))
+    (t/is (= 0 (at 100 :header)) "the header of the section stays at the top")
+    (t/is (= -60 (at 520 :header)) "until the end of its section takes it on")))
+
+(t/deftest a-sticky-layer-of-a-row-stops-at-its-left
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
+                    (cthc/add-frame :chips :name "Chips" :parent-label :screen :x 24 :y 600 :width 354 :height 48
+                                    :scroll-overflow :horizontal)
+                    (cths/add-sample-shape :tag :parent-label :chips :x 24 :y 604 :width 80 :height 40
+                                           :sticky-scroll true)
+                    (cths/add-sample-shape :chip :parent-label :chips :x 110 :y 604 :width 700 :height 40)
+                    (cthf/current-page)
+                    :objects)
+        shifts  (dvs/scroll-shifts objects {(cthi/id :chips) [200 0]})]
+    (t/is (= -200 (:x (get shifts (cthi/id :chip)))))
+    (t/is (= 0 (:x (get shifts (cthi/id :tag)))) "the tag stays at the left edge")))
+
+(t/deftest a-stuck-layer-gives-with-the-rubber-band
+  (let [objects (sticky-list)
+        id      (cthi/id :list)
+        shifts  (dvs/view-shifts objects {id {:offset [0 2000] :past [0 30]}})]
+    (t/is (= -1030 (js/Math.round (:y (get shifts (cthi/id :row3))))) "past its end the content gives")
+    (t/is (= -830 (js/Math.round (:y (get shifts (cthi/id :h3)))))
+          "the header stuck at the top goes with it: 100 - 900 - 30")))

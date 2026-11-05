@@ -83,8 +83,7 @@
         scroll     (mf/deref (or scroll-ref no-scroll))
         shifts     (mf/with-memo [objects scroll sheet-root]
                      (when (and (seq scroll) (some? objects))
-                       (not-empty (dvs/scroll-shifts objects (dvs/view-offsets objects scroll
-                                                                               :overlay-root sheet-root)))))
+                       (not-empty (dvs/view-shifts objects scroll :overlay-root sheet-root))))
         prepared   (mf/with-memo [prepared modifiers objects frame size delta pins shifts]
                      (cond-> (if (and (seq modifiers) (some? objects))
                                (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))

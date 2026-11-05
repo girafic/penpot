@@ -368,15 +368,14 @@
 (defn- scroll-of
   "How the containers in `objects` scroll for `scroll` (`{id {:offset
   :past}}`, see `dvs/view-offsets`): the shifts of their layers (see
-  `dvs/scroll-shifts`) and `sheet-root`, the root of an overlay drawn
+  `dvs/view-shifts`) and `sheet-root`, the root of an overlay drawn
   back at its box (see `dvs/scroll-entries`). `cache-ref` keeps the
   last: a frame of an animation that does not scroll works out nothing."
   [cache-ref objects scroll sheet-root]
   (let [[c-objects c-scroll c-result] (mf/ref-val cache-ref)]
     (if (and (identical? c-objects objects) (identical? c-scroll scroll))
       c-result
-      (let [result {:shifts     (dvs/scroll-shifts objects (dvs/view-offsets objects scroll
-                                                                             :overlay-root sheet-root))
+      (let [result {:shifts     (dvs/view-shifts objects scroll :overlay-root sheet-root)
                     :sheet-root sheet-root}]
         (mf/set-ref-val! cache-ref [objects scroll result])
         result))))
