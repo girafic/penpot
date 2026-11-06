@@ -374,18 +374,19 @@
             (.drawImage ctx src 0 0 (.-width dst) (.-height dst))))))))
 
 (defn- scroll-of
-  "How the containers in `objects` scroll for `scroll` (`{id {:offset
-  :past}}`, see `dvs/view-offsets`): the shifts of their layers (see
-  `dvs/view-shifts`) and `sheet-root`, the root of an overlay drawn
-  back at its box (see `dvs/scroll-entries`). `cache-ref` keeps the
-  last: a frame of an animation that does not scroll works out nothing."
-  [cache-ref objects scroll sheet-root]
-  (let [[c-objects c-scroll c-result] (mf/ref-val cache-ref)]
-    (if (and (identical? c-objects objects) (identical? c-scroll scroll))
+  "How the containers in the board `frame-id` of `objects` scroll for
+  `scroll` (`{id {:offset :past}}`, see `dvs/view-offsets`): the shifts
+  of their layers (see `dvs/view-shifts`) and `sheet-root`, the root of
+  an overlay drawn back at its box (see `dvs/scroll-entries`).
+  `cache-ref` keeps the last: a frame of an animation that does not
+  scroll works out nothing."
+  [cache-ref objects scroll frame-id sheet-root]
+  (let [[c-objects c-scroll c-frame c-result] (mf/ref-val cache-ref)]
+    (if (and (identical? c-objects objects) (identical? c-scroll scroll) (= c-frame frame-id))
       c-result
-      (let [result {:shifts     (dvs/view-shifts objects scroll :overlay-root sheet-root)
+      (let [result {:shifts     (dvs/view-shifts objects scroll :root-id frame-id :overlay-root sheet-root)
                     :sheet-root sheet-root}]
-        (mf/set-ref-val! cache-ref [objects scroll result])
+        (mf/set-ref-val! cache-ref [objects scroll frame-id result])
         result))))
 
 (defn moving-passes
@@ -519,7 +520,7 @@
                                                                 :touched touched
                                                                 :scroll-only? scroll-only?})
                                     scroll  (scroll-of scroll-cache page-objects
-                                                       (some-> scroll-ref deref) sheet-root)
+                                                       (some-> scroll-ref deref) frame-id sheet-root)
                                     draws
                                     (into []
                                           (keep (fn [{:keys [tag still canvas include clear pins]}]

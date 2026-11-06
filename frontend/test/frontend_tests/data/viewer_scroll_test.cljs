@@ -526,3 +526,28 @@
     (t/is (= -660 (js/Math.round (:y (get (dvs/view-shifts objects {} :overlay-root id) (cthi/id :done)))))
           "as the root of an overlay, at the bottom of its box: 440 - 1100")
     (t/is (nil? (get (dvs/view-shifts objects {}) (cthi/id :done))) "as a screen, the page's sticky box holds it")))
+
+(t/deftest a-layer-given-the-bottom-edge-sticks-at-rest-at-once
+  (let [objects (footer-list)
+        plain   (reduce #(update %1 (cthi/id %2) dissoc :sticky-edge) objects [:total :button])]
+    (t/is (empty? (dvs/scroll-shifts plain {})) "none at the bottom: nothing moves at rest")
+    (t/is (= -976 (js/Math.round (:y (get (dvs/scroll-shifts objects {}) (cthi/id :button)))))
+          "the edge given, it sticks there: not what was worked out for the others")))
+
+(t/deftest only-the-layers-of-the-shown-board-stick-at-rest
+  (let [add     (fn [file screen form cta x]
+                  (-> file
+                      (cthc/add-frame screen :name (name screen) :x x :y 0 :width 402 :height 874)
+                      (cthc/add-frame form :parent-label screen :x x :y 100 :width 354 :height 400
+                                      :scroll-overflow :vertical)
+                      (cths/add-sample-shape cta :parent-label form :x x :y 1400 :width 354 :height 60
+                                             :sticky-scroll true :sticky-edge :bottom)))
+        objects (-> (cthf/sample-file :file1)
+                    (add :screen-a :form-a :cta-a 0)
+                    (add :screen-b :form-b :cta-b 500)
+                    (cthf/current-page)
+                    :objects)
+        moved   #(set (keys (dvs/scroll-shifts objects {} :root-id %)))]
+    (t/is (= #{(cthi/id :cta-a)} (moved (cthi/id :screen-a))))
+    (t/is (= #{(cthi/id :cta-b)} (moved (cthi/id :screen-b))) "not those of another board of the page")
+    (t/is (= #{(cthi/id :cta-a) (cthi/id :cta-b)} (moved nil)) "without a board, those of the whole page")))

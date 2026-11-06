@@ -126,7 +126,7 @@
                     (when-let [point (svg-point svg event)]
                       (map #(hash-map :id % :svg svg)
                            (dvs/container-at objects ids offsets (gpt/add point origin)
-                                             :extra extra :overlay-root overlay-root)))))]
+                                             :extra extra :root-id root-id :overlay-root overlay-root)))))]
     (vec (concat (under fixed-layer-svg (filter fixed? ids))
                  (mapcat (fn [sticky-id]
                            (under (sticky-layer-svg sticky-id) (filter #(= sticky-id (get held %)) ids)))

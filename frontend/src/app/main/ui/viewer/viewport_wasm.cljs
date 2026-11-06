@@ -92,9 +92,9 @@
            objects frame scroll-ref pins sheet-root]}]
   (let [scroll     (mf/deref (or scroll-ref no-scroll))
         ;; a layer sticky at the bottom of a container may stick at rest
-        shifts     (mf/with-memo [objects scroll sheet-root]
+        shifts     (mf/with-memo [objects scroll frame sheet-root]
                      (when (some? objects)
-                       (not-empty (dvs/view-shifts objects scroll :overlay-root sheet-root))))
+                       (not-empty (dvs/view-shifts objects scroll :root-id (:id frame) :overlay-root sheet-root))))
         prepared   (mf/with-memo [posed pins shifts]
                      (cond-> posed
                        (seq pins)   (vpc/pin-objects pins)

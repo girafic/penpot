@@ -263,12 +263,12 @@
   shown `objects`, the innermost first: their boxes where the scroll
   `offsets` of the ones around them (`{id [x y]}`, see `view-offsets`)
   and `extra` (`{id point}`, how far else they show moved) have them, and
-  within those boxes too (a container clips what it holds).
-  `overlay-root`, the root of an overlay, scrolls as one (see
-  `scroll-shifts`)."
-  [objects ids offsets point & {:keys [extra overlay-root]}]
+  within those boxes too (a container clips what it holds), in the
+  board `root-id`. `overlay-root`, the root of an overlay, scrolls as
+  one (see `scroll-shifts`)."
+  [objects ids offsets point & {:keys [extra root-id overlay-root]}]
   (let [ids     (set ids)
-        shifts  (scroll-shifts objects offsets :overlay-root overlay-root)
+        shifts  (scroll-shifts objects offsets :root-id root-id :overlay-root overlay-root)
         zero    (gpt/point 0 0)
         inside? (fn [id]
                   (let [{:keys [x y width height]} (:selrect (design-box (get objects id)))
@@ -387,33 +387,36 @@
     (walk (dm/get-in objects [id :shapes]))))
 
 (defn- rest-areas*
-  "The containers of `objects` with a layer in them sticky at their
-  bottom or right edge (see `sticky-edge`), which may stick at rest: the
-  innermost container around it, `overlay-root` (the root of an overlay)
-  as one (see `container-axes`)."
-  [objects overlay-root]
+  "The containers in the board `root-id` of `objects` (the shown one; nil:
+  the whole page) with a layer in them sticky at their bottom or right
+  edge (see `sticky-edge`), which may stick at rest: the innermost
+  container around it, `overlay-root` (the root of an overlay) as one
+  (see `container-axes`)."
+  [objects root-id overlay-root]
   (into #{}
-        (keep (fn [shape]
-                (when (and (cfh/sticky-end-side? (:sticky-edge shape))
-                           (not (:hidden shape))
-                           (cfh/sticky-scroll? shape))
-                  (d/seek #(container-axes objects (get objects %) :overlay-root? (= % overlay-root))
-                          (cfh/get-parent-ids-seq objects (:id shape))))))
-        (vals objects)))
+        (keep (fn [id]
+                (let [shape (get objects id)]
+                  (when (and (cfh/sticky-end-side? (:sticky-edge shape))
+                             (not (:hidden shape))
+                             (cfh/sticky-scroll? shape))
+                    (d/seek #(container-axes objects (get objects %) :overlay-root? (= % overlay-root))
+                            (cfh/get-parent-ids-seq objects id))))))
+        (cfh/get-children-ids objects (or root-id uuid/zero))))
 
-(def ^:private rest-areas-memo
-  "The last `rest-areas*`: `[objects overlay-root areas]`."
-  (volatile! nil))
+;; What `rest-areas*` gave for `objects`: `{[root-id overlay-root] areas}`;
+;; a screen and an overlay on it ask it in turn for the same objects.
+(defonce ^:private rest-areas-cache (js/WeakMap.))
 
 (defn- rest-areas
   "`rest-areas*`, worked out again only for other `objects`: each step of
   a scroll and each frame of an animation asks it."
-  [objects overlay-root]
-  (let [[m-objects m-root areas] @rest-areas-memo]
-    (if (and (identical? m-objects objects) (= m-root overlay-root))
-      areas
-      (let [areas (rest-areas* objects overlay-root)]
-        (vreset! rest-areas-memo [objects overlay-root areas])
+  [objects root-id overlay-root]
+  (let [key   [root-id overlay-root]
+        known (.get rest-areas-cache objects)]
+    (if (contains? known key)
+      (get known key)
+      (let [areas (rest-areas* objects root-id overlay-root)]
+        (.set rest-areas-cache objects (assoc known key areas))
         areas))))
 
 (defn scroll-shifts
@@ -424,11 +427,12 @@
   innermost container (see `sticky-edge`) by its offset but for `past`
   (`{id [x y]}`, how far a container gives past an end, see
   `view-past`), and goes on with that; one at the bottom or the right
-  edge at rest too, its container not scrolled (`overlay-root`, the root
-  of an overlay, scrolls as one, see `container-axes`). `{id point}` of
-  the layers that move."
-  [objects offsets & {:keys [past overlay-root]}]
-  (let [resting (rest-areas objects overlay-root)]
+  edge at rest too, its container not scrolled, in the board `root-id`
+  (the shown one; nil: any) (`overlay-root`, the root of an overlay,
+  scrolls as one, see `container-axes`). `{id point}` of the layers that
+  move."
+  [objects offsets & {:keys [past root-id overlay-root]}]
+  (let [resting (rest-areas objects root-id overlay-root)]
     (reduce-kv
      (fn [shifts id [ox oy]]
        (let [scrolled? (not (and (zero? ox) (zero? oy)))]
@@ -468,10 +472,12 @@
 
 (defn view-shifts
   "The shifts of the layers of `objects` for the containers of `scroll`
-  as the view mode shows them (see `view-offsets` and `scroll-shifts`)."
-  [objects scroll & {:keys [overlay-root]}]
+  as the view mode shows them in the board `root-id` (see `view-offsets`
+  and `scroll-shifts`)."
+  [objects scroll & {:keys [root-id overlay-root]}]
   (scroll-shifts objects (view-offsets objects scroll :overlay-root overlay-root)
                  :past (view-past objects scroll :overlay-root overlay-root)
+                 :root-id root-id
                  :overlay-root overlay-root))
 
 (defn shift-objects
