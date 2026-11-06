@@ -527,6 +527,59 @@
           "as the root of an overlay, at the bottom of its box: 440 - 1100")
     (t/is (nil? (get (dvs/view-shifts objects {}) (cthi/id :done))) "as a screen, the page's sticky box holds it")))
 
+(t/deftest a-layer-sticky-at-the-right-of-a-row-sticks-at-rest
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
+                    (cthc/add-frame :row :name "Row" :parent-label :screen :x 0 :y 600 :width 400 :height 48
+                                    :scroll-overflow :horizontal)
+                    (cths/add-sample-shape :chips :parent-label :row :x 0 :y 604 :width 1600 :height 40)
+                    (cthc/add-frame :group :parent-label :row :x 600 :y 600 :width 300 :height 48)
+                    (cths/add-sample-shape :tag :parent-label :group :x 820 :y 604 :width 60 :height 40
+                                           :sticky-scroll true :sticky-edge :right)
+                    (cths/add-sample-shape :c1 :parent-label :row :x 1000 :y 604 :width 80 :height 40
+                                           :sticky-scroll true :sticky-edge :right)
+                    (cths/add-sample-shape :c2 :parent-label :row :x 1400 :y 604 :width 80 :height 40
+                                           :sticky-scroll true :sticky-edge :right)
+                    (cthf/current-page)
+                    :objects)
+        at      (fn [offset label]
+                  (some-> (get (dvs/scroll-shifts objects {(cthi/id :row) [offset 0]}) (cthi/id label))
+                          :x js/Math.round))]
+    (t/is (= -680 (at 0 :c1)) "not scrolled, it shows at the right of the row: 400 - 80 - 1000")
+    (t/is (= -680 (at 400 :c1)) "scrolled, it stays there")
+    (t/is (= -700 (at 700 :c1)) "its place come, it scrolls with the rest")
+    (t/is (= -320 (at 0 :c2)) "the one before holds the next one: 1080 - 1400")
+    (t/is (= -1080 (at 800 :c2)) "that one scrolled on, the next one sticks at the right: 320 - 1400")
+    (t/is (= -220 (at 0 :tag)) "its board holds it at its start: 600 - 820")
+    (t/is (= -480 (at 400 :tag)) "its board come in, it sticks at the right: 340 - 820")
+    (t/is (= -600 (at 600 :tag)) "its place come, it scrolls with the rest")))
+
+(t/deftest a-sticky-layer-of-a-container-stops-its-offset-below-the-top
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
+                    (cthc/add-frame :list :name "List" :parent-label :screen :x 24 :y 100 :width 354 :height 400
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :rows :parent-label :list :x 24 :y 100 :width 354 :height 1400)
+                    (cths/add-sample-shape :above :parent-label :list :x 24 :y 120 :width 354 :height 40
+                                           :sticky-scroll true :sticky-offset 44)
+                    (cths/add-sample-shape :head :parent-label :list :x 24 :y 300 :width 354 :height 40
+                                           :sticky-scroll true :sticky-offset 44)
+                    (cthf/current-page)
+                    :objects)
+        at      (fn [offset label]
+                  (some-> (get (dvs/scroll-shifts objects {(cthi/id :list) [0 offset]}) (cthi/id label))
+                          :y js/Math.round))]
+    (t/is (= -100 (at 100 :head)) "it scrolls until it comes to its line")
+    (t/is (= -156 (at 400 :head)) "and stops there, 44 below the top of the list: 144 - 300")
+    (t/is (= -400 (at 400 :above)) "one above that line scrolls as any other")))
+
+(t/deftest a-layer-stuck-at-the-bottom-gives-with-the-rubber-band
+  (let [objects (footer-list)
+        shifts  (dvs/view-shifts objects {(cthi/id :form) {:offset [0 0] :past [0 -40]}})]
+    (t/is (= 40 (js/Math.round (:y (get shifts (cthi/id :rows))))) "pulled down past its top, the content gives")
+    (t/is (= -936 (js/Math.round (:y (get shifts (cthi/id :button)))))
+          "the button stuck at the bottom goes with it: 40 - 976")))
+
 (t/deftest a-layer-given-the-bottom-edge-sticks-at-rest-at-once
   (let [objects (footer-list)
         plain   (reduce #(update %1 (cthi/id %2) dissoc :sticky-edge) objects [:total :button])]
