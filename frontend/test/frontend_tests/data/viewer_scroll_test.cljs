@@ -327,11 +327,25 @@
 ;; --- Sticky layers
 
 (t/deftest a-sticky-layer-moves-sticks-and-is-pushed-on
-  (t/is (= 200 (dvs/sticky-edge 300 50 100 0 nil)) "it moves with what scrolls")
-  (t/is (= 0 (dvs/sticky-edge 300 50 400 0 nil)) "and stops at the edge")
-  (t/is (= 0 (dvs/sticky-edge 300 50 400 0 600)) "until what comes next")
-  (t/is (= -30 (dvs/sticky-edge 300 50 580 0 600)) "pushes it on")
-  (t/is (= -110 (dvs/sticky-edge -10 50 100 0 nil)) "one above the edge moves as any other"))
+  (let [top (fn [edge offset line bound]
+              (dvs/sticky-edge edge 50 offset {:side :start :line line :bound bound}))]
+    (t/is (= 200 (top 300 100 0 nil)) "it moves with what scrolls")
+    (t/is (= 0 (top 300 400 0 nil)) "and stops at the edge")
+    (t/is (= 0 (top 300 400 0 600)) "until what comes next")
+    (t/is (= -30 (top 300 580 0 600)) "pushes it on")
+    (t/is (= -110 (top -10 100 0 nil)) "one above the edge moves as any other")
+    (t/is (= 44 (top 300 400 44 nil)) "an offset holds it that far from the edge")
+    (t/is (= -80 (top 20 100 44 nil)) "one above that line moves as any other")))
+
+(t/deftest a-layer-sticky-at-the-end-sticks-before-its-place-comes
+  (let [bottom (fn [edge offset line bound]
+                 (dvs/sticky-edge edge 50 offset {:side :end :line line :bound bound}))]
+    (t/is (= 750 (bottom 1500 0 800 nil)) "below the end it shows at the end at rest")
+    (t/is (= 750 (bottom 1500 600 800 nil)) "and stays there as what scrolls moves")
+    (t/is (= 600 (bottom 1500 900 800 nil)) "until its place comes, then moves with it")
+    (t/is (= 300 (bottom 300 0 800 nil)) "one above the end stays at its place")
+    (t/is (= 1000 (bottom 1500 0 800 1000)) "its bound holds it below where it would stick")
+    (t/is (= 734 (bottom 1500 0 784 nil)) "an offset holds it that far from the end")))
 
 (defn- sticky-list
   "A page with the container List (24, 100, 354 × 400) scrolling down
@@ -390,7 +404,7 @@
                  ;; as flat as a path can be, not as a rect is made
                  line {:id line :type :path :parent-id area :frame-id area :sticky-scroll true
                        :selrect {:x 0 :y 300 :width 402 :height 0 :x1 0 :y1 300 :x2 402 :y2 300}}}]
-    (t/is (nil? (dvs/sticky-end objects (get objects line) area :y)) "nothing comes after it")))
+    (t/is (nil? (dvs/sticky-bound objects (get objects line) area #{:y})) "nothing comes after it")))
 
 (t/deftest a-sticky-layer-leaves-with-its-board
   (let [objects (sticky-list)
@@ -422,3 +436,93 @@
     (t/is (= -1030 (js/Math.round (:y (get shifts (cthi/id :row3))))) "past its end the content gives")
     (t/is (= -830 (js/Math.round (:y (get shifts (cthi/id :h3)))))
           "the header stuck at the top goes with it: 100 - 900 - 30")))
+
+(defn- footer-list
+  "A page with the container Form (24, 100, 354 × 400) scrolling down to
+  1500: rows, a section board from 600 to 1100 with a total sticky at
+  the bottom of the form at 1040, and a button sticky at its bottom 16
+  px from it at 1400."
+  []
+  (-> (cthf/sample-file :file1)
+      (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
+      (cthc/add-frame :form :name "Form" :parent-label :screen :x 24 :y 100 :width 354 :height 400
+                      :scroll-overflow :vertical)
+      (cths/add-sample-shape :rows :parent-label :form :x 24 :y 100 :width 354 :height 500)
+      (cthc/add-frame :section :parent-label :form :x 24 :y 600 :width 354 :height 500)
+      (cths/add-sample-shape :total :parent-label :section :x 24 :y 1040 :width 354 :height 60
+                             :sticky-scroll true :sticky-edge :bottom)
+      (cths/add-sample-shape :button :parent-label :form :x 24 :y 1400 :width 354 :height 60
+                             :sticky-scroll true :sticky-edge :bottom :sticky-offset 16)
+      (cths/add-sample-shape :end :parent-label :form :x 24 :y 1460 :width 354 :height 40)
+      (cthf/current-page)
+      :objects))
+
+(t/deftest a-layer-sticky-at-the-bottom-of-a-container-sticks-at-rest
+  (let [objects (footer-list)
+        at      (fn [offsets label]
+                  (some-> (get (dvs/scroll-shifts objects offsets) (cthi/id label)) :y js/Math.round))]
+    (t/is (= -976 (at {} :button)) "not scrolled, it shows 16 px above the bottom of the form: 500 - 16 - 60 - 1400")
+    (t/is (= -440 (at {} :total)) "its section holds the total at its top, below the form: 600 - 1040")
+    (t/is (= -976 (at {(cthi/id :form) [0 500]} :button)) "scrolled, it stays there")
+    (t/is (= -600 (at {(cthi/id :form) [0 500]} :total))
+          "its section come up, the total sticks at the bottom: 440 - 1040")
+    (t/is (= -1000 (at {(cthi/id :form) [0 1000]} :button)) "its place come, it scrolls with the rest")))
+
+(t/deftest a-layer-sticky-at-the-bottom-is-pushed-on-by-the-one-before
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
+                    (cthc/add-frame :list :name "List" :parent-label :screen :x 0 :y 0 :width 402 :height 400
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :f1 :parent-label :list :x 0 :y 600 :width 402 :height 40
+                                           :sticky-scroll true :sticky-edge :bottom)
+                    (cths/add-sample-shape :f2 :parent-label :list :x 0 :y 1000 :width 402 :height 40
+                                           :sticky-scroll true :sticky-edge :bottom)
+                    (cths/add-sample-shape :rows :parent-label :list :x 0 :y 0 :width 402 :height 1400)
+                    (cthf/current-page)
+                    :objects)
+        at      (fn [offset label]
+                  (some-> (get (dvs/scroll-shifts objects {(cthi/id :list) [0 offset]}) (cthi/id label))
+                          :y js/Math.round))]
+    (t/is (= -240 (at 0 :f1)) "the first one sticks at the bottom: 360 - 600")
+    (t/is (= -360 (at 0 :f2)) "the next one only below the first one's place: 640 - 1000")
+    (t/is (= -300 (at 300 :f1)) "the first one scrolls up from its place")
+    (t/is (= -640 (at 300 :f2)) "the next one sticks at the bottom then: 360 - 1000")))
+
+(t/deftest a-sticky-layer-stops-only-at-an-edge-of-what-scrolls
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :screen :name "Screen" :x 0 :y 0 :width 402 :height 874)
+                    (cthc/add-frame :grid :name "Grid" :parent-label :screen :x 0 :y 0 :width 400 :height 400
+                                    :scroll-overflow :both)
+                    (cths/add-sample-shape :head :parent-label :grid :x 0 :y 0 :width 1200 :height 40
+                                           :sticky-scroll true)
+                    (cths/add-sample-shape :col :parent-label :grid :x 0 :y 40 :width 80 :height 1200
+                                           :sticky-scroll true :sticky-edge :left)
+                    (cths/add-sample-shape :end :parent-label :grid :x 0 :y 0 :width 1200 :height 1240)
+                    (cthc/add-frame :list :name "List" :parent-label :screen :x 0 :y 400 :width 400 :height 400
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :aside :parent-label :list :x 0 :y 400 :width 80 :height 40
+                                           :sticky-scroll true :sticky-edge :right)
+                    (cths/add-sample-shape :rows :parent-label :list :x 0 :y 440 :width 400 :height 1000)
+                    (cthf/current-page)
+                    :objects)
+        shifts  (dvs/scroll-shifts objects {(cthi/id :grid) [100 100] (cthi/id :list) [0 100]})]
+    (t/is (= [-100 0] ((juxt :x :y) (get shifts (cthi/id :head))))
+          "without an edge, in a board that scrolls both ways, it sticks at the top only")
+    (t/is (= [0 -100] ((juxt :x :y) (get shifts (cthi/id :col)))) "at the left edge, it sticks at the left only")
+    (t/is (= [0 -100] ((juxt :x :y) (get shifts (cthi/id :aside))))
+          "at the right edge of a list, it scrolls as any other")))
+
+(t/deftest a-layer-sticky-at-the-bottom-of-a-sheet-sticks-at-rest
+  (let [objects (-> (cthf/sample-file :file1)
+                    (cthc/add-frame :sheet :name "Sheet" :x 0 :y 0 :width 402 :height 500
+                                    :scroll-overflow :vertical)
+                    (cths/add-sample-shape :item :parent-label :sheet :x 0 :y 0 :width 402 :height 1200)
+                    (cths/add-sample-shape :done :parent-label :sheet :x 0 :y 1100 :width 402 :height 60
+                                           :sticky-scroll true :sticky-edge :bottom)
+                    (cthf/current-page)
+                    :objects
+                    (dvs/scroll-objects))
+        id      (cthi/id :sheet)]
+    (t/is (= -660 (js/Math.round (:y (get (dvs/view-shifts objects {} :overlay-root id) (cthi/id :done)))))
+          "as the root of an overlay, at the bottom of its box: 440 - 1100")
+    (t/is (nil? (get (dvs/view-shifts objects {}) (cthi/id :done))) "as a screen, the page's sticky box holds it")))

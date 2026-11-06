@@ -255,10 +255,12 @@
   shown `objects`, the innermost first: their boxes where the scroll
   `offsets` of the ones around them (`{id [x y]}`, see `view-offsets`)
   and `extra` (`{id point}`, how far else they show moved) have them, and
-  within those boxes too (a container clips what it holds)."
-  [objects ids offsets point & {:keys [extra]}]
+  within those boxes too (a container clips what it holds).
+  `overlay-root`, the root of an overlay, scrolls as one (see
+  `scroll-shifts`)."
+  [objects ids offsets point & {:keys [extra overlay-root]}]
   (let [ids     (set ids)
-        shifts  (scroll-shifts objects offsets)
+        shifts  (scroll-shifts objects offsets :overlay-root overlay-root)
         zero    (gpt/point 0 0)
         inside? (fn [id]
                   (let [{:keys [x y width height]} (:selrect (design-box (get objects id)))
@@ -277,54 +279,92 @@
 (defn sticky-edge
   "Where a sticky layer that starts at `edge` along an axis, `size` long,
   shows when what scrolls it moved `offset` back, as CSS `position:
-  sticky` has it: it moves with it, stops at `start`, the edge of the
-  area it scrolls in, and goes on once `end` pushes it on (the end of its
-  board, or the start of the next sticky layer; nil: none). One that
-  starts before `start` moves as any other."
-  [edge size offset start end]
+  sticky` has it: it moves with it. At the start `side` (`:start`, the
+  top or the left) it stops at `line`, the edge of the area it scrolls
+  in plus its offset, and goes on once `bound` pushes it on (the end of
+  its board, or the start of the next sticky layer; nil: none); one that
+  starts before `line` moves as any other. At the end side (`:end`, the
+  bottom or the right) its end stops at `line`, the end of the area less
+  its offset, also before it scrolls to its place, and `bound` holds it
+  (the start of its board, or the end of the sticky layer before it)."
+  [edge size offset {:keys [side line bound]}]
   (let [moved (- edge offset)]
-    (if (< edge start)
-      moved
-      (cond-> (max moved start)
-        (some? end) (min (- end offset size))))))
+    (if (= side :end)
+      (cond-> (min moved (- line size))
+        (some? bound) (max (- bound offset)))
+      (if (< edge line)
+        moved
+        (cond-> (max moved line)
+          (some? bound) (min (- bound offset size)))))))
 
-(defn sticky-end
-  "Where the sticky layer `shape` of `objects`, in the area `area-id` (the
-  board it scrolls in), stops sticking along `axis` (`:x` or `:y`): the
-  end of its board when that is not the area (it leaves with its board),
-  and the start of the nearest other sticky layer of its board past its
-  own end, not a hidden one (the next one pushes it on); nil without
-  either."
-  [objects shape area-id axis]
-  (let [[lo hi] (if (= axis :x) [:x1 :x2] [:y1 :y2])
-        parent  (get objects (:parent-id shape))
-        own-end (dm/get-in shape [:selrect hi])
-        ends    (into []
-                      (comp (keep #(get objects %))
-                            (remove :hidden)
-                            (remove #(= (:id %) (:id shape)))
-                            (filter cfh/sticky-scroll?)
-                            (map #(dm/get-in % [:selrect lo]))
-                            (filter #(>= % own-end)))
-                      (:shapes parent))
-        ends    (cond-> ends
-                  (not= (:id parent) area-id) (conj (dm/get-in parent [:selrect hi])))]
-    (when (seq ends)
-      (reduce min ends))))
+(defn side-axis
+  "The axis along which a layer sticks at the edge `side` (see
+  `cfh/sticky-side`)."
+  [side]
+  (if (contains? #{:top :bottom} side) :y :x))
+
+(defn end-side?
+  "Whether the edge `side` is at the end of its axis: the bottom or the
+  right (see `sticky-edge`)."
+  [side]
+  (contains? #{:bottom :right} side))
+
+(defn sticky-bound
+  "What holds the sticky layer `shape` of `objects` in the area `area-id`
+  (the board it scrolls in, along `axes`) at the edge it sticks at (see
+  `cfh/sticky-side`), along its axis (see `sticky-edge`): at the top or
+  the left the end of its board when that is not the area (it leaves
+  with its board), and the start of the nearest other layer of its board
+  sticky at that edge past its own end (the next one pushes it on); at
+  the bottom or the right the start of its board so, and the end of the
+  nearest such layer before its start. None hidden; nil without either."
+  [objects shape area-id axes]
+  (when-let [side (cfh/sticky-side shape axes)]
+    (let [[lo hi] (if (= :x (side-axis side)) [:x1 :x2] [:y1 :y2])
+          end?    (end-side? side)
+          parent  (get objects (:parent-id shape))
+          others  (into []
+                        (comp (keep #(get objects %))
+                              (remove :hidden)
+                              (remove #(= (:id %) (:id shape)))
+                              (filter cfh/sticky-scroll?)
+                              (filter #(= side (cfh/sticky-side % axes))))
+                        (:shapes parent))
+          inner?  (not= (:id parent) area-id)
+          bounds  (if end?
+                    (let [own (dm/get-in shape [:selrect lo])]
+                      (cond-> (into [] (comp (map #(dm/get-in % [:selrect hi])) (filter #(<= % own))) others)
+                        inner? (conj (dm/get-in parent [:selrect lo]))))
+                    (let [own (dm/get-in shape [:selrect hi])]
+                      (cond-> (into [] (comp (map #(dm/get-in % [:selrect lo])) (filter #(>= % own))) others)
+                        inner? (conj (dm/get-in parent [:selrect hi])))))]
+      (when (seq bounds)
+        (reduce (if end? max min) bounds)))))
 
 (defn- sticky-move
-  "How much further than its container `area` moves it, scrolled `[ox oy]`,
-  the sticky layer `shape` of `objects` moves (see `sticky-edge`), a
-  point: 0 along an axis it does not scroll."
-  [objects shape area [ox oy]]
-  (let [{bx :x by :y} (:selrect (design-box area))
-        {:keys [x y width height]} (:selrect shape)
-        along (fn [edge size offset start axis]
-                (if (zero? offset)
-                  0
-                  (+ offset (- (sticky-edge edge size offset start (sticky-end objects shape (:id area) axis))
-                               edge))))]
-    (gpt/point (along x width ox bx :x) (along y height oy by :y))))
+  "How much further than its container `area` moves it, scrolled `[ox oy]`
+  along `axes`, the sticky layer `shape` of `objects` moves (see
+  `sticky-edge`), a point: 0 along the axis it does not stick along."
+  [objects shape area axes [ox oy]]
+  (let [side (cfh/sticky-side shape axes)]
+    (if (nil? side)
+      (gpt/point 0 0)
+      (let [x?     (= :x (side-axis side))
+            end?   (end-side? side)
+            box    (:selrect (design-box area))
+            {:keys [x y width height]} (:selrect shape)
+            [edge size offset lo hi] (if x?
+                                       [x width ox (:x box) (+ (:x box) (:width box))]
+                                       [y height oy (:y box) (+ (:y box) (:height box))])
+            inset  (or (:sticky-offset shape) 0)
+            move   (if (and (zero? offset) (not end?))
+                     0
+                     (+ offset (- (sticky-edge edge size offset
+                                               {:side  (if end? :end :start)
+                                                :line  (if end? (- hi inset) (+ lo inset))
+                                                :bound (sticky-bound objects shape (:id area) axes)})
+                                  edge)))]
+        (if x? (gpt/point move 0) (gpt/point 0 move))))))
 
 (defn- sticky-layers
   "The sticky layers of `objects` the container `id` is the innermost
@@ -350,6 +390,36 @@
                     ids))]
     (walk (dm/get-in objects [id :shapes]))))
 
+(defn- rest-areas*
+  "The containers of `objects` with a layer in them sticky at their
+  bottom or right edge (see `sticky-edge`), which may stick at rest: the
+  innermost container around it, `overlay-root` (the root of an overlay)
+  as one (see `container-axes`)."
+  [objects overlay-root]
+  (into #{}
+        (keep (fn [shape]
+                (when (and (end-side? (:sticky-edge shape))
+                           (not (:hidden shape))
+                           (cfh/sticky-scroll? shape))
+                  (d/seek #(container-axes objects (get objects %) :overlay-root? (= % overlay-root))
+                          (cfh/get-parent-ids-seq objects (:id shape))))))
+        (vals objects)))
+
+(def ^:private rest-areas-memo
+  "The last `rest-areas*`: `[objects overlay-root areas]`."
+  (volatile! nil))
+
+(defn- rest-areas
+  "`rest-areas*`, worked out again only for other `objects`: each step of
+  a scroll and each frame of an animation asks it."
+  [objects overlay-root]
+  (let [[m-objects m-root areas] @rest-areas-memo]
+    (if (and (identical? m-objects objects) (= m-root overlay-root))
+      areas
+      (let [areas (rest-areas* objects overlay-root)]
+        (vreset! rest-areas-memo [objects overlay-root areas])
+        areas))))
+
 (defn scroll-shifts
   "How far each layer moves for the scroll `offsets` of containers
   (`{id [x y]}`): the layers of a container, but for those fixed when
@@ -357,43 +427,56 @@
   containers they are in. A sticky layer stops at the edge of its
   innermost container (see `sticky-edge`) by its offset but for `past`
   (`{id [x y]}`, how far a container gives past an end, see
-  `view-past`), and goes on with that. `{id point}` of the layers that
-  move."
-  [objects offsets & {:keys [past]}]
-  (reduce-kv
-   (fn [shifts id [ox oy]]
-     (if (and (zero? ox) (zero? oy))
-       shifts
-       (let [move    (gpt/point (- ox) (- oy))
-             add     (fn [shifts ids move]
-                       (reduce (fn [shifts id]
-                                 (update shifts id #(if (some? %) (gpt/add % move) move)))
-                               shifts
-                               ids))
-             shifts  (reduce (fn [shifts child-id]
-                               (if (cfh/fixed-scroll? (get objects child-id))
-                                 shifts
-                                 (add shifts (cons child-id (cfh/get-children-ids objects child-id)) move)))
-                             shifts
-                             (dm/get-in objects [id :shapes]))
-             [px py] (get past id [0 0])
-             area    (get objects id)]
-         (reduce (fn [shifts shape]
-                   (let [stuck (sticky-move objects shape area [(- ox px) (- oy py)])]
-                     (if (and (zero? (:x stuck)) (zero? (:y stuck)))
-                       shifts
-                       (add shifts (cons (:id shape) (cfh/get-children-ids objects (:id shape))) stuck))))
-                 shifts
-                 (sticky-layers objects id)))))
-   {}
-   offsets))
+  `view-past`), and goes on with that; one at the bottom or the right
+  edge at rest too, its container not scrolled (`overlay-root`, the root
+  of an overlay, scrolls as one, see `container-axes`). `{id point}` of
+  the layers that move."
+  [objects offsets & {:keys [past overlay-root]}]
+  (let [resting (rest-areas objects overlay-root)]
+    (reduce-kv
+     (fn [shifts id [ox oy]]
+       (let [scrolled? (not (and (zero? ox) (zero? oy)))]
+         (if (and (not scrolled?) (not (contains? resting id)))
+           shifts
+           (let [move    (gpt/point (- ox) (- oy))
+                 add     (fn [shifts ids move]
+                           (reduce (fn [shifts id]
+                                     (update shifts id #(if (some? %) (gpt/add % move) move)))
+                                   shifts
+                                   ids))
+                 shifts  (if scrolled?
+                           (reduce (fn [shifts child-id]
+                                     (if (cfh/fixed-scroll? (get objects child-id))
+                                       shifts
+                                       (add shifts (cons child-id (cfh/get-children-ids objects child-id)) move)))
+                                   shifts
+                                   (dm/get-in objects [id :shapes]))
+                           shifts)
+                 [px py] (get past id [0 0])
+                 area    (get objects id)
+                 ;; a top board among `offsets` is the root of an overlay
+                 axes    (container-axes objects area :overlay-root? true)]
+             (reduce (fn [shifts shape]
+                       (let [stuck (sticky-move objects shape area axes [(- ox px) (- oy py)])]
+                         (if (and (zero? (:x stuck)) (zero? (:y stuck)))
+                           shifts
+                           (add shifts (cons (:id shape) (cfh/get-children-ids objects (:id shape))) stuck))))
+                     shifts
+                     (sticky-layers objects id))))))
+     {}
+     (reduce (fn [offsets id]
+               (cond-> offsets
+                 (not (contains? offsets id)) (assoc id [0 0])))
+             offsets
+             resting))))
 
 (defn view-shifts
   "The shifts of the layers of `objects` for the containers of `scroll`
   as the view mode shows them (see `view-offsets` and `scroll-shifts`)."
   [objects scroll & {:keys [overlay-root]}]
   (scroll-shifts objects (view-offsets objects scroll :overlay-root overlay-root)
-                 :past (view-past objects scroll :overlay-root overlay-root)))
+                 :past (view-past objects scroll :overlay-root overlay-root)
+                 :overlay-root overlay-root))
 
 (defn shift-objects
   "`objects` with each layer of `shifts` moved as far (see

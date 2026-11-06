@@ -91,8 +91,9 @@
   [{:keys [vbox size class posed prepared-all prepared-frame shape-filter
            objects frame scroll-ref pins sheet-root]}]
   (let [scroll     (mf/deref (or scroll-ref no-scroll))
+        ;; a layer sticky at the bottom of a container may stick at rest
         shifts     (mf/with-memo [objects scroll sheet-root]
-                     (when (and (seq scroll) (some? objects))
+                     (when (some? objects)
                        (not-empty (dvs/view-shifts objects scroll :overlay-root sheet-root))))
         prepared   (mf/with-memo [posed pins shifts]
                      (cond-> posed

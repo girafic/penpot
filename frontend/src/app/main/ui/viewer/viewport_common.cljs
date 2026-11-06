@@ -110,12 +110,12 @@
   a unit: its `:edge` (top) and `:height`, and the span it sticks in, as
   the box of CSS `position: sticky` does in its parent: from `:top`, the
   top of its board, to `:bottom`, where it stops sticking (see
-  `dvs/sticky-end`), the bottom of the board `frame-id` at most."
+  `dvs/sticky-bound`), the bottom of the board `frame-id` at most."
   [objects frame-id id scale]
   (let [shape  (get objects id)
         {:keys [y1 y2]} (:selrect shape)
         limit  (dm/get-in objects [frame-id :selrect :y2])
-        end    (min limit (or (dvs/sticky-end objects shape frame-id :y) limit))]
+        end    (min limit (or (dvs/sticky-bound objects shape frame-id #{:y}) limit))]
     {:edge   (* scale y1)
      :height (* scale (- y2 y1))
      :top    (* scale (min y1 (dm/get-in objects [(:parent-id shape) :selrect :y1])))
@@ -138,8 +138,10 @@
           root  (cfh/get-root-frame objects sticky-id)]
       (when (= (:id root) screen-id)
         (let [{:keys [y1 y2]} (:selrect shape)
-              shown (dvs/sticky-edge y1 (- y2 y1) scroll (dm/get-in root [:selrect :y1])
-                                     (dvs/sticky-end objects shape (:id root) :y))
+              shown (dvs/sticky-edge y1 (- y2 y1) scroll
+                                     {:side  :start
+                                      :line  (dm/get-in root [:selrect :y1])
+                                      :bound (dvs/sticky-bound objects shape (:id root) #{:y})})
               dy    (- (+ shown scroll) y1)]
           (when (> dy 0.01)
             {:id sticky-id :dy dy}))))))
