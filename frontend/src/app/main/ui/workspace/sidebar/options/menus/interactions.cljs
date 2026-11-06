@@ -829,7 +829,7 @@
   "The edge the sticky layers `shapes` of `objects` stop at, as the
   prototype tab shows it: `:value` the one they have, without one where
   they stick (see `cfh/sticky-side`), `:multiple` when they differ;
-  `:idle?` when one of them stops at none, what scrolls it not scrolling
+  `:idle` when one of them stops at none, what scrolls it not scrolling
   along it."
   [objects shapes]
   (let [edges  (map (fn [shape]
@@ -838,7 +838,7 @@
                     shapes)
         values (into #{} (map first) edges)]
     {:value (if (= 1 (count values)) (first values) :multiple)
-     :idle? (boolean (some second edges))}))
+     :idle  (boolean (some second edges))}))
 
 (defn sticky-offset
   "How far from their edge the sticky layers `shapes` stop, px (see
@@ -901,7 +901,7 @@
 
         objects  (mf/deref refs/workspace-page-objects)
         sticky?  (= behavior :sticky)
-        {edge :value idle? :idle?}
+        {edge :value idle :idle}
         (mf/with-memo [objects shapes sticky?]
           (when sticky? (sticky-edge objects shapes)))
         offset   (mf/with-memo [shapes] (sticky-offset shapes))
@@ -972,7 +972,7 @@
                                 :value "right"
                                 :title (tr "workspace.options.constraints.right")
                                 :id "sticky-edge-right"}]]]]
-           (when idle?
+           (when idle
              [:p {:class (stl/css :counterpart-hint)}
               (tr "workspace.options.scrolling.edge-hint")])
            [:div {:class (stl/css :interaction-row) :data-testid "sticky-offset"}

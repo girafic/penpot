@@ -197,11 +197,11 @@
           shapes  (fn [objects & labels] (map #(get objects (cthi/id %)) labels))
           page    (:objects (cthf/current-page file))
           store   (ths/setup-store file)]
-      (t/is (= {:value :top :idle? false} (menu/sticky-edge page (shapes page :a :b)))
+      (t/is (= {:value :top :idle false} (menu/sticky-edge page (shapes page :a :b)))
             "without an edge: the top of the screen")
-      (t/is (= {:value :left :idle? false} (menu/sticky-edge page (shapes page :c)))
+      (t/is (= {:value :left :idle false} (menu/sticky-edge page (shapes page :c)))
             "the left of a board that scrolls sideways only")
-      (t/is (= {:value :multiple :idle? false} (menu/sticky-edge page (shapes page :a :c))))
+      (t/is (= {:value :multiple :idle false} (menu/sticky-edge page (shapes page :a :c))))
       (t/is (= :multiple (menu/sticky-offset (shapes page :a :b))))
       (ths/run-store
        store done [(dwi/set-sticky-edge [a b] :left)
@@ -210,7 +210,7 @@
        (fn [state]
          (let [objects (objects state)]
            (t/is (= [:left :left] (map :sticky-edge (shapes objects :a :b))))
-           (t/is (= {:value :left :idle? true} (menu/sticky-edge objects (shapes objects :a :b)))
+           (t/is (= {:value :left :idle true} (menu/sticky-edge objects (shapes objects :a :b)))
                  "the screen scrolls not sideways: it stops at none")
            (t/is (= 16 (menu/sticky-offset (shapes objects :a))))
            (t/is (not (contains? (get objects b) :sticky-offset)) "an offset of 0 is none")
