@@ -528,7 +528,7 @@
            first* (:first-codec media)]
        (if (or (nil? ctor) (nil? first*))
          (js/Promise.resolve false)
-         (-> (first* (.getSupportedVideoCodecs (new ctor))
+         (-> (first* (.getSupportedVideoCodecs ^js (new ctor))
                      #js {:width 64 :height 64})
              (.then some?)
              (.catch (fn [_] false)))))
@@ -1018,11 +1018,13 @@
             (nil? source-ctor) (nil? sample-ctor) (nil? first-codec)
             (nil? w))
       (js/Promise.resolve {:status :unavailable})
-      (let [fmt    (if (= format :mp4)
-                     (new format-ctor #js {:fastStart "in-memory"})
-                     (new format-ctor))
-            target (new target-ctor)
-            output (new output-ctor #js {:format fmt :target target})
+      ;; Mediabunny comes in from outside the build: its objects are
+      ;; tagged `js`, else a release build renames their methods.
+      (let [^js fmt    (if (= format :mp4)
+                         (new format-ctor #js {:fastStart "in-memory"})
+                         (new format-ctor))
+            ^js target (new target-ctor)
+            ^js output (new output-ctor #js {:format fmt :target target})
             n      (count frames)
             dur    (/ 1.0 fps)
             closed (atom 0)
@@ -1052,15 +1054,15 @@
                  {:status :unavailable}
                  (let [alpha?     (some? alpha-codec)
                        flatten-bg (when-not alpha? flatten-bg)
-                       source  (new source-ctor
-                                    #js {:codec codec
-                                         :quality (new quality-ctor #js {:bitrate bitrate})
-                                         :alpha (if alpha? "keep" "discard")})
-                       asource (when (some? acodec)
-                                 (new audio-ctor
-                                      #js {:codec acodec
-                                           :quality (new quality-ctor #js {:bitrate audio-bitrate})}
-                                      #js {:startTimestamp (audio-start acodec)}))]
+                       ^js source  (new source-ctor
+                                        #js {:codec codec
+                                             :quality (new quality-ctor #js {:bitrate bitrate})
+                                             :alpha (if alpha? "keep" "discard")})
+                       ^js asource (when (some? acodec)
+                                     (new audio-ctor
+                                          #js {:codec acodec
+                                               :quality (new quality-ctor #js {:bitrate audio-bitrate})}
+                                          #js {:startTimestamp (audio-start acodec)}))]
                    (.addVideoTrack output source #js {:frameRate fps})
                    (when (some? asource)
                      (.addAudioTrack output asource))
@@ -1078,14 +1080,14 @@
                                                   (:data pixels)
                                                   (:width pixels)
                                                   (:height pixels))
-                                          sample (new sample-ctor
-                                                      (:data yuv)
-                                                      #js {:timestamp (* i dur)
-                                                           :duration dur
-                                                           :colorSpace video-color-space
-                                                           :format (:format yuv)
-                                                           :codedWidth (:width yuv)
-                                                           :codedHeight (:height yuv)})]
+                                          ^js sample (new sample-ctor
+                                                          (:data yuv)
+                                                          #js {:timestamp (* i dur)
+                                                               :duration dur
+                                                               :colorSpace video-color-space
+                                                               :format (:format yuv)
+                                                               :codedWidth (:width yuv)
+                                                               :codedHeight (:height yuv)})]
                                       (-> (.add source sample
                                                 #js {:keyFrame (zero? (mod i fps))})
                                           (.finally
