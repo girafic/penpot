@@ -178,4 +178,19 @@
     (t/is (= {:id (:id layer) :sticky-scroll true} (cfh/apply-scroll-behavior layer :sticky))
           "fixed and sticky exclude each other")
     (t/is (= layer (cfh/apply-scroll-behavior (dissoc layer :fixed-scroll) :fixed)))
-    (t/is (= {:id (:id layer)} (cfh/apply-scroll-behavior layer :scroll)) "with its board: neither key")))
+    (t/is (= {:id (:id layer)} (cfh/apply-scroll-behavior layer :scroll)) "with its board: neither key"))
+  (let [layer {:id (uuid/next) :sticky-scroll true :sticky-edge :bottom :sticky-offset 16}]
+    (t/is (= (assoc layer :fixed-scroll true :sticky-scroll nil)
+             (assoc (cfh/apply-scroll-behavior layer :fixed) :sticky-scroll nil))
+          "its edge and offset stay, as constraints do")))
+
+(t/deftest a-sticky-layer-stops-at-the-edge-it-has-along-what-scrolls
+  (let [layer (fn [& {:as attrs}] (merge {:id (uuid/next) :sticky-scroll true} attrs))]
+    (t/is (= :top (cfh/sticky-side (layer) #{:y})) "without an edge, the top")
+    (t/is (= :top (cfh/sticky-side (layer) #{:x :y})) "the top only in an area that scrolls both ways")
+    (t/is (= :left (cfh/sticky-side (layer) #{:x})) "the left in one that scrolls sideways only")
+    (t/is (= :bottom (cfh/sticky-side (layer :sticky-edge :bottom) #{:y})))
+    (t/is (= :right (cfh/sticky-side (layer :sticky-edge :right) #{:x :y})))
+    (t/is (nil? (cfh/sticky-side (layer :sticky-edge :left) #{:y})) "an edge along no axis it scrolls: none")
+    (t/is (nil? (cfh/sticky-side (layer :sticky-edge :bottom) #{:x})))
+    (t/is (nil? (cfh/sticky-side (layer) #{})))))

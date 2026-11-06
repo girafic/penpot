@@ -112,6 +112,8 @@
    :constraints-v           :constraints-group
    :fixed-scroll            :constraints-group
    :sticky-scroll           :constraints-group
+   :sticky-edge             :constraints-group
+   :sticky-offset           :constraints-group
    :scroll-overflow         :constraints-group
    :bool-type               :content-group
    :bool-content            :content-group

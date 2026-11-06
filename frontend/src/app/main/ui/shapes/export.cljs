@@ -100,6 +100,8 @@
         (add! :constraints-v)
         (add! :fixed-scroll)
         (add! :sticky-scroll)
+        (add! :sticky-edge)
+        (add! :sticky-offset)
 
         (cond-> frame?
           (-> (add! :show-content)

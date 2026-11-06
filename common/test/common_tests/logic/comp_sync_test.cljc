@@ -798,14 +798,14 @@
 
 (defn- sync-sticky
   "`file` with `copy-update` done to the child of the copy and the main child
-  set sticky, then synced (Penpot Motion)."
+  set sticky at the bottom, 8 px from it, then synced (Penpot Motion)."
   [file copy-update]
   (let [page         (thf/current-page file)
         changes1     (-> (pcb/empty-changes nil (:id page))
                          (cond-> (some? copy-update)
                            (cls/generate-update-shapes #{(thi/id :copy-child)} copy-update (:objects page) {}))
                          (cls/generate-update-shapes #{(thi/id :main-child)}
-                                                     #(assoc % :sticky-scroll true)
+                                                     #(assoc % :sticky-scroll true :sticky-edge :bottom :sticky-offset 8)
                                                      (:objects page)
                                                      {}))
         updated-file (thf/apply-changes file changes1)
@@ -828,8 +828,10 @@
                                                      :copy-root-params {:children-labels [:copy-child]}))]
     (let [copy-child' (ths/get-shape (sync-sticky file nil) :copy-child)]
       (t/is (true? (:sticky-scroll copy-child')) "a copy follows its main")
+      (t/is (= [:bottom 8] [(:sticky-edge copy-child') (:sticky-offset copy-child')]) "its edge and offset too")
       (t/is (nil? (:touched copy-child'))))
     (let [copy-child' (ths/get-shape (sync-sticky file #(assoc % :fixed-scroll true)) :copy-child)]
       (t/is (nil? (:sticky-scroll copy-child')) "one whose scroll behavior was changed keeps it")
+      (t/is (nil? (:sticky-edge copy-child')))
       (t/is (true? (:fixed-scroll copy-child')))
       (t/is (= #{:constraints-group} (:touched copy-child'))))))

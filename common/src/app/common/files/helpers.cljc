@@ -898,6 +898,23 @@
   ^boolean
   (= :sticky (scroll-behavior shape)))
 
+(defn sticky-side
+  "The edge the sticky layer `shape` (see `sticky-scroll?`) stops at in
+  an area that scrolls along `axes` (`#{:x :y}` or part of it): its
+  `:sticky-edge` (`:top`, `:bottom`, `:left` or `:right`), without one
+  the top, or the left in an area that scrolls sideways only. Nil when
+  the area does not scroll along its edge: it scrolls as any other."
+  [shape axes]
+  (let [edge (:sticky-edge shape)]
+    (cond
+      (nil? edge)
+      (cond
+        (contains? axes :y) :top
+        (contains? axes :x) :left)
+
+      (contains? axes (if (contains? #{:top :bottom} edge) :y :x))
+      edge)))
+
 (defn fixed?
   [objects shape-id]
   (let [ids-to-check

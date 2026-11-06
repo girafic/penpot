@@ -116,6 +116,8 @@
             :constraints-v
             :fixed-scroll
             :sticky-scroll
+            :sticky-edge
+            :sticky-offset
             :parent-id
             :frame-id
 
@@ -161,6 +163,8 @@
            :constraints-v
            :fixed-scroll
            :sticky-scroll
+           :sticky-edge
+           :sticky-offset
            :parent-id
            :frame-id
 
@@ -225,6 +229,8 @@
              :constraints-v
              :fixed-scroll
              :sticky-scroll
+             :sticky-edge
+             :sticky-offset
              :parent-id
              :frame-id
 
@@ -289,6 +295,8 @@
            :constraints-v
            :fixed-scroll
            :sticky-scroll
+           :sticky-edge
+           :sticky-offset
            :parent-id
            :frame-id
 
@@ -353,6 +361,8 @@
            :constraints-v
            :fixed-scroll
            :sticky-scroll
+           :sticky-edge
+           :sticky-offset
            :parent-id
            :frame-id
 
@@ -442,6 +452,8 @@
             :constraints-v
             :fixed-scroll
             :sticky-scroll
+            :sticky-edge
+            :sticky-offset
             :parent-id
             :frame-id
 
@@ -485,6 +497,8 @@
               :constraints-v
               :fixed-scroll
               :sticky-scroll
+              :sticky-edge
+              :sticky-offset
               :parent-id
               :frame-id
 
@@ -550,6 +564,8 @@
            :constraints-v
            :fixed-scroll
            :sticky-scroll
+           :sticky-edge
+           :sticky-offset
            :parent-id
            :frame-id
 
