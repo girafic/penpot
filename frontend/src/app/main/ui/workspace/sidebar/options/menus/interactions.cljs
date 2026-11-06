@@ -15,6 +15,7 @@
    [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
    [app.main.data.common :as dcm]
+   [app.main.data.viewer.scroll :as dvs]
    [app.main.data.viewer.turn :as dvt]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.refs :as refs]
@@ -824,6 +825,28 @@
       (= 1 (count values))                        (first values)
       :else                                       :multiple)))
 
+(defn sticky-edge
+  "The edge the sticky layers `shapes` of `objects` stop at, as the
+  prototype tab shows it: `:value` the one they have, without one where
+  they stick (see `cfh/sticky-side`), `:multiple` when they differ;
+  `:idle?` when one of them stops at none, what scrolls it not scrolling
+  along it."
+  [objects shapes]
+  (let [edges  (map (fn [shape]
+                      (let [side (cfh/sticky-side shape (dvs/sticky-axes objects shape))]
+                        [(or (:sticky-edge shape) side) (nil? side)]))
+                    shapes)
+        values (into #{} (map first) edges)]
+    {:value (if (= 1 (count values)) (first values) :multiple)
+     :idle? (boolean (some second edges))}))
+
+(defn sticky-offset
+  "How far from their edge the sticky layers `shapes` stop, px (see
+  `sticky-edge`): `:multiple` when they differ."
+  [shapes]
+  (let [values (into #{} (map #(or (:sticky-offset %) 0)) shapes)]
+    (if (= 1 (count values)) (first values) :multiple)))
+
 (mf/defc scrolling*
   "How things scroll in the prototype: the content of the board `shape`
   (see `app.main.data.viewer.scroll`), a top board vertically through
@@ -831,7 +854,8 @@
   inside its box, vertically, sideways or both (a top board that has one
   of the other two, moved out of a board, shows it too: as a screen it
   scrolls vertically only); and the layers `shapes`, right in a board,
-  with it, fixed or sticky (see `scroll-behavior`)."
+  with it, fixed or sticky (see `scroll-behavior`), sticky at an edge of
+  what scrolls them, an offset from it (see `sticky-edge`)."
   {::mf/private true}
   [{:keys [shape shapes]}]
   (let [id       (:id shape)
@@ -873,7 +897,27 @@
          (mf/deps ids)
          (fn [value]
            (when-not (str/empty? value)
-             (st/emit! (dwi/set-scroll-behavior ids (keyword value))))))]
+             (st/emit! (dwi/set-scroll-behavior ids (keyword value))))))
+
+        objects  (mf/deref refs/workspace-page-objects)
+        sticky?  (= behavior :sticky)
+        {edge :value idle? :idle?}
+        (mf/with-memo [objects shapes sticky?]
+          (when sticky? (sticky-edge objects shapes)))
+        offset   (mf/with-memo [shapes] (sticky-offset shapes))
+
+        on-edge-change
+        (mf/use-fn
+         (mf/deps ids)
+         (fn [value]
+           (st/emit! (dwi/set-sticky-edge ids (keyword value)))))
+
+        on-offset-change
+        (mf/use-fn
+         (mf/deps ids)
+         (fn [value]
+           (when (number? value)
+             (st/emit! (dwi/set-sticky-offset ids value)))))]
     (when (or board? (some? behavior))
       [:div {:class (stl/css :section)}
        [:div {:class (stl/css :title)}
@@ -899,7 +943,48 @@
            [:div {:class (stl/css :interaction-row-wide)}
             [:& select {:default-value (if (= behavior :multiple) "" (name behavior))
                         :options behaviors
-                        :on-change on-behavior-change}]]])]])))
+                        :on-change on-behavior-change}]]])
+
+        ;; where a sticky layer stops, and how far from there
+        (when sticky?
+          [:*
+           [:div {:class (stl/css :interaction-row) :data-testid "sticky-edge"}
+            [:div {:class (stl/css :interaction-row-label)}
+             [:div {:class (stl/css :interaction-row-name)}
+              (tr "workspace.options.scrolling.edge")]]
+            [:div {:class (stl/css :interaction-row-select)}
+             [:& radio-buttons {:selected (when (not= edge :multiple) (d/name edge))
+                                :on-change on-edge-change
+                                :name "sticky-edge"}
+              [:& radio-button {:icon i/align-top
+                                :value "top"
+                                :title (tr "workspace.options.constraints.top")
+                                :id "sticky-edge-top"}]
+              [:& radio-button {:icon i/align-bottom
+                                :value "bottom"
+                                :title (tr "workspace.options.constraints.bottom")
+                                :id "sticky-edge-bottom"}]
+              [:& radio-button {:icon i/align-left
+                                :value "left"
+                                :title (tr "workspace.options.constraints.left")
+                                :id "sticky-edge-left"}]
+              [:& radio-button {:icon i/align-right
+                                :value "right"
+                                :title (tr "workspace.options.constraints.right")
+                                :id "sticky-edge-right"}]]]]
+           (when idle?
+             [:p {:class (stl/css :counterpart-hint)}
+              (tr "workspace.options.scrolling.edge-hint")])
+           [:div {:class (stl/css :interaction-row) :data-testid "sticky-offset"}
+            [:div {:class (stl/css :interaction-row-label)}
+             [:div {:class (stl/css :interaction-row-name)}
+              (tr "workspace.options.scrolling.offset")]]
+            [:div {:class (stl/css :interaction-row-input)}
+             [:> numeric-input* {:min 0
+                                 :value offset
+                                 :placeholder (tr "settings.multiple")
+                                 :property (tr "workspace.options.scrolling.offset")
+                                 :on-change on-offset-change}]]]])]])))
 
 (mf/defc interactions*
   [{:keys [interactions shape]}]

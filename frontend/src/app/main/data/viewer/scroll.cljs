@@ -160,6 +160,14 @@
           #{:y})
         (get axes-of value)))))
 
+(defn sticky-axes
+  "The axes along which what scrolls the sticky layer `shape` of
+  `objects` scrolls (see `cfh/sticky-side`): its innermost container
+  (see `container-axes`), else the screen, vertically."
+  [objects shape]
+  (or (some #(container-axes objects (get objects %)) (cfh/get-parent-ids-seq objects (:id shape)))
+      #{:y}))
+
 (defn scroll-range
   "How far the container `frame` of `objects` scrolls along `axes` (see
   `container-axes`), `[x y]` px: from where its content is in the

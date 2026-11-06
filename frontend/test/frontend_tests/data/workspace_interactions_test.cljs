@@ -181,3 +181,34 @@
          (t/is (not-any? (fn [id] (some #(contains? (get (objects state) id) %) [:fixed-scroll :sticky-scroll]))
                          [a b])
                "neither key"))))))
+
+(t/deftest a-sticky-layer-stops-at-the-edge-and-offset-it-is-given
+  (t/async
+    done
+    (let [file    (-> (cthf/sample-file :file1)
+                      (ctho/add-frame :board)
+                      (cths/add-sample-shape :a :parent-label :board :sticky-scroll true)
+                      (cths/add-sample-shape :b :parent-label :board :sticky-scroll true :sticky-offset 8)
+                      (ctho/add-frame :chips :parent-label :board :scroll-overflow :horizontal)
+                      (cths/add-sample-shape :c :parent-label :chips :sticky-scroll true))
+          a       (cthi/id :a)
+          b       (cthi/id :b)
+          objects #(get-in % [:files (:current-file-id %) :data :pages-index (:current-page-id %) :objects])
+          shapes  (fn [objects & labels] (map #(get objects (cthi/id %)) labels))
+          page    (:objects (cthf/current-page file))
+          store   (ths/setup-store file)]
+      (t/is (= {:value :top :idle? false} (menu/sticky-edge page (shapes page :a :b)))
+            "without an edge: the top of the screen")
+      (t/is (= {:value :left :idle? false} (menu/sticky-edge page (shapes page :c)))
+            "the left of a board that scrolls sideways only")
+      (t/is (= {:value :multiple :idle? false} (menu/sticky-edge page (shapes page :a :c))))
+      (t/is (= :multiple (menu/sticky-offset (shapes page :a :b))))
+      (ths/run-store
+       store done [(dwi/set-sticky-edge [a b] :left)
+                   (dwi/set-sticky-offset [a b] 16)]
+       (fn [state]
+         (let [objects (objects state)]
+           (t/is (= [:left :left] (map :sticky-edge (shapes objects :a :b))))
+           (t/is (= {:value :left :idle? true} (menu/sticky-edge objects (shapes objects :a :b)))
+                 "the screen scrolls not sideways: it stops at none")
+           (t/is (= 16 (menu/sticky-offset (shapes objects :a :b))))))))))

@@ -8808,11 +8808,19 @@ msgstr "Scroll with parent"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.scrolling.behavior.sticky"
-msgstr "Sticky (stop at top edge)"
+msgstr "Sticky (stop at an edge)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.scrolling.both"
 msgstr "Both"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.edge"
+msgstr "Edge"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.edge-hint"
+msgstr "What holds it doesn't scroll this way: it scrolls with its board"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.scrolling.hint"
@@ -8833,6 +8841,10 @@ msgstr "Horizontal"
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.scrolling.none"
 msgstr "None"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.scrolling.offset"
+msgstr "Offset"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.scrolling.overflow"

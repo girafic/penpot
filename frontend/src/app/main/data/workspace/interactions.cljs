@@ -129,6 +129,26 @@
     (watch [_ _ _]
       (rx/of (dwsh/update-shapes ids #(cfh/apply-scroll-behavior % behavior))))))
 
+(defn set-sticky-edge
+  "Make the sticky layers `ids` stop at the edge `edge` of what scrolls
+  them (`:top`, `:bottom`, `:left` or `:right`, see `cfh/sticky-side`)."
+  [ids edge]
+  (ptk/reify ::set-sticky-edge
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (dwsh/update-shapes ids #(assoc % :sticky-edge edge))))))
+
+(defn set-sticky-offset
+  "Make the sticky layers `ids` stop `offset` px from their edge (see
+  `set-sticky-edge`); 0 right at it."
+  [ids offset]
+  (ptk/reify ::set-sticky-offset
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (dwsh/update-shapes ids #(if (zero? offset)
+                                        (dissoc % :sticky-offset)
+                                        (assoc % :sticky-offset offset)))))))
+
 (defn update-flow
   [page-id flow-id update-fn]
 
