@@ -406,7 +406,20 @@
           objs   (objects (frame pid :layout :flex :layout-flex-dir :column :scroll-overflow :vertical) cta aside)
           values (fn [shape] (mapv #(css/get-css-value objs shape %) [:position :top :right :bottom :left]))]
       (is (= ["sticky" nil nil "16px" nil] (values cta)))
-      (is (= [nil nil nil nil nil] (values aside)) "an edge along which nothing scrolls: as any other layer")))
+      (is (= [nil nil nil nil nil] (values aside)) "an edge along which nothing scrolls: as any other layer")
+      (is (str/includes? (css/get-shape-css-selector objs aside)
+                         (str "/* " (:name aside) ": sticky when scrolling in the prototype */"))
+          "the CSS says it sticks in the prototype")))
+  (testing "an offset at the top, and at the left of a board that scrolls sideways"
+    (let [top-id (uuid/next)
+          row-id (uuid/next)
+          head   (child (uuid/next) top-id :frame-id top-id :sticky-scroll true :sticky-offset 44)
+          tag    (child (uuid/next) row-id :frame-id row-id :sticky-scroll true :sticky-edge :left :sticky-offset 8)
+          objs   (objects (frame top-id :layout :flex :layout-flex-dir :column :scroll-overflow :vertical)
+                          (frame row-id :parent-id top-id :frame-id top-id :layout :flex :scroll-overflow :horizontal)
+                          head tag)]
+      (is (= "44px" (css/get-css-value objs head :top)))
+      (is (= ["8px" nil] [(css/get-css-value objs tag :left) (css/get-css-value objs tag :top)]))))
   (testing "in a layout that does not scroll: at the top of the page"
     (let [pid  (uuid/next)
           head (child (uuid/next) pid :frame-id pid :sticky-scroll true)

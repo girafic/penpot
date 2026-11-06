@@ -312,8 +312,8 @@ body {
 
        (str/join
         "\n"
-        (filter some? [(if (and (cfh/sticky-scroll? shape) (nil? (sv/sticky-axes shape objects)))
-                         ;; placed absolutely, out of the flow
+        (filter some? [(if (and (cfh/sticky-scroll? shape) (nil? (sv/sticky-side shape objects)))
+                         ;; placed absolutely, out of the flow, or at an edge along which nothing scrolls
                          (str/fmt "/* %s: sticky when scrolling in the prototype */" (:name shape))
                          (str/fmt "/* %s */" (:name shape)))
                        (when wrapper? (str/fmt ".%s-wrapper {\n%s\n}" selector wrapper-properties))
