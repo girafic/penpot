@@ -256,16 +256,16 @@
            :still true})))
 
 (mf/defc wasm-sticky-box*
-  "A layer that sticks at the top of the screen (see
-  `vpc/screen-sticky-layer?`): a box the browser holds at the top of the
-  section as it scrolls, as CSS `position: sticky` does, in the span of
-  its board (`span`, see `vpc/sticky-span`), with the picture of the
+  "A layer that sticks at the top or the bottom of the screen (see
+  `vpc/screen-sticky-layer?`): a box the browser holds at that edge of
+  the section as it scrolls, as CSS `position: sticky` does, in the span
+  of its board (`span`, see `vpc/sticky-span`), with the picture of the
   layer as large as the board (`layer-props`, see `wasm-layer*`) hanging
   from it, its hotspots and the boxes that blur what scrolls under its
   layers (`mask`, see `wasm-backdrops*`). A scroll event would come a
   frame late."
   [{:keys [id span mask prepared size scale layer-props]}]
-  (let [{:keys [edge height top bottom]} span]
+  (let [{:keys [side inset edge height top bottom]} span]
     [:div {:style {:position "absolute"
                    :top top
                    :left 0
@@ -275,7 +275,8 @@
      [:div {:style {:height (- edge top)}}]
      [:div {:data-sticky-layer (dm/str id)
             :style {:position "sticky"
-                    :top 0
+                    :top (when (not= side :bottom) inset)
+                    :bottom (when (= side :bottom) inset)
                     :width 0
                     :height height}}
       [:div {:style {:position "absolute"

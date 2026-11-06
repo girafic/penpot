@@ -76,18 +76,23 @@
                       (take-while #(and (not= % uuid/zero) (not (cfh/root-frame? objects %)))))))))
 
 (defn screen-sticky-layer?
-  "Whether the layer `shape` of `objects` sticks at the top of the screen
-  as it scrolls (see `cfh/sticky-scroll?`), in a box of its own (see
-  `sticky-span`): not in a container (it sticks in that one, see
-  `dvs/scroll-shifts`), not in or holding a layer that stays on screen
-  (see `screen-fixed?`), and not one that starts above its top board (it
-  would stick at once)."
+  "Whether the layer `shape` of `objects` sticks at the top or the bottom
+  of the screen as it scrolls (see `cfh/sticky-side`; a screen scrolls
+  vertically), in a box of its own (see `sticky-span`): not in a
+  container (it sticks in that one, see `dvs/scroll-shifts`), not in or
+  holding a layer that stays on screen (see `screen-fixed?`), and at the
+  top not one that starts above its line, the top of its board plus its
+  offset (it would stick at once)."
   [objects shape]
   (and (cfh/sticky-scroll? shape)
        (not (in-container? objects (:id shape)))
        (not (screen-fixed? objects (:id shape)))
-       (let [root (cfh/get-root-frame objects (:id shape))]
-         (>= (dm/get-in shape [:selrect :y1]) (dm/get-in root [:selrect :y1])))))
+       (case (cfh/sticky-side shape #{:y})
+         :top    (let [root (cfh/get-root-frame objects (:id shape))]
+                   (>= (dm/get-in shape [:selrect :y1])
+                       (+ (dm/get-in root [:selrect :y1]) (or (:sticky-offset shape) 0))))
+         :bottom true
+         false)))
 
 (defn screen-sticky-ids
   "The layers of the board `frame-id` of `objects` that stick at the top
@@ -107,29 +112,41 @@
 (defn sticky-span
   "Where the sticky layer `id` of the prepared `objects` of the board
   `frame-id` (see `screen-sticky-layer?`) shows on its canvas, `scale` px
-  a unit: its `:edge` (top) and `:height`, and the span it sticks in, as
-  the box of CSS `position: sticky` does in its parent: from `:top`, the
-  top of its board, to `:bottom`, where it stops sticking (see
-  `dvs/sticky-bound`), the bottom of the board `frame-id` at most."
+  a unit: its `:edge` (top) and `:height`, the edge of the screen it
+  sticks at (`:side`, `:top` or `:bottom`) and how far from it
+  (`:inset`), and the span it sticks in, as the box of CSS `position:
+  sticky` does in its parent, from `:top` to `:bottom`: at the top from
+  the top of its board to where it stops sticking (see
+  `dvs/sticky-bound`), the bottom of the board `frame-id` at most; at
+  the bottom from where it stops sticking, the top of that board at
+  least, to its own end."
   [objects frame-id id scale]
   (let [shape  (get objects id)
         {:keys [y1 y2]} (:selrect shape)
-        limit  (dm/get-in objects [frame-id :selrect :y2])
-        end    (min limit (or (dvs/sticky-bound objects shape frame-id #{:y}) limit))]
-    {:edge   (* scale y1)
+        side   (cfh/sticky-side shape #{:y})
+        bound  (dvs/sticky-bound objects shape frame-id #{:y})
+        span   (if (= side :bottom)
+                 (let [limit (dm/get-in objects [frame-id :selrect :y1])]
+                   [(min y1 (max limit (or bound limit))) y2])
+                 (let [limit (dm/get-in objects [frame-id :selrect :y2])]
+                   [(min y1 (dm/get-in objects [(:parent-id shape) :selrect :y1]))
+                    (max (min limit (or bound limit)) y2)]))]
+    {:side   side
+     :inset  (* scale (or (:sticky-offset shape) 0))
+     :edge   (* scale y1)
      :height (* scale (- y2 y1))
-     :top    (* scale (min y1 (dm/get-in objects [(:parent-id shape) :selrect :y1])))
-     :bottom (* scale (max end y2))}))
+     :top    (* scale (first span))
+     :bottom (* scale (second span))}))
 
 (defn screen-stuck-move
   "How far down from its place the sticky layer of the screen `screen-id`
   (see `screen-sticky-layer?`) that is or holds the layer `id` of
-  `objects` shows, its page scrolled `scroll` units down, as its box
-  sticks (see `dvs/sticky-edge`): `{:id :dy}`, nil when it shows at its
-  place. A layer of another top board, an overlay on it, sticks not to
-  the page of the screen (see
-  `app.main.ui.viewer.viewport-wasm/viewport-wasm*`)."
-  [objects screen-id id scroll]
+  `objects` shows (up, less than 0, at the bottom), its page scrolled
+  `scroll` units down and `view-h` high on screen, as its box sticks (see
+  `dvs/sticky-edge`): `{:id :dy}`, nil when it shows at its place. A
+  layer of another top board, an overlay on it, sticks not to the page
+  of the screen (see `app.main.ui.viewer.viewport-wasm/viewport-wasm*`)."
+  [objects screen-id id scroll view-h]
   (when-let [sticky-id (when (contains? objects id)
                          (->> (cons id (cfh/get-parent-ids-seq objects id))
                               (filter #(screen-sticky-layer? objects (get objects %)))
@@ -138,12 +155,15 @@
           root  (cfh/get-root-frame objects sticky-id)]
       (when (= (:id root) screen-id)
         (let [{:keys [y1 y2]} (:selrect shape)
+              top   (dm/get-in root [:selrect :y1])
+              inset (or (:sticky-offset shape) 0)
+              end?  (= :bottom (cfh/sticky-side shape #{:y}))
               shown (dvs/sticky-edge y1 (- y2 y1) scroll
-                                     {:side  :start
-                                      :line  (dm/get-in root [:selrect :y1])
+                                     {:side  (if end? :end :start)
+                                      :line  (if end? (- (+ top view-h) inset) (+ top inset))
                                       :bound (dvs/sticky-bound objects shape (:id root) #{:y})})
               dy    (- (+ shown scroll) y1)]
-          (when (> dy 0.01)
+          (when (> (mth/abs dy) 0.01)
             {:id sticky-id :dy dy}))))))
 
 (defn frame-fixed-mask-ids

@@ -86,14 +86,14 @@
 (defn stuck-place
   "Where an overlay placed by the layer `relative-to-id` of `objects` goes
   when a sticky layer of the screen `base-frame` that is or holds it
-  sticks as its page scrolled `scroll` units down (see
-  `vpc/screen-stuck-move`): `:objects` with that one where it shows, and
-  the overlay holds to it (`:anchor` `:layer`, its place on the first
-  screen) on a board that shows as a screen (`screen?`, see
+  sticks as its page scrolled `scroll` units down, `view-h` high on
+  screen (see `vpc/screen-stuck-move`): `:objects` with that one where it
+  shows, and the overlay holds to it (`:anchor` `:layer`, its place on
+  the first screen) on a board that shows as a screen (`screen?`, see
   `app.main.ui.viewer/stays-on-screen?`), else to the page. Nil when none
   sticks."
-  [objects relative-to-id base-frame scroll screen?]
-  (when-let [{:keys [id dy]} (vpc/screen-stuck-move objects (:id base-frame) relative-to-id scroll)]
+  [objects relative-to-id base-frame scroll view-h screen?]
+  (when-let [{:keys [id dy]} (vpc/screen-stuck-move objects (:id base-frame) relative-to-id scroll view-h)]
     (let [move (gpt/point 0 (if screen? (- dy scroll) dy))]
       {:objects (dvs/shift-objects objects (into {}
                                                  (map #(vector % move))
@@ -103,10 +103,12 @@
 (defn- stuck-place-now
   "`stuck-place` as the page of the screen `base-frame` scrolled now."
   [objects relative-to-id base-frame]
-  (let [state  @st/state
-        zoom   (dm/get-in state [:viewer-local :zoom] 1)
-        scroll (/ (or (dom/get-scroll-pos (dom/get-element "viewer-section")) 0) zoom)]
-    (stuck-place objects relative-to-id base-frame scroll
+  (let [state   @st/state
+        zoom    (dm/get-in state [:viewer-local :zoom] 1)
+        section (dom/get-element "viewer-section")
+        scroll  (/ (or (dom/get-scroll-pos section) 0) zoom)
+        view-h  (/ (or (some-> section .-clientHeight) 0) zoom)]
+    (stuck-place objects relative-to-id base-frame scroll view-h
                  (or (some? (dv/device-shown state)) (some? (dvs/screen-h base-frame))))))
 
 (defn- ignore-frame-shape

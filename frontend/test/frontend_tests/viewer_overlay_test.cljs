@@ -59,6 +59,8 @@
 (def ^:private heading (uuid/custom 11 7))
 (def ^:private more (uuid/custom 11 8))
 (def ^:private sheet-title (uuid/custom 11 9))
+(def ^:private cta (uuid/custom 11 10))
+(def ^:private buy (uuid/custom 11 11))
 
 (defn- shape
   [id type parent-id frame-id x y w h & {:as attrs}]
@@ -67,12 +69,15 @@
 
 (def ^:private objects
   (->> [(shape screen-id :frame uuid/zero uuid/zero 0 0 402 874 :scroll-overflow :vertical
-               :shapes [row heading header])
+               :shapes [row heading header cta])
         (shape row :rect screen-id screen-id 24 600 354 68)
         (shape heading :frame screen-id screen-id 0 300 402 44 :sticky-scroll true :shapes [more])
         (shape more :rect heading heading 350 310 24 24)
         (shape header :group screen-id screen-id 0 0 402 54 :fixed-scroll true :shapes [back])
         (shape back :rect header screen-id 24 10 44 44)
+        (shape cta :frame screen-id screen-id 0 1000 402 60 :sticky-scroll true :sticky-edge :bottom
+               :shapes [buy])
+        (shape buy :rect cta cta 24 1010 354 40)
         (shape sheet-id :frame uuid/zero uuid/zero 500 0 402 560 :shapes [sheet-title option])
         (shape sheet-title :frame sheet-id sheet-id 500 20 402 44 :sticky-scroll true)
         (shape option :rect sheet-id sheet-id 524 100 354 52)]
@@ -92,16 +97,20 @@
 (t/deftest an-overlay-goes-where-the-sticky-layer-that-placed-it-shows
   (let [screen (get objects screen-id)
         top    (fn [stuck id] (some-> stuck :objects (get id) :selrect :y1))]
-    (t/is (nil? (shapes/stuck-place objects more screen 100 true)) "not stuck yet: where it is")
-    (let [stuck (shapes/stuck-place objects more screen 400 true)]
+    (t/is (nil? (shapes/stuck-place objects more screen 100 874 true)) "not stuck yet: where it is")
+    (let [stuck (shapes/stuck-place objects more screen 400 874 true)]
       (t/is (= :layer (:anchor stuck)) "on a screen it stays with the stuck layer")
       (t/is (= 10 (top stuck more)) "at its place on the first screen, the top")
       (t/is (= 0 (top stuck heading)) "with the layer that sticks"))
-    (let [stuck (shapes/stuck-place objects more screen 400 false)]
+    (let [stuck (shapes/stuck-place objects more screen 400 874 false)]
       (t/is (= :page (:anchor stuck)) "on a page it scrolls with it")
       (t/is (= 410 (top stuck more)) "at the top of what the page shows"))
-    (t/is (nil? (shapes/stuck-place objects sheet-title screen 400 true))
-          "not by the sticky layer of an overlay on the screen, which the page leaves where it is")))
+    (t/is (nil? (shapes/stuck-place objects sheet-title screen 400 874 true))
+          "not by the sticky layer of an overlay on the screen, which the page leaves where it is")
+    (let [stuck (shapes/stuck-place objects buy screen 0 874 true)]
+      (t/is (= :layer (:anchor stuck)) "by a layer stuck at the bottom it stays with it")
+      (t/is (= 824 (top stuck buy)) "where it shows on the first screen: 1010 - (1000 - 814)"))
+    (t/is (= 924 (top (shapes/stuck-place objects buy screen 0 974 true) buy)) "lower on a higher screen")))
 
 (t/deftest an-overlay-placed-by-the-screen-goes-up-on-a-lower-screen
   (let [placed (fn [anchor snap-v]
