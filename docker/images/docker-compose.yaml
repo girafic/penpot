@@ -25,10 +25,10 @@
 # 'disable-secure-session-cookies' and 'disable-email-verification'
 #
 # Penpot Motion (the timeline animation) is the 'enable-feature-animation'
-# flag. The audio clips of its timelines need it on the backend as well as
-# on the frontend: only then does the backend take audio uploads.
+# flag, on here. The audio clips of its timelines need it on the backend as
+# well as on the frontend: only then does the backend take audio uploads.
 x-flags: &penpot-flags
-  PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp enable-admin-console
+  PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp enable-admin-console enable-feature-animation
 
 ## Public URI where Penpot is reached. To serve Penpot from a subpath, include
 ## it with a trailing slash, e.g. https://example.com/penpot/. A reverse proxy in
