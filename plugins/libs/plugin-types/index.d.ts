@@ -7153,8 +7153,9 @@ export interface ShapeBase extends PluginData {
    * Indicates whether the shape sticks at an edge of what scrolls it in the
    * prototype, as CSS `position: sticky` does: it scrolls with the rest,
    * stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
-   * on once the end of its board takes it on. Unlike CSS, the next shape of
-   * its board sticky at the same edge pushes it on too. Only for a shape
+   * on once its board takes it on: its end at the top or the left, its start
+   * at the bottom or the right. Unlike CSS, another shape of its board sticky
+   * at the same edge pushes it on too when they meet. Only for a shape
    * directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
    * `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
    *

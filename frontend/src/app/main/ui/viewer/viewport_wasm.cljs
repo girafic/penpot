@@ -210,9 +210,9 @@
   `rwv/use-viewer-wasm-viewport!`): `:fixed-mask-set`, the layers fixed
   when scrolling (with `has-fixed?`, see `vpc/frame-fixed-mask-ids`);
   `:sticky-masks`, `[id ids]` of each of the layers `sticky-ids` that
-  stick at the top of the screen, all within it; `:apart`, those the pass
-  of what scrolls leaves to the others, and the include and clear ids of
-  that one and the fixed one."
+  stick at the top or the bottom of the screen, all within it; `:apart`,
+  those the pass of what scrolls leaves to the others, and the include
+  and clear ids of that one and the fixed one."
   [objects frame-id has-fixed? sticky-ids]
   (let [fixed-mask-set (or (when has-fixed? (vpc/frame-fixed-mask-ids objects frame-id)) #{})
         sticky-masks   (mapv (fn [id] [id (into #{} (cfh/get-children-ids-with-self objects id))])
@@ -235,10 +235,10 @@
   "The render passes of the board `frame-id` (see
   `rwv/use-viewer-wasm-viewport!`) for what `layer-masks` gave it,
   without their canvases: what scrolls, all of the board but what the
-  others draw; each layer that sticks at the top of the screen
-  (`:layer`) with its board, whose fills it clears; the fixed layers so,
-  held on a lower screen by `pins`. All but the first are still: a
-  scroll of the containers leaves them as they are."
+  others draw; each layer that sticks at the top or the bottom of the
+  screen (`:layer`) with its board, whose fills it clears; the fixed
+  layers so, held on a lower screen by `pins`. All but the first are
+  still: a scroll of the containers leaves them as they are."
   [{:keys [sticky-masks not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids]} frame-id pins]
   (cond-> (into [{:tag "scroll" :include not-fixed-include-ids}]
                 (map (fn [[id mask]]
@@ -310,7 +310,7 @@
 
         not-fixed-wasm-ref   (mf/use-ref nil)
         fixed-wasm-ref       (mf/use-ref nil)
-        ;; {id canvas} of the layers that stick at the top of the screen
+        ;; {id canvas} of the layers that stick at the top or the bottom of the screen
         sticky-canvases      (mf/use-ref {})
 
         objects  (:objects page)
@@ -434,8 +434,8 @@
       [:*
        [:> wasm-layer* not-fixed-props]
 
-       ;; The layers that stick at the top of the screen, over what
-       ;; scrolls, under what stays (see `wasm-sticky-box*`)
+       ;; The layers that stick at the top or the bottom of the screen,
+       ;; over what scrolls, under what stays (see `wasm-sticky-box*`)
        (for [{:keys [id mask span ref scrolls?]} sticky-boxes]
          [:> wasm-sticky-box*
           {:key (dm/str id)
