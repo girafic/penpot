@@ -65,12 +65,16 @@ body {
     :z-index
     :top
     :left
+    :right
+    :bottom
     :position})
 
 (def shape-css-properties
   [:position
    :left
    :top
+   :right
+   :bottom
    :width
    :height
    :transform

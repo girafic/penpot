@@ -1162,6 +1162,8 @@ Board:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -1630,19 +1632,45 @@ Board:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -2599,6 +2627,8 @@ VariantContainer:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -3070,19 +3100,45 @@ VariantContainer:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -4013,6 +4069,8 @@ Boolean:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -4293,19 +4351,45 @@ Boolean:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -7451,6 +7535,8 @@ Ellipse:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -7703,19 +7789,45 @@ Ellipse:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -10188,6 +10300,8 @@ Group:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -10462,19 +10576,45 @@ Group:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -11872,6 +12012,8 @@ Image:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -12124,19 +12266,45 @@ Image:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -15971,6 +16139,8 @@ Path:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -16245,19 +16415,45 @@ Path:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -17463,6 +17659,8 @@ Rectangle:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -17715,19 +17913,45 @@ Rectangle:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -22050,6 +22274,8 @@ ShapeBase:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -22297,19 +22523,45 @@ ShapeBase:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -23322,6 +23574,8 @@ SvgRaw:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -23563,19 +23817,45 @@ SvgRaw:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number
@@ -24378,6 +24658,8 @@ Text:
         constraintsVertical: "center" | "top" | "bottom" | "scale" | "topbottom";
         fixedWhenScrolling: boolean;
         stickyWhenScrolling: boolean;
+        stickyEdge: "top" | "bottom" | "left" | "right" | null;
+        stickyOffset: number;
         borderRadius: number;
         borderRadiusTopLeft: number;
         borderRadiusTopRight: number;
@@ -24637,19 +24919,45 @@ Text:
         stickyWhenScrolling: boolean
         ```
 
-        Indicates whether the shape sticks at the edge of what scrolls it in
-        the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-        in a board that scrolls sideways): it scrolls with the rest, stops at
-        the top of the screen or of the board that scrolls it, and goes on
-        once the end of its board pushes it on. Unlike CSS, the next sticky
-        shape of its board pushes it on too. Only for a shape directly in a
-        board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-        setting it to `false` leaves `fixedWhenScrolling` as it is.
+        Indicates whether the shape sticks at an edge of what scrolls it in the
+        prototype, as CSS `position: sticky` does: it scrolls with the rest,
+        stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+        on once the end of its board takes it on. Unlike CSS, the next shape of
+        its board sticky at the same edge pushes it on too. Only for a shape
+        directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+        `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
 
         Example
         ```
         header.stickyWhenScrolling = true;
         ```
+      stickyEdge: |-
+        ```
+        stickyEdge: "top" | "bottom" | "left" | "right" | null
+        ```
+
+        The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+        stops at: `'top'` or `'bottom'` of the screen or of a board that
+        scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+        an edge along which nothing scrolls does nothing. `null`, the default,
+        stops at the top, or at the left in a board that scrolls sideways only.
+        At the bottom or the right it sticks before its place comes too, as a
+        button at the end of a long form does, and the start of its board holds
+        it.
+
+        Example
+        ```
+        button.stickyWhenScrolling = true;
+        button.stickyEdge = 'bottom';
+        button.stickyOffset = 16;
+        ```
+      stickyOffset: |-
+        ```
+        stickyOffset: number
+        ```
+
+        How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+        the inset of CSS `position: sticky`, 0 by default.
       borderRadius: |-
         ```
         borderRadius: number

@@ -16,6 +16,8 @@
 (def css-formatters
   {:left                      :position
    :top                       :position
+   :right                     :position
+   :bottom                    :position
    :width                     :size
    :height                    :size
    :max-height                :size

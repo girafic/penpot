@@ -387,7 +387,7 @@
     (is (= "sticky" (css/get-css-value objs head :position)))
     (is (= "0px" (css/get-css-value objs head :top)) "at the top of what scrolls it, not where it is")
     (is (nil? (css/get-css-value objs head :left))))
-  (testing "at the left of a board that scrolls sideways, at both edges of one that scrolls both ways"
+  (testing "at the left of a board that scrolls sideways, at the top only of one that scrolls both ways"
     (let [top-id  (uuid/next)
           row-id  (uuid/next)
           map-id  (uuid/next)
@@ -398,7 +398,15 @@
                            (frame map-id :parent-id top-id :frame-id top-id :layout :flex :scroll-overflow :both)
                            tag pin)]
       (is (= ["0px" nil] [(css/get-css-value objs tag :left) (css/get-css-value objs tag :top)]))
-      (is (= ["0px" "0px"] [(css/get-css-value objs pin :left) (css/get-css-value objs pin :top)]))))
+      (is (= [nil "0px"] [(css/get-css-value objs pin :left) (css/get-css-value objs pin :top)]))))
+  (testing "at the edge it has, its offset from it"
+    (let [pid    (uuid/next)
+          cta    (child (uuid/next) pid :frame-id pid :sticky-scroll true :sticky-edge :bottom :sticky-offset 16)
+          aside  (child (uuid/next) pid :frame-id pid :sticky-scroll true :sticky-edge :right)
+          objs   (objects (frame pid :layout :flex :layout-flex-dir :column :scroll-overflow :vertical) cta aside)
+          values (fn [shape] (mapv #(css/get-css-value objs shape %) [:position :top :right :bottom :left]))]
+      (is (= ["sticky" nil nil "16px" nil] (values cta)))
+      (is (= [nil nil nil nil nil] (values aside)) "an edge along which nothing scrolls: as any other layer")))
   (testing "in a layout that does not scroll: at the top of the page"
     (let [pid  (uuid/next)
           head (child (uuid/next) pid :frame-id pid :sticky-scroll true)

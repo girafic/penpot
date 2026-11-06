@@ -173,6 +173,22 @@
             (t/is (not (contains? (get-in @store (pop (get-shape-path nil))) :sticky-scroll)) "set back: no attribute")
             (set! (.-fixedWhenScrolling shape) false))
 
+          (t/testing " - stickyEdge and stickyOffset"
+            (t/is (nil? (.-stickyEdge shape)) "none: the top, or the left where it scrolls sideways")
+            (t/is (= 0 (.-stickyOffset shape)))
+            (set! (.-stickyEdge shape) "bottom")
+            (set! (.-stickyOffset shape) 16)
+            (t/is (= "bottom" (.-stickyEdge shape)))
+            (t/is (= 16 (.-stickyOffset shape)))
+            (t/is (= :bottom (get-in @store (get-shape-path :sticky-edge))))
+            (t/is (thrown? js/Error (set! (.-stickyEdge shape) "middle")))
+            (t/is (thrown? js/Error (set! (.-stickyOffset shape) "16")))
+            (t/is (= ["bottom" 16] [(.-stickyEdge shape) (.-stickyOffset shape)]))
+            (set! (.-stickyEdge shape) nil)
+            (set! (.-stickyOffset shape) 0)
+            (t/is (not-any? #(contains? (get-in @store (pop (get-shape-path nil))) %) [:sticky-edge :sticky-offset])
+                  "set back: no attributes"))
+
           (t/testing " - borderRadius"
             (set! (.-borderRadius shape) 10)
             (t/is (= (.-borderRadius shape) 10))

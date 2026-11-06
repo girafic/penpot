@@ -610,6 +610,51 @@
                                                         (cfh/apply-scroll-behavior % :sticky)
                                                         (dissoc % :sticky-scroll)))))))}
 
+           ;; the edge of what scrolls it a sticky shape stops at, and
+           ;; how far from it (Penpot Motion, see `cfh/sticky-side`)
+           :stickyEdge
+           {:this true
+            :get #(some-> % u/proxy->shape :sticky-edge d/name)
+            :set
+            (fn [self value]
+              (let [id   (obj/get self "$id")
+                    edge (when (string? value) (keyword value))]
+                (cond
+                  (not (or (nil? value) (contains? cts/sticky-edges edge)))
+                  (u/not-valid plugin-id :stickyEdge value)
+
+                  (not (r/check-permission plugin-id "content:write"))
+                  (u/not-valid plugin-id :stickyEdge "Plugin doesn't have 'content:write' permission")
+
+                  (not (u/page-active? page-id))
+                  (u/not-valid plugin-id :stickyEdge "Cannot modify a page that is not currently active")
+
+                  :else
+                  (st/emit! (dwsh/update-shapes [id] #(if (some? edge)
+                                                        (assoc % :sticky-edge edge)
+                                                        (dissoc % :sticky-edge)))))))}
+
+           :stickyOffset
+           {:this true
+            :get #(-> % u/proxy->shape (:sticky-offset 0))
+            :set
+            (fn [self value]
+              (let [id (obj/get self "$id")]
+                (cond
+                  (not (sm/valid-safe-number? value))
+                  (u/not-valid plugin-id :stickyOffset value)
+
+                  (not (r/check-permission plugin-id "content:write"))
+                  (u/not-valid plugin-id :stickyOffset "Plugin doesn't have 'content:write' permission")
+
+                  (not (u/page-active? page-id))
+                  (u/not-valid plugin-id :stickyOffset "Cannot modify a page that is not currently active")
+
+                  :else
+                  (st/emit! (dwsh/update-shapes [id] #(if (zero? value)
+                                                        (dissoc % :sticky-offset)
+                                                        (assoc % :sticky-offset value)))))))}
+
            :borderRadius
            {:this true
             :get #(-> % u/proxy->shape :r1)

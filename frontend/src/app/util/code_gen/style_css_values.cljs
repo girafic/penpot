@@ -157,6 +157,22 @@
               (cfh/get-parent-ids-seq objects (:id shape)))
         #{:y})))
 
+(defn sticky-side
+  "The edge at which the layer `shape` of `objects` sticks as CSS
+  `position: sticky` does (see `cfh/sticky-side`), along the axes it
+  sticks along (see `sticky-axes`): nil when it does not, and for an edge
+  along none of them."
+  [shape objects]
+  (some->> (sticky-axes shape objects) (cfh/sticky-side shape)))
+
+(defn- sticky-inset
+  "The inset of CSS `position: sticky` of the layer `shape` of `objects`
+  at the edge `edge` (see `sticky-side`): its offset there, nil at the
+  others."
+  [shape objects edge]
+  (when (= edge (sticky-side shape objects))
+    (or (:sticky-offset shape) 0)))
+
 (defn- holds-sticky?
   "Whether a layer in the board `shape` of `objects` sticks as CSS
   `position: sticky` does (see `sticky-axes`) to a board around `shape`
@@ -165,7 +181,7 @@
   [shape objects]
   (letfn [(holds? [id]
             (when-let [child (get objects id)]
-              (or (some? (sticky-axes child objects))
+              (or (some? (sticky-side child objects))
                   (and (nil? (prototype-scroll child))
                        (some holds? (:shapes child))))))]
     (boolean (some holds? (:shapes shape)))))
@@ -173,7 +189,7 @@
 (defn- get-position
   [shape objects]
   (cond
-    (some? (sticky-axes shape objects))
+    (some? (sticky-side shape objects))
     :sticky
 
     (or (and (ctl/any-layout-immediate-child? objects shape)
@@ -193,14 +209,14 @@
 
 (defn- get-left-position
   [shape objects]
-  (if-let [axes (sticky-axes shape objects)]
-    (when (contains? axes :x) 0)
+  (if (some? (sticky-side shape objects))
+    (sticky-inset shape objects :left)
     (get-shape-position shape objects :x)))
 
 (defn- get-top-position
   [shape objects]
-  (if-let [axes (sticky-axes shape objects)]
-    (when (contains? axes :y) 0)
+  (if (some? (sticky-side shape objects))
+    (sticky-inset shape objects :top)
     (get-shape-position shape objects :y)))
 
 (defn- get-flex
@@ -651,7 +667,7 @@
     0
 
     ;; over the layers that scroll under it, as in the prototype
-    (some? (sticky-axes shape objects))
+    (some? (sticky-side shape objects))
     (or layout-item-z-index 1)
 
     (ctl/any-layout-immediate-child? objects shape)
@@ -726,6 +742,8 @@
     :position (get-position shape objects)
     :left (get-left-position  shape objects)
     :top (get-top-position  shape objects)
+    :right (sticky-inset shape objects :right)
+    :bottom (sticky-inset shape objects :bottom)
     :z-index (get-z-index  shape objects)
     :transform (get-transform  shape objects)
     :perspective (get-perspective shape objects)

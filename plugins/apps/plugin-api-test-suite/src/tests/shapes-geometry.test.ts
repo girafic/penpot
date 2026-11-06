@@ -206,6 +206,18 @@ describe('Shapes', () => {
       expect(r.stickyWhenScrolling).toBe(false);
     });
 
+    test('stickyEdge and stickyOffset are readable and writable', (ctx) => {
+      const r = rect(ctx);
+      expect(r.stickyEdge).toBe(null);
+      expect(r.stickyOffset).toBe(0);
+      r.stickyEdge = 'bottom';
+      r.stickyOffset = 16;
+      expect(r.stickyEdge).toBe('bottom');
+      expect(r.stickyOffset).toBe(16);
+      r.stickyEdge = null;
+      expect(r.stickyEdge).toBe(null);
+    });
+
     test('opacity is readable and writable', (ctx) => {
       const r = rect(ctx);
       r.opacity = 0.5;

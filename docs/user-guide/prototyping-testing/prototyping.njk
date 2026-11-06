@@ -201,15 +201,23 @@ desc: This Penpot user guide explains how to prototype interactions, connect boa
 </figure>
 
 <h2 id="prototyping-fix-scroll">Fix elements at scroll</h2>
-<p>You can fix the position of a layer when scrolling at the presentation view, or let it stick at the top edge. This is tipically useful for prototyping fixed headers, navbars, floating buttons and section headings.</p>
+<p>You can fix the position of a layer when scrolling at the presentation view, or let it stick at an edge. This is tipically useful for prototyping fixed headers, navbars, floating buttons, section headings and a button at the end of a form.</p>
 <p>Select an element right inside a board and choose how it scrolls in the Scrolling section of the Prototype tab (right side):</p>
 <ul>
   <li><strong>Scroll with parent</strong>: it scrolls with its board, as any other layer.</li>
   <li><strong>Fixed (stay in place)</strong>: it stays where it is while its board scrolls under it.</li>
-  <li><strong>Sticky (stop at top edge)</strong>: it scrolls with its board until it reaches the top edge of what scrolls (the left edge of a board that scrolls sideways) and stays there, as CSS <code>position: sticky</code> does, until the end of the board it is in takes it along. Unlike CSS, the next sticky layer of its board pushes it on as well.</li>
+  <li><strong>Sticky (stop at an edge)</strong>: it scrolls with its board until it reaches an edge of what scrolls and stays there, as CSS <code>position: sticky</code> does, until the board it is in takes it along. Unlike CSS, the next layer of its board sticky at the same edge pushes it on as well.</li>
 </ul>
 <figure>
   <img src="/img/prototype/prototype-fix-scroll.webp" alt="The scroll behavior of a layer in the Scrolling section of the Prototype tab">
+</figure>
+<p>A sticky layer shows two more settings:</p>
+<ul>
+  <li><strong>Edge</strong>: the edge it stops at. Top and bottom work on a screen and in a board that scrolls vertically, left and right in one that scrolls sideways. At first it stops at the top, or at the left of a board that scrolls only sideways. At the bottom it sticks before it is scrolled to: a button at the end of a long form shows at the bottom of the screen until its place comes.</li>
+  <li><strong>Offset</strong>: how far from the edge it stops, for example under a fixed navigation bar.</li>
+</ul>
+<figure>
+  <img src="/img/prototype/prototype-sticky-edge.webp" alt="The edge and offset of a sticky layer in the Scrolling section of the Prototype tab">
 </figure>
 <figure>
   <img src="/img/prototype/prototyping-scroll.gif" alt="Prototyping scroll">

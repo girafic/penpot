@@ -7150,14 +7150,13 @@ export interface ShapeBase extends PluginData {
   fixedWhenScrolling: boolean;
 
   /**
-   * Indicates whether the shape sticks at the edge of what scrolls it in
-   * the prototype, as CSS `position: sticky` with `top: 0` does (`left: 0`
-   * in a board that scrolls sideways): it scrolls with the rest, stops at
-   * the top of the screen or of the board that scrolls it, and goes on
-   * once the end of its board pushes it on. Unlike CSS, the next sticky
-   * shape of its board pushes it on too. Only for a shape directly in a
-   * board. Setting it to `true` sets `fixedWhenScrolling` to `false`;
-   * setting it to `false` leaves `fixedWhenScrolling` as it is.
+   * Indicates whether the shape sticks at an edge of what scrolls it in the
+   * prototype, as CSS `position: sticky` does: it scrolls with the rest,
+   * stops at the edge `stickyEdge` gives, `stickyOffset` from it, and goes
+   * on once the end of its board takes it on. Unlike CSS, the next shape of
+   * its board sticky at the same edge pushes it on too. Only for a shape
+   * directly in a board. Setting it to `true` sets `fixedWhenScrolling` to
+   * `false`; setting it to `false` leaves `fixedWhenScrolling` as it is.
    *
    * @example
    * ```js
@@ -7165,6 +7164,31 @@ export interface ShapeBase extends PluginData {
    * ```
    */
   stickyWhenScrolling: boolean;
+
+  /**
+   * The edge of what scrolls a sticky shape (see `stickyWhenScrolling`) it
+   * stops at: `'top'` or `'bottom'` of the screen or of a board that
+   * scrolls vertically, `'left'` or `'right'` of one that scrolls sideways;
+   * an edge along which nothing scrolls does nothing. `null`, the default,
+   * stops at the top, or at the left in a board that scrolls sideways only.
+   * At the bottom or the right it sticks before its place comes too, as a
+   * button at the end of a long form does, and the start of its board holds
+   * it.
+   *
+   * @example
+   * ```js
+   * button.stickyWhenScrolling = true;
+   * button.stickyEdge = 'bottom';
+   * button.stickyOffset = 16;
+   * ```
+   */
+  stickyEdge: 'top' | 'bottom' | 'left' | 'right' | null;
+
+  /**
+   * How far from its edge (see `stickyEdge`) a sticky shape stops, in px:
+   * the inset of CSS `position: sticky`, 0 by default.
+   */
+  stickyOffset: number;
 
   /**
    * The border radius of the shape.
