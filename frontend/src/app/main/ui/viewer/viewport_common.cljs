@@ -144,7 +144,7 @@
   (see `screen-sticky-layer?`) that is or holds the layer `id` of
   `objects` shows (up, less than 0, at the bottom), its page scrolled
   `scroll` units down and `view-h` high on screen, as its box sticks (see
-  `dvs/sticky-edge`): `{:id :dy}`, nil when it shows at its place. A
+  `dvs/sticky-place`): `{:id :dy}`, nil when it shows at its place. A
   layer of another top board, an overlay on it, sticks not to the page
   of the screen (see `app.main.ui.viewer.viewport-wasm/viewport-wasm*`)."
   [objects screen-id id scroll view-h]
@@ -159,10 +159,10 @@
               top   (dm/get-in root [:selrect :y1])
               inset (or (:sticky-offset shape) 0)
               end?  (cfh/sticky-end-side? (cfh/sticky-side shape #{:y}))
-              shown (dvs/sticky-edge y1 (- y2 y1) scroll
-                                     {:side  (if end? :end :start)
-                                      :line  (if end? (- (+ top view-h) inset) (+ top inset))
-                                      :bound (dvs/sticky-bound objects shape (:id root) #{:y})})
+              shown (dvs/sticky-place y1 (- y2 y1) scroll
+                                      {:side  (if end? :end :start)
+                                       :line  (if end? (- (+ top view-h) inset) (+ top inset))
+                                       :bound (dvs/sticky-bound objects shape (:id root) #{:y})})
               dy    (- (+ shown scroll) y1)]
           (when (> (mth/abs dy) 0.01)
             {:id sticky-id :dy dy}))))))

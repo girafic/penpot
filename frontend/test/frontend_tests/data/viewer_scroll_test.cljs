@@ -327,8 +327,8 @@
 ;; --- Sticky layers
 
 (t/deftest a-sticky-layer-moves-sticks-and-is-pushed-on
-  (let [top (fn [edge offset line bound]
-              (dvs/sticky-edge edge 50 offset {:side :start :line line :bound bound}))]
+  (let [top (fn [edge scrolled line bound]
+              (dvs/sticky-place edge 50 scrolled {:side :start :line line :bound bound}))]
     (t/is (= 200 (top 300 100 0 nil)) "it moves with what scrolls")
     (t/is (= 0 (top 300 400 0 nil)) "and stops at the edge")
     (t/is (= 0 (top 300 400 0 600)) "until what comes next")
@@ -338,8 +338,8 @@
     (t/is (= -80 (top 20 100 44 nil)) "one above that line moves as any other")))
 
 (t/deftest a-layer-sticky-at-the-end-sticks-before-its-place-comes
-  (let [bottom (fn [edge offset line bound]
-                 (dvs/sticky-edge edge 50 offset {:side :end :line line :bound bound}))]
+  (let [bottom (fn [edge scrolled line bound]
+                 (dvs/sticky-place edge 50 scrolled {:side :end :line line :bound bound}))]
     (t/is (= 750 (bottom 1500 0 800 nil)) "below the end it shows at the end at rest")
     (t/is (= 750 (bottom 1500 600 800 nil)) "and stays there as what scrolls moves")
     (t/is (= 600 (bottom 1500 900 800 nil)) "until its place comes, then moves with it")

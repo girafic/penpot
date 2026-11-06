@@ -284,9 +284,9 @@
 
 ;; --- Sticky layers
 
-(defn sticky-edge
+(defn sticky-place
   "Where a sticky layer that starts at `edge` along an axis, `size` long,
-  shows when what scrolls it moved `offset` back, as CSS `position:
+  shows when what scrolls it moved `scrolled` back, as CSS `position:
   sticky` has it: it moves with it. At the start `side` (`:start`, the
   top or the left) it stops at `line`, the edge of the area it scrolls
   in plus its offset, and goes on once `bound` pushes it on (the end of
@@ -295,20 +295,20 @@
   bottom or the right) its end stops at `line`, the end of the area less
   its offset, also before it scrolls to its place, and `bound` holds it
   (the start of its board, or the end of the sticky layer before it)."
-  [edge size offset {:keys [side line bound]}]
-  (let [moved (- edge offset)]
+  [edge size scrolled {:keys [side line bound]}]
+  (let [moved (- edge scrolled)]
     (if (= side :end)
       (cond-> (min moved (- line size))
-        (some? bound) (max (- bound offset)))
+        (some? bound) (max (- bound scrolled)))
       (if (< edge line)
         moved
         (cond-> (max moved line)
-          (some? bound) (min (- bound offset size)))))))
+          (some? bound) (min (- bound scrolled size)))))))
 
 (defn sticky-bound
   "What holds the sticky layer `shape` of `objects` in the area `area-id`
   (the board it scrolls in, along `axes`) at the edge it sticks at (see
-  `cfh/sticky-side`), along its axis (see `sticky-edge`): at the top or
+  `cfh/sticky-side`), along its axis (see `sticky-place`): at the top or
   the left the end of its board when that is not the area (it leaves
   with its board), and the start of the nearest other layer of its board
   sticky at that edge past its own end (the next one pushes it on); at
@@ -340,7 +340,7 @@
 (defn- sticky-move
   "How much further than its container `area` moves it, scrolled `[ox oy]`
   along `axes`, the sticky layer `shape` of `objects` moves (see
-  `sticky-edge`), a point: 0 along the axis it does not stick along."
+  `sticky-place`), a point: 0 along the axis it does not stick along."
   [objects shape area axes [ox oy]]
   (let [side (cfh/sticky-side shape axes)]
     (if (nil? side)
@@ -349,17 +349,17 @@
             end?   (cfh/sticky-end-side? side)
             box    (:selrect (design-box area))
             {:keys [x y width height]} (:selrect shape)
-            [edge size offset lo hi] (if x?
-                                       [x width ox (:x box) (+ (:x box) (:width box))]
-                                       [y height oy (:y box) (+ (:y box) (:height box))])
+            [edge size scrolled lo hi] (if x?
+                                         [x width ox (:x box) (+ (:x box) (:width box))]
+                                         [y height oy (:y box) (+ (:y box) (:height box))])
             inset  (or (:sticky-offset shape) 0)
-            move   (if (and (zero? offset) (not end?))
+            move   (if (and (zero? scrolled) (not end?))
                      0
-                     (+ offset (- (sticky-edge edge size offset
-                                               {:side  (if end? :end :start)
-                                                :line  (if end? (- hi inset) (+ lo inset))
-                                                :bound (sticky-bound objects shape (:id area) axes)})
-                                  edge)))]
+                     (+ scrolled (- (sticky-place edge size scrolled
+                                                  {:side  (if end? :end :start)
+                                                   :line  (if end? (- hi inset) (+ lo inset))
+                                                   :bound (sticky-bound objects shape (:id area) axes)})
+                                    edge)))]
         (if x? (gpt/point move 0) (gpt/point 0 move))))))
 
 (defn- sticky-layers
@@ -389,7 +389,7 @@
 (defn- rest-areas*
   "The containers in the board `root-id` of `objects` (the shown one; nil:
   the whole page) with a layer in them sticky at their bottom or right
-  edge (see `sticky-edge`), which may stick at rest: the innermost
+  edge (see `sticky-place`), which may stick at rest: the innermost
   container around it, `overlay-root` (the root of an overlay) as one
   (see `container-axes`)."
   [objects root-id overlay-root]
@@ -424,7 +424,7 @@
   (`{id [x y]}`): the layers of a container, but for those fixed when
   scrolling, and all within them, back by its offset, summed over the
   containers they are in. A sticky layer stops at the edge of its
-  innermost container (see `sticky-edge`) by its offset but for `past`
+  innermost container (see `sticky-place`) by its offset but for `past`
   (`{id [x y]}`, how far a container gives past an end, see
   `view-past`), and goes on with that; one at the bottom or the right
   edge at rest too, its container not scrolled, in the board `root-id`
