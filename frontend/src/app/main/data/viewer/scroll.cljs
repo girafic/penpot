@@ -305,18 +305,6 @@
         (cond-> (max moved line)
           (some? bound) (min (- bound offset size)))))))
 
-(defn side-axis
-  "The axis along which a layer sticks at the edge `side` (see
-  `cfh/sticky-side`)."
-  [side]
-  (if (contains? #{:top :bottom} side) :y :x))
-
-(defn end-side?
-  "Whether the edge `side` is at the end of its axis: the bottom or the
-  right (see `sticky-edge`)."
-  [side]
-  (contains? #{:bottom :right} side))
-
 (defn sticky-bound
   "What holds the sticky layer `shape` of `objects` in the area `area-id`
   (the board it scrolls in, along `axes`) at the edge it sticks at (see
@@ -328,8 +316,8 @@
   nearest such layer before its start. None hidden; nil without either."
   [objects shape area-id axes]
   (when-let [side (cfh/sticky-side shape axes)]
-    (let [[lo hi] (if (= :x (side-axis side)) [:x1 :x2] [:y1 :y2])
-          end?    (end-side? side)
+    (let [[lo hi] (if (= :x (cfh/sticky-axis side)) [:x1 :x2] [:y1 :y2])
+          end?    (cfh/sticky-end-side? side)
           parent  (get objects (:parent-id shape))
           others  (into []
                         (comp (keep #(get objects %))
@@ -357,8 +345,8 @@
   (let [side (cfh/sticky-side shape axes)]
     (if (nil? side)
       (gpt/point 0 0)
-      (let [x?     (= :x (side-axis side))
-            end?   (end-side? side)
+      (let [x?     (= :x (cfh/sticky-axis side))
+            end?   (cfh/sticky-end-side? side)
             box    (:selrect (design-box area))
             {:keys [x y width height]} (:selrect shape)
             [edge size offset lo hi] (if x?
@@ -406,7 +394,7 @@
   [objects overlay-root]
   (into #{}
         (keep (fn [shape]
-                (when (and (end-side? (:sticky-edge shape))
+                (when (and (cfh/sticky-end-side? (:sticky-edge shape))
                            (not (:hidden shape))
                            (cfh/sticky-scroll? shape))
                   (d/seek #(container-axes objects (get objects %) :overlay-root? (= % overlay-root))

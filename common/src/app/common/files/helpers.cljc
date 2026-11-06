@@ -898,6 +898,19 @@
   ^boolean
   (= :sticky (scroll-behavior shape)))
 
+(defn sticky-axis
+  "The axis along which a layer sticks at the edge `side` (see
+  `sticky-side`): `:y` at the top or the bottom, `:x` at the left or the
+  right."
+  [side]
+  (if (contains? #{:top :bottom} side) :y :x))
+
+(defn sticky-end-side?
+  "Whether the edge `side` (see `sticky-side`) is at the end of its axis:
+  the bottom or the right."
+  [side]
+  (contains? #{:bottom :right} side))
+
 (defn sticky-side
   "The edge the sticky layer `shape` (see `sticky-scroll?`) stops at in
   an area that scrolls along `axes` (`#{:x :y}` or part of it): its
@@ -912,7 +925,7 @@
         (contains? axes :y) :top
         (contains? axes :x) :left)
 
-      (contains? axes (if (contains? #{:top :bottom} edge) :y :x))
+      (contains? axes (sticky-axis edge))
       edge)))
 
 (defn fixed?

@@ -193,4 +193,7 @@
     (t/is (= :right (cfh/sticky-side (layer :sticky-edge :right) #{:x :y})))
     (t/is (nil? (cfh/sticky-side (layer :sticky-edge :left) #{:y})) "an edge along no axis it scrolls: none")
     (t/is (nil? (cfh/sticky-side (layer :sticky-edge :bottom) #{:x})))
-    (t/is (nil? (cfh/sticky-side (layer) #{})))))
+    (t/is (nil? (cfh/sticky-side (layer) #{}))))
+  (t/is (= [:y :y :x :x] (map cfh/sticky-axis [:top :bottom :left :right])))
+  (t/is (= [false true false true] (map cfh/sticky-end-side? [:top :bottom :left :right])))
+  (t/is (false? (cfh/sticky-end-side? nil)) "no edge: not at the end"))

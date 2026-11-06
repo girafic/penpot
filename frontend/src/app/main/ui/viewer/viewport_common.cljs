@@ -125,7 +125,7 @@
         {:keys [y1 y2]} (:selrect shape)
         side   (cfh/sticky-side shape #{:y})
         bound  (dvs/sticky-bound objects shape frame-id #{:y})
-        span   (if (= side :bottom)
+        span   (if (cfh/sticky-end-side? side)
                  (let [limit (dm/get-in objects [frame-id :selrect :y1])]
                    [(min y1 (max limit (or bound limit))) y2])
                  (let [limit (dm/get-in objects [frame-id :selrect :y2])]
@@ -157,7 +157,7 @@
         (let [{:keys [y1 y2]} (:selrect shape)
               top   (dm/get-in root [:selrect :y1])
               inset (or (:sticky-offset shape) 0)
-              end?  (= :bottom (cfh/sticky-side shape #{:y}))
+              end?  (cfh/sticky-end-side? (cfh/sticky-side shape #{:y}))
               shown (dvs/sticky-edge y1 (- y2 y1) scroll
                                      {:side  (if end? :end :start)
                                       :line  (if end? (- (+ top view-h) inset) (+ top inset))
