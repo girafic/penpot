@@ -7,8 +7,11 @@
 (ns app.main.ui.workspace.right-header
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.common.data.macros :as dm]
    [app.main.data.common :as dcm]
    [app.main.data.event :as ev]
+   [app.main.data.helpers :as dsh]
+   [app.main.data.modal :as modal]
    [app.main.data.shortcuts :as scd]
    [app.main.data.team :as dtm]
    [app.main.data.workspace :as dw]
@@ -28,6 +31,7 @@
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.exports.assets :refer [progress-widget]]
    [app.main.ui.formats :as fmt]
+   [app.main.ui.workspace.phone-link]
    [app.main.ui.workspace.presence :refer [active-sessions*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
@@ -174,7 +178,22 @@
              (dwpp/set-play-mode! mode)
              (if (= mode :preview)
                (st/emit! (dwpp/open-preview))
-               (on-view-mode)))))]
+               (on-view-mode)))))
+
+        ;; the view mode of the board selected, live on a phone (see
+        ;; `app.main.ui.workspace.phone-link`)
+        on-phone
+        (mf/use-fn
+         (fn [event]
+           (dom/stop-propagation event)
+           (reset! open* false)
+           (let [state    @st/state
+                 page-id  (:current-page-id state)
+                 objects  (dsh/lookup-page-objects state)
+                 selected (dm/get-in state [:workspace-local :selected])]
+             (modal/show! :phone-link {:file-id (:current-file-id state)
+                                       :page-id page-id
+                                       :frame-id (dwpp/start-frame-id objects selected)}))))]
 
     [:div {:class (stl/css :play-section)}
      [:> icon-button* {:variant "action"
@@ -207,7 +226,10 @@
                             :shortcut (get-tt :toggle-prototype-preview)
                             :radio true
                             :checked preview?
-                            :on-click on-pick}]]]))
+                            :on-click on-pick}]
+      [:li {:class (stl/css :play-separator) :role "separator"}]
+      [:> check-menu-item* {:label (tr "workspace.header.play.phone")
+                            :on-click on-phone}]]]))
 
 ;; --- Header Component
 

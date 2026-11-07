@@ -176,3 +176,9 @@
   inset-inline-end: 0;
   inline-size: $sz-224;
 }
+
+.play-separator {
+  margin-block: var(--sp-xs);
+  border-block-start: $b-1 solid var(--color-background-quaternary);
+  list-style: none;
+}

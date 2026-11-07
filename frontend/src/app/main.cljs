@@ -31,6 +31,7 @@
    [app.plugins :as plugins]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
    [debug]
@@ -135,6 +136,7 @@
       (mw/init!)
       (i18n/init)
       (cur/init-styles)
+      (touch/init!)
 
       (mf/set-update-scheduler {:on-trip errors/on-update-loop})
 

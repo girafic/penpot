@@ -529,6 +529,13 @@ async function generateTemplates() {
   await fs.writeFile("./resources/public/rasterizer.html", content);
   collectCspHashes(content, cspHashes);
 
+  // the web app manifest, linked on touch devices (see app.util.touch):
+  // at the root, where the server serves json
+  await fs.copyFile(
+    "resources/templates/app-manifest.json",
+    "./resources/public/app-manifest.json",
+  );
+
   await fs.writeFile(
     "./resources/public/csp-script-hashes.txt",
     [...cspHashes].join(" ") + "\n",

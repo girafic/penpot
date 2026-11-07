@@ -30,6 +30,7 @@
    [app.util.dom :as dom]
    [app.util.modules :as mod]
    [app.util.theme :as theme]
+   [app.util.touch :as touch]
    [rumext.v2 :as mf]))
 
 (def auth-page
@@ -109,6 +110,11 @@
              (:onboarding-viewed props)
              (not= (:release-notes-viewed props) (:main cf/version))
              (not= "0.0" (:main cf/version)))]
+
+    ;; a phone shows the view mode as wide as it is, a tablet all of
+    ;; Penpot (see `touch/viewport-content`)
+    (mf/with-effect [section]
+      (touch/set-viewport! (touch/viewport-content section (touch/phone?) (touch/coarse?))))
 
     [:& (mf/provider ctx/current-route) {:value route}
      (case section
@@ -225,7 +231,9 @@
              share    (:share params)
              ;; in a window of the workspace (see
              ;; `app.main.ui.workspace.prototype-preview`)
-             preview  (= "true" (rt/get-query-param params :preview))]
+             preview  (= "true" (rt/get-query-param params :preview))
+             ;; live, on a phone (see `app.main.data.viewer.follow`)
+             follow   (= "true" (rt/get-query-param params :follow))]
 
          [:? {}
           [:> viewer-page*
@@ -237,7 +245,8 @@
             :share-id share-id
             :interactions-mode imode
             :share share
-            :preview preview}]])
+            :preview preview
+            :follow follow}]])
 
 
        :frame-preview

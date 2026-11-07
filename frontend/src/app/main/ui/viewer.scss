@@ -398,3 +398,66 @@
 [data-force-visible="true"] .viewer-go-prev {
   transform: translateX(0);
 }
+
+/** PHONE: the board as wide as the screen, the header and the bar at the
+  bottom over it on request (see `phone-bars-button*`); the page itself
+  never bounces nor reloads by a pull */
+:global(html:has([data-phone="true"])),
+:global(body:has([data-phone="true"])) {
+  overscroll-behavior: none;
+}
+
+[data-phone="true"] {
+  grid-template-rows: 1fr;
+  block-size: 100dvh;
+}
+
+[data-phone="true"] .viewer-content {
+  grid-row: 1 / span 1;
+}
+
+[data-phone="true"] .viewer-section,
+[data-phone="true"] .device-stage {
+  block-size: 100dvh;
+  touch-action: manipulation;
+}
+
+[data-phone="true"] .viewer-go-next,
+[data-phone="true"] .viewer-go-prev {
+  display: none;
+}
+
+[data-phone="true"] .viewer-bottom {
+  padding-block-end: env(safe-area-inset-bottom);
+  block-size: calc(#{$sz-40} + env(safe-area-inset-bottom));
+  transform: translateY(100%);
+}
+
+[data-bars="true"] .viewer-bottom {
+  transform: translateY(0);
+}
+
+.phone-bars-button {
+  position: fixed;
+  inset-block-start: calc(env(safe-area-inset-top) + var(--sp-xs));
+  inset-inline-end: calc(env(safe-area-inset-right) + var(--sp-xs));
+  z-index: deprecated.$z-index-4;
+  display: grid;
+  place-items: center;
+  inline-size: $sz-32;
+  block-size: $sz-32;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: rgb(0 0 0 / 0.35);
+  color: var(--color-static-white);
+  opacity: 0.7;
+  transition: inset-block-start 200ms ease;
+}
+
+.phone-bars-shown {
+  inset-block-start: calc(env(safe-area-inset-top) + #{$sz-48} + var(--sp-xs));
+  background-color: var(--color-background-primary);
+  color: var(--color-foreground-primary);
+  opacity: 1;
+}

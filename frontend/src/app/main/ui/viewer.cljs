@@ -24,6 +24,7 @@
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.devices :as dvd]
+   [app.main.data.viewer.follow :as dvf]
    [app.main.data.viewer.preview :as dvp]
    [app.main.data.viewer.scroll :as dvs]
    [app.main.data.viewer.shortcuts :as sc]
@@ -545,6 +546,18 @@
                           :page page
                           :zoom zoom}])]])
 
+(mf/defc phone-bars-button*
+  "On a phone, where the board fills the screen, the button that shows
+  the header and the bar at the bottom over it, and hides them again."
+  {::mf/private true}
+  [{:keys [shown on-toggle]}]
+  [:button {:class (stl/css-case :phone-bars-button true
+                                 :phone-bars-shown shown)
+            :aria-label (if shown (tr "viewer.phone.hide-bars") (tr "viewer.phone.show-bars"))
+            :aria-pressed shown
+            :on-click on-toggle}
+   [:> icon* {:icon-id (if shown i/close i/menu) :size "m"}]])
+
 (mf/defc viewer-content*
   [{:keys [data page-id share-id section index interactions-mode share preview]}]
   (let [{:keys [file users project permissions]} data
@@ -683,6 +696,11 @@
         framed-ref (mf/use-ref false)
 
         fullscreen? (mf/deref header/fullscreen-ref)
+        ;; on a phone the board fills the screen: its bars show on
+        ;; request (see `phone-bars-button*`)
+        phone?      (and (not preview) (true? (:phone? local)))
+        bars*       (mf/use-state false)
+        bars?       (deref bars*)
         overlays    (mf/deref current-overlays-ref)
         ;; where the view box of each overlay starts on the page (see
         ;; `vpc/prepare-objects`), for the wheel over its containers
@@ -942,12 +960,13 @@
           (.addEventListener js/window "message" on-message)
           #(.removeEventListener js/window "message" on-message))))
 
-    ;; as wide as the screen of its device, or, in the preview, fitted
-    ;; or filled as it resizes; at 100 % as it is
-    (mf/with-effect [preview (:viewport-size local) (:id frame) device]
+    ;; as wide as the screen of its device, or, in the preview and on a
+    ;; phone, fitted, filled or as wide as it is as it resizes or turns;
+    ;; at 100 % as it is
+    (mf/with-effect [preview phone? (:viewport-size local) (:id frame) device]
       (let [framed? (mf/ref-val framed-ref)]
         (mf/set-ref-val! framed-ref (some? device))
-        (when (and (some? frame) (or preview (some? device) framed?))
+        (when (and (some? frame) (or preview phone? (some? device) framed?))
           (st/emit! dv/refit-zoom))))
 
     (mf/with-effect [preview]
@@ -1087,8 +1106,9 @@
      (mf/deps zoom-type)
      (fn []
        (case zoom-type
-         :fit (st/emit! dv/zoom-to-fit)
-         :fill (st/emit! dv/zoom-to-fill)
+         :fit   (st/emit! dv/zoom-to-fit)
+         :fill  (st/emit! dv/zoom-to-fill)
+         :width (st/emit! dv/zoom-to-width)
          nil)))
 
     ;; WASM draws a board after it shows (see
@@ -1119,8 +1139,9 @@
      (mf/deps index current-animations zoom-type)
      (fn []
        (case zoom-type
-         :fit  (st/emit! dv/zoom-to-fit)
-         :fill (st/emit! dv/zoom-to-fill)
+         :fit   (st/emit! dv/zoom-to-fit)
+         :fill  (st/emit! dv/zoom-to-fill)
+         :width (st/emit! dv/zoom-to-width)
          nil)
        ;; Navigate animation needs to be started after navigation
        ;; is complete, and we have the next page index.
@@ -1219,6 +1240,8 @@
       :data-fullscreen fullscreen?
       :data-force-visible (:show-thumbnails local)
       :data-preview (true? preview)
+      :data-phone phone?
+      :data-bars (and phone? bars?)
       ;; the device alone, on the workspace (see `.window.framed` of
       ;; the preview)
       :data-device-only (and (true? preview) (some? device-layout))}
@@ -1329,6 +1352,10 @@
                               :finish device-finish
                               :cutouts true}]])]
 
+     (when phone?
+       [:> phone-bars-button* {:shown bars?
+                               :on-toggle #(swap! bars* not)}])
+
      (when-not preview
        [:& header/header {:project project
                           :index index
@@ -1348,7 +1375,7 @@
 ;; --- Component: Viewer
 
 (mf/defc viewer*
-  [{:keys [file-id share-id page-id preview] :as props}]
+  [{:keys [file-id share-id page-id preview follow] :as props}]
   (mf/with-effect [file-id page-id share-id]
     (let [params {:file-id file-id
                   :page-id page-id
@@ -1359,6 +1386,13 @@
       (st/emit! (dv/initialize params))
       (fn []
         (st/emit! (dv/finalize params)))))
+
+  ;; live, on a phone: what is saved and the board selected in the
+  ;; workspace (see `dvf/start`)
+  (mf/with-effect [file-id follow]
+    (when (and follow (not preview))
+      (st/emit! (dvf/start file-id))
+      #(st/emit! dvf/stop)))
 
   (if-let [data (mf/deref refs/viewer-data)]
     (let [props (obj/merge props #js {:data data :key (dm/str file-id)})]

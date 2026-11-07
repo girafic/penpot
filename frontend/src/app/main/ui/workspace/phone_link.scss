@@ -1,0 +1,85 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+// The shared modal placeholders, as the other modals of the workspace.
+@use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_borders.scss" as *;
+@use "ds/_utils.scss" as *;
+@use "ds/typography.scss" as *;
+
+.modal-overlay {
+  @extend %modal-overlay-base;
+}
+
+.modal-container {
+  @extend %modal-container-base;
+
+  inline-size: px2rem(408);
+  // taller than the shared modal allows: the QR code, the hints, the link
+  max-block-size: calc(100vh - var(--sp-xxxl));
+  overflow-y: auto;
+}
+
+.modal-header {
+  margin-block-end: var(--sp-xxl);
+}
+
+.modal-title {
+  @include use-typography("headline-medium");
+
+  color: var(--color-foreground-primary);
+}
+
+.modal-close-btn {
+  position: absolute;
+  inset-block-start: var(--sp-s);
+  inset-inline-end: var(--sp-xs);
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-l);
+}
+
+// black on white in either theme: a camera reads it so
+.qr-code {
+  align-self: center;
+  inline-size: px2rem(176);
+  block-size: px2rem(176);
+  border-radius: $br-8;
+}
+
+.modal-msg,
+.modal-hint,
+.modal-warning {
+  @include use-typography("body-medium");
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
+
+.modal-warning {
+  color: var(--color-accent-warning);
+}
+
+.link-row {
+  display: flex;
+  gap: var(--sp-s);
+}
+
+.link {
+  @include use-typography("body-small");
+
+  flex: 1;
+  min-inline-size: 0;
+  padding: 0 var(--sp-s);
+  border: $b-1 solid var(--color-background-quaternary);
+  border-radius: $br-8;
+  background-color: var(--color-background-tertiary);
+  color: var(--color-foreground-primary);
+  text-overflow: ellipsis;
+}

@@ -25,6 +25,7 @@
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.layout :as dwly]
    [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.phone :as dwph]
    [app.main.data.workspace.texts :as dwt]
    [app.main.router :as rt]
    [app.util.globals :refer [global]]
@@ -145,6 +146,10 @@
     :team-membership-change  (dc/team-membership-change msg)
     :team-organization-change         (dc/handle-change-team-organization msg)
     :organization-change-sso (dc/handle-organization-change-sso msg)
+    ;; what the other sessions of the same person tell (see
+    ;; `app.main.data.viewer.follow`)
+    :broadcast               (when (= :viewer-follow (:event msg))
+                               (dwph/view-mode-heard msg))
     nil))
 
 (defn- handle-pointer-send

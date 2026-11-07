@@ -6419,6 +6419,14 @@ msgstr "No boards found on the page."
 msgid "viewer.frame-not-found"
 msgstr "Board not found."
 
+#: src/app/main/ui/viewer.cljs
+msgid "viewer.phone.hide-bars"
+msgstr "Hide the bars"
+
+#: src/app/main/ui/viewer.cljs
+msgid "viewer.phone.show-bars"
+msgstr "Show the bars"
+
 #: src/app/main/ui/viewer.cljs:127
 msgid "viewer.go-to-first-board"
 msgstr "Go to the first board"
@@ -7499,6 +7507,10 @@ msgstr "Stroke %s gap"
 msgid "workspace.animation.stroke-dash-offset"
 msgstr "Stroke %s dash offset"
 
+#: src/app/main/ui/workspace/right_header.cljs
+msgid "workspace.header.play.phone"
+msgstr "On your phone…"
+
 #: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
 msgid "workspace.options.stroke-dash-offset"
 msgstr "Dash offset"
@@ -8127,6 +8139,34 @@ msgstr "Split at the playhead"
 
 msgid "workspace.animation.fit-to-audio"
 msgstr "Make the timeline as long as its audio"
+
+#: src/app/main/ui/workspace/phone_link.cljs
+msgid "workspace.phone.copied"
+msgstr "Link copied"
+
+#: src/app/main/ui/workspace/phone_link.cljs
+msgid "workspace.phone.copy"
+msgstr "Copy link"
+
+#: src/app/main/ui/workspace/phone_link.cljs
+msgid "workspace.phone.home-screen"
+msgstr "Tip: Share › Add to Home Screen keeps it on the phone as an app."
+
+#: src/app/main/ui/workspace/phone_link.cljs
+msgid "workspace.phone.local-host"
+msgstr "This address only works on this computer. Open Penpot here at an address the phone reaches (the name or the IP address of this computer in your network), then open this again."
+
+#: src/app/main/ui/workspace/phone_link.cljs
+msgid "workspace.phone.qr"
+msgstr "QR code of the link"
+
+#: src/app/main/ui/workspace/phone_link.cljs
+msgid "workspace.phone.scan"
+msgstr "Scan it with the camera of your phone and log in with this account. The phone shows the board you select here, and what you change once it is saved."
+
+#: src/app/main/ui/workspace/phone_link.cljs
+msgid "workspace.phone.title"
+msgstr "Open on your phone"
 
 msgid "workspace.shape.menu.copy-animation"
 msgstr "Copy animation"

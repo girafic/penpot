@@ -32,6 +32,7 @@
    [app.main.ui.workspace.libraries]
    [app.main.ui.workspace.nudge]
    [app.main.ui.workspace.palette :refer [palette*]]
+   [app.main.ui.workspace.phone :refer [phone-follow*]]
    [app.main.ui.workspace.plugins]
    [app.main.ui.workspace.prototype-preview :refer [prototype-preview*]]
    [app.main.ui.workspace.sidebar :refer [sidebar*]]
@@ -190,7 +191,10 @@
                      :drawing-tool (get drawing :tool)}])
 
      ;; the prototype in a window over it all (Shift + Space)
-     [:> prototype-preview* {:file-id (get file :id)}]]))
+     [:> prototype-preview* {:file-id (get file :id)}]
+
+     ;; the board selected, for a view mode on a phone
+     [:> phone-follow* {:page page :selected selected}]]))
 
 (mf/defc workspace-loader*
   {::mf/private true}

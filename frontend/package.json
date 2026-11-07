@@ -133,6 +133,7 @@
     "gifenc": "^1.0.3",
     "lottie-web": "^5.13.0",
     "mediabunny": "^1.59.0",
-    "react-aria-components": "^1.21.1"
+    "react-aria-components": "^1.21.1",
+    "uqr": "^0.1.3"
   }
 }

@@ -37,6 +37,7 @@
    [app.util.globals :as ug]
    [app.util.storage :as storage]
    [app.util.timers :as ts]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
@@ -60,8 +61,10 @@
 (declare bundle-fetched)
 (declare zoom-to-fill)
 (declare zoom-to-fit)
+(declare zoom-to-width)
 (declare reset-zoom)
 (declare initial-device)
+(declare phone?)
 (declare update-device-querystring)
 
 (def ^:private
@@ -99,7 +102,10 @@
                       default-local-state
                       lstate)))
           (assoc-in [:viewer-local :share-id] share-id)
-          (assoc-in [:viewer-local :device] (initial-device (rt/get-params state)))
+          ;; on a phone the board fills it, the phone is its device
+          ;; (see `phone?`)
+          (assoc-in [:viewer-local :phone?] (touch/phone?))
+          (assoc-in [:viewer-local :device] (initial-device (rt/get-params state) (touch/phone?)))
           (update :comments-local dcmt/merge-persisted-filters)))
 
     ptk/WatchEvent
@@ -379,9 +385,10 @@
 
         (rx/merge
          (rx/of (case (:zoom qparams)
-                  "fit" zoom-to-fit
-                  "fill" zoom-to-fill
-                  nil))
+                  "fit"   zoom-to-fit
+                  "fill"  zoom-to-fill
+                  "width" zoom-to-width
+                  (when (phone? state) zoom-to-width)))
          (rx/of (update-page-position-data file-id page-id))
          (cond
            (and (some? frame-id)
@@ -484,15 +491,29 @@
 
 (defn- initial-device
   "The device the view mode starts with, as its URL `params` say; else,
-  in a view mode of its own, the one picked last; else none."
-  [params]
+  in a view mode of its own, the one picked last; else none, as on a
+  `phone?`: it is the device."
+  [params phone?]
   (let [choice   (rt/get-query-param params :device)
         preview? (= "true" (rt/get-query-param params :preview))]
-    (if (or (some? choice) preview?)
+    (cond
+      phone?
+      {:choice nil :finish nil}
+
+      (or (some? choice) preview?)
       {:choice (dvd/parse-choice choice)
        :finish (dvd/parse-finish (rt/get-query-param params :device-color))}
+
+      :else
       {:choice (dvd/parse-choice (get storage/user ::device))
        :finish (dvd/parse-finish (get storage/user ::device-color))})))
+
+(defn phone?
+  "Whether the view mode in `state` shows on a phone: its boards as wide
+  as its screen (see `zoom-to-width`), no device round them, its bars
+  shown on request."
+  [state]
+  (true? (dm/get-in state [:viewer-local :phone?])))
 
 (defn device
   "The device picked for the view mode in `state`, `{:choice :finish
@@ -609,8 +630,9 @@
       (if (some? (device-shown state))
         (rx/of zoom-to-device)
         (case (dm/get-in state [:viewer-local :zoom-type])
-          :fit  (rx/of zoom-to-fit)
-          :fill (rx/of zoom-to-fill)
+          :fit   (rx/of zoom-to-fit)
+          :fill  (rx/of zoom-to-fill)
+          :width (rx/of zoom-to-width)
           (rx/empty))))))
 
 ;; --- Zoom Management
@@ -622,7 +644,10 @@
       (let [zoom-type (get-in state [:viewer-local :zoom-type])
             params    (rt/get-params state)
             current   (rt/get-query-param params :zoom)
-            expected  (some-> zoom-type name)]
+            ;; as wide as the screen is what a phone shows anyway: kept
+            ;; out of the URL, whose board it would race to set
+            expected  (when-not (= :width zoom-type)
+                        (some-> zoom-type name))]
         ;; Zoom is view state: mirror it into the URL, replacing the history
         ;; entry, only when the query string does not already describe it.
         (when (not= current expected)
@@ -709,6 +734,28 @@
         (-> state
             (assoc-in  [:viewer-local :zoom] (or (device-zoom state) maxzoom))
             (assoc-in  [:viewer-local :zoom-type] :fill))))
+
+    ptk/WatchEvent
+    (watch [_ _ _] (rx/of update-zoom-querystring))))
+
+(def zoom-to-width
+  "The board shown as wide as the view mode: on a phone, as wide as its
+  screen, a tall board scrolling down."
+  (ptk/reify ::zoom-to-width
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [params  (rt/get-params state)
+            page-id (some-> (:page-id params) uuid/parse)
+            index   (some-> (rt/get-query-param params :index) parse-long)
+            frames  (dm/get-in state [:viewer :pages page-id :frames])
+            index   (min (or index 0) (max 0 (dec (count frames))))
+            width   (dm/get-in frames [index :selrect :width])
+            vwidth  (dm/get-in state [:viewer-local :viewport-size :width])]
+        ;; until the view mode has its size, it keeps the zoom it has,
+        ;; to fit once it gets it (see `refit-zoom`)
+        (cond-> (assoc-in state [:viewer-local :zoom-type] :width)
+          (and (number? width) (pos? width) (number? vwidth) (pos? vwidth))
+          (assoc-in [:viewer-local :zoom] (or (device-zoom state) (/ vwidth width))))))
 
     ptk/WatchEvent
     (watch [_ _ _] (rx/of update-zoom-querystring))))
