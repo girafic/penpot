@@ -107,16 +107,20 @@
               #(mf/deferred % ts/idle-then-raf)]}
   [{:keys [is-selected frame on-click index objects page-id thumbnail-data]}]
 
-  (let [children-ids (cfh/get-children-ids objects (:id frame))
-        children-bounds (gsh/shapes->rect (concat [frame] (->> children-ids (keep (d/getf objects)))))]
+  (let [;; the same each render: selecting a board does not draw its
+        ;; picture again
+        preview (mf/with-memo [frame objects page-id thumbnail-data]
+                  (let [children-ids    (cfh/get-children-ids objects (:id frame))
+                        children-bounds (gsh/shapes->rect (concat [frame] (->> children-ids (keep (d/getf objects)))))]
+                    (-> frame
+                        (assoc :thumbnail (get thumbnail-data (dm/str page-id (:id frame))))
+                        (assoc :children-bounds children-bounds))))]
 
     [:button {:class (stl/css :thumbnail-item)
               :on-click #(on-click % index)}
      [:div {:class (stl/css-case :thumbnail-preview true
                                  :selected is-selected)}
-      [:& render/frame-svg {:frame (-> frame
-                                       (assoc :thumbnail (get thumbnail-data (dm/str page-id (:id frame))))
-                                       (assoc :children-bounds children-bounds))
+      [:& render/frame-svg {:frame preview
                             :objects objects
                             :use-thumbnails true}]]
      [:div {:class (stl/css :thumbnail-info)
@@ -132,6 +136,12 @@
         objects   (:objects page)
         on-close  #(st/emit! dv/toggle-thumbnails-panel)
         selected  (mf/use-var false)
+
+        ;; the boards draw once the panel first shows: hidden, the
+        ;; pictures of all the boards took the view mode of a phone
+        ;; more than a second as the board changed
+        shown-ref (mf/use-ref false)
+        _         (when (true? show) (mf/set-ref-val! shown-ref true))
 
         on-item-click
         (mf/use-fn
@@ -157,7 +167,7 @@
                               :total (count frames)}]
      [:> thumbnails-content* {:is-expanded expanded?
                               :total (count frames)}
-      (for [[i frame] (d/enumerate frames)]
+      (for [[i frame] (when (mf/ref-val shown-ref) (d/enumerate frames))]
         [:> thumbnail-item* {:index i
                              :key (dm/str (:id frame) "-" i)
                              :frame frame
