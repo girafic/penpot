@@ -9,9 +9,11 @@
   phone stopped there for more than a second, and the animation the
   board comes in with skipped its start."
   (:require
+   [app.common.geom.point :as gpt]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.ui.viewer.thumbnails :refer [thumbnails-panel*]]
+   [app.main.ui.viewer.viewport-common :as vpc]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [rumext.v2 :as mf]))
@@ -55,3 +57,12 @@
                  (t/is (= [0 1 1] seen) "none while hidden; each once shown, kept as it hides again")))
         (.catch (fn [cause] (t/is false (ex-message cause))))
         (.finally (fn [] (done) nil)))))
+
+(t/deftest a-board-moves-as-the-page-does
+  ;; the base board of a viewport, worked out alone: the page as a whole
+  ;; only for an overlay to place (see `viewport-wasm*`)
+  (let [size  {:x 40 :y 20}
+        delta (gpt/point 5 5)]
+    (t/is (= (get (vpc/prepare-page-objects (:objects page) size delta) (:id board))
+             (vpc/prepare-shape board size delta)))
+    (t/is (= -45 (:x (vpc/prepare-shape board size delta))))))

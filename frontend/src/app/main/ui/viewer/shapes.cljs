@@ -112,12 +112,14 @@
                  (or (some? (dv/device-shown state)) (some? (dvs/screen-h base-frame))))))
 
 (defn- ignore-frame-shape
+  "`shape` and `objects` (or a delay of them, see `frame-hotspots*`) to
+  place an overlay with."
   [shape objects manual?]
   (let [shape (cond-> shape ;; When the the interaction is not manual and its origin is a frame,
                 ;; we need to ignore it on all the find-frame calculations
                 (and (:frame-id shape) (not manual?))
                 (assoc :type :rect))
-        objects (assoc objects (:id shape) shape)]
+        objects (assoc (force objects) (:id shape) shape)]
     [shape objects]))
 
 (defn- activate-interaction
@@ -521,7 +523,10 @@
 
   Optional `shape-filter` is a predicate that receives the shape id and returns
   true when it should be included (used to split fixed-scroll vs normal layers).
-  `clips`, the clip path of each shape in a board that scrolls its content."
+  `clips`, the clip path of each shape in a board that scrolls its content.
+  `all-objects`, all the shapes of the page in vbox-space, may be a delay:
+  only an interaction that places an overlay forces it (see
+  `ignore-frame-shape`)."
   [{:keys [objects all-objects shape-filter frame clips]}]
   (let [all-objects (or all-objects objects)
         hotspots    (hotspot-shapes objects (:id frame) shape-filter)]

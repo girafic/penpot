@@ -123,7 +123,9 @@
                        (seq pins)   (vpc/pin-objects pins)
                        (seq shifts) (dvs/shift-objects shifts)))
         prepared-all (mf/with-memo [prepared-all shifts]
-                       (cond-> prepared-all (seq shifts) (dvs/shift-objects shifts)))
+                       (if (seq shifts)
+                         (delay (dvs/shift-objects (force prepared-all) shifts))
+                         prepared-all))
         prepared-frame (or (get prepared (:id prepared-frame)) prepared-frame)
         containers (mf/with-memo [objects frame sheet-root]
                      (when (some? objects)
@@ -357,9 +359,17 @@
         (mf/with-memo [objects frame size delta]
           (vpc/prepare-objects frame size delta objects))
 
+        ;; all the shapes of the page in vbox-space, for the
+        ;; interactions that place an overlay: worked out on the first
+        ;; one, not each time the board changes (a prototype has
+        ;; hundreds)
         prepared-all
         (mf/with-memo [objects size delta]
-          (vpc/prepare-page-objects objects size delta))
+          (delay (vpc/prepare-page-objects objects size delta)))
+
+        prepared-base
+        (mf/with-memo [objects base size delta]
+          (some-> (get objects (:id base)) (vpc/prepare-shape size delta)))
 
         ;; nothing of an overlay sticks to the section: the root of one
         ;; that scrolls holds its sticky layers (see `dvs/view-shifts`)
@@ -453,7 +463,7 @@
      sheet-root
      (true? is-snapshot))
 
-    [:& (mf/provider shapes/base-frame-ctx) {:value (get prepared-all (:id base))}
+    [:& (mf/provider shapes/base-frame-ctx) {:value prepared-base}
      [:& (mf/provider shapes/frame-offset-ctx) {:value offset}
       [:*
        [:> wasm-layer* not-fixed-props]

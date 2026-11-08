@@ -229,6 +229,14 @@
         ids (->> (keys objects) (remove #(= % uuid/zero)))]
     (reduce update-fn objects ids)))
 
+(defn prepare-shape
+  "`shape` in vbox-space, as `prepare-page-objects` puts it."
+  [shape size delta]
+  (let [vector (-> (gpt/point (:x size) (:y size))
+                   (gpt/add delta)
+                   (gpt/negate))]
+    (gsh/transform-shape shape (ctm/move-modifiers vector))))
+
 (defn viewer-scale
   [size]
   (if (and (:base-width size) (pos? (:base-width size)))
