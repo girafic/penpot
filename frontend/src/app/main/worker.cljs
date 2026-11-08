@@ -24,44 +24,54 @@
                               :build-data cf/build-date
                               :version cf/version
                               :version-tag cf/version-tag}})
-    (set! instance worker)))
+    (set! instance worker)
+    worker))
+
+(defn- ensure-instance!
+  "The worker, started on its first use: pages that never ask it (the
+  login, the view mode, the settings) never load its code, which costs
+  a phone more than 100 MB."
+  []
+  (or instance
+      (when (exists? js/Worker)
+        (init!))))
 
 (defn ask!
   ([message]
-   (if instance
-     (uw/ask! instance message)
+   (if-let [worker (ensure-instance!)]
+     (uw/ask! worker message)
      (rx/empty)))
   ([message transfer]
-   (if instance
-     (uw/ask! instance message transfer)
+   (if-let [worker (ensure-instance!)]
+     (uw/ask! worker message transfer)
      (rx/empty))))
 
 (defn emit!
   ([message]
-   (if instance
-     (uw/emit! instance message)
+   (if-let [worker (ensure-instance!)]
+     (uw/emit! worker message)
      (rx/empty)))
   ([message transfer]
-   (if instance
-     (uw/emit! instance message transfer)
+   (if-let [worker (ensure-instance!)]
+     (uw/emit! worker message transfer)
      (rx/empty))))
 
 (defn ask-buffered!
   ([message]
-   (if instance
-     (uw/ask-buffered! instance message)
+   (if-let [worker (ensure-instance!)]
+     (uw/ask-buffered! worker message)
      (rx/empty)))
   ([message transfer]
-   (if instance
-     (uw/ask-buffered! instance message transfer)
+   (if-let [worker (ensure-instance!)]
+     (uw/ask-buffered! worker message transfer)
      (rx/empty))))
 
 (defn ask-many!
   ([message]
-   (if instance
-     (uw/ask-many! instance message)
+   (if-let [worker (ensure-instance!)]
+     (uw/ask-many! worker message)
      (rx/empty)))
   ([message transfer]
-   (if instance
-     (uw/ask-many! instance message transfer)
+   (if-let [worker (ensure-instance!)]
+     (uw/ask-many! worker message transfer)
      (rx/empty))))

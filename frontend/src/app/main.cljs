@@ -18,8 +18,6 @@
    [app.main.data.websocket :as ws]
    [app.main.data.workspace.mcp :as mcp]
    [app.main.errors :as errors]
-   [app.main.features :as feat]
-   [app.main.rasterizer :as thr]
    [app.main.store :as st]
    [app.main.ui :as ui]
    [app.main.ui.alert]
@@ -27,7 +25,6 @@
    [app.main.ui.css-cursors :as cur]
    [app.main.ui.delete-shared]
    [app.main.ui.routes :as rt]
-   [app.main.worker :as mw]
    [app.plugins :as plugins]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n]
@@ -64,14 +61,6 @@
   (reset! rendered-app ui/app)
   (mf/render! app-root (mf/element ui/app)))
 
-(defn- initialize-rasterizer
-  []
-  (ptk/reify ::initialize-rasterizer
-    ptk/EffectEvent
-    (effect [_ _ _]
-      ;; The rasterizer is used for the dashboard thumbnails
-      (thr/init!))))
-
 (defn initialize
   []
   (ptk/reify ::initialize
@@ -105,12 +94,7 @@
             (rx/map deref)
             (rx/filter dp/is-authenticated?)
             (rx/take 1)
-            (rx/map #(ws/initialize)))
-
-       (->> stream
-            (rx/filter (ptk/type? ::feat/initialize))
-            (rx/take 1)
-            (rx/map #(initialize-rasterizer)))))))
+            (rx/map #(ws/initialize)))))))
 
 (defn ^:export init
   [options]
@@ -133,7 +117,6 @@
     (do
       (some-> (unchecked-get options "defaultTranslations")
               (i18n/set-default-translations))
-      (mw/init!)
       (i18n/init)
       (cur/init-styles)
       (touch/init!)

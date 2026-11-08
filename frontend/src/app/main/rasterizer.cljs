@@ -23,6 +23,7 @@
    [cuerdas.core :as str]))
 
 (defonce ready? false)
+(defonce started? false)
 (defonce queue #js [])
 (defonce instance nil)
 (defonce msgbus (rx/subject))
@@ -75,9 +76,21 @@
       (str/replace styles public-uri rasterizer-uri)
       styles)))
 
+(declare init!)
+
+(defn- ensure-started!
+  "Creates the iframe on the first render: it loads a second copy of the
+  application code, which pages without thumbnails (the login, the view
+  mode, the settings) never need."
+  []
+  (when-not ^boolean started?
+    (set! started? true)
+    (init!)))
+
 (defn render
   "Renders an SVG"
   [{:keys [data styles width result] :as params}]
+  (ensure-started!)
   (let [styles  (replace-uris (d/nilv styles ""))
         result  (d/nilv result "blob")
         id      (dm/str (uuid/next))

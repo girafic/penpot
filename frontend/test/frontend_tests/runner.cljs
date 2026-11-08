@@ -94,7 +94,9 @@
    [frontend-tests.logic.wasm-modifiers-nil-id-test]
    [frontend-tests.logic.wasm-pixel-snap-test]
    [frontend-tests.main-errors-test]
+   [frontend-tests.main.rasterizer-test]
    [frontend-tests.main.refs-test]
+   [frontend-tests.main.worker-test]
    [frontend-tests.plugins.comments-test]
    [frontend-tests.plugins.context-shapes-test]
    [frontend-tests.plugins.events-test]
@@ -332,7 +334,9 @@
    'frontend-tests.logic.path-lifecycle-test
    'frontend-tests.logic.path-tools-test
    'frontend-tests.logic.pasting-in-containers-test
+   'frontend-tests.main.rasterizer-test
    'frontend-tests.main.refs-test
+   'frontend-tests.main.worker-test
    'frontend-tests.main-errors-test
    'frontend-tests.logic.sidebar-transform-coalescing-test
    'frontend-tests.logic.update-position-test
