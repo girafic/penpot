@@ -688,6 +688,16 @@
           (assoc-in  [:viewer-local :zoom] (or (device-zoom state) 1))
           (d/dissoc-in  [:viewer-local :zoom-type])))))
 
+(defn- with-zoom
+  "`state` with the view mode at `zoom`, unless that is as good as the
+  zoom it has: as the board changes, one a hair apart in size (402 px
+  and 401.9999999999998 px wide) would else draw all its layers again."
+  [state zoom]
+  (let [current (dm/get-in state [:viewer-local :zoom])]
+    (if (and (number? current) (mth/close? current zoom (* 1e-9 (abs zoom))))
+      state
+      (assoc-in state [:viewer-local :zoom] zoom))))
+
 (def zoom-to-fit
   (ptk/reify ::zoom-to-fit
     ptk/UpdateEvent
@@ -705,7 +715,7 @@
             hdiff   (/ (:height osize) (:height srect))
             minzoom (min wdiff hdiff)]
         (-> state
-            (assoc-in  [:viewer-local :zoom] (or (device-zoom state) minzoom))
+            (with-zoom (or (device-zoom state) minzoom))
             (assoc-in  [:viewer-local :zoom-type] :fit))))
 
     ptk/WatchEvent
@@ -732,7 +742,7 @@
 
             maxzoom (max wdiff hdiff)]
         (-> state
-            (assoc-in  [:viewer-local :zoom] (or (device-zoom state) maxzoom))
+            (with-zoom (or (device-zoom state) maxzoom))
             (assoc-in  [:viewer-local :zoom-type] :fill))))
 
     ptk/WatchEvent
@@ -755,7 +765,7 @@
         ;; to fit once it gets it (see `refit-zoom`)
         (cond-> (assoc-in state [:viewer-local :zoom-type] :width)
           (and (number? width) (pos? width) (number? vwidth) (pos? vwidth))
-          (assoc-in [:viewer-local :zoom] (or (device-zoom state) (/ vwidth width))))))
+          (with-zoom (or (device-zoom state) (/ vwidth width))))))
 
     ptk/WatchEvent
     (watch [_ _ _] (rx/of update-zoom-querystring))))

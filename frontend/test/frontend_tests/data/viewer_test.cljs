@@ -49,6 +49,19 @@
       (t/is (= (get-in result [:viewer-local :zoom-type]) :fit))
       (t/is (number? (get-in result [:viewer-local :zoom]))))))
 
+(t/deftest a-board-a-hair-apart-keeps-the-zoom
+  ;; boards of 402 px drawn by hand come out 401.9999999999998 px wide:
+  ;; a zoom off by 1e-15 drew all the layers of the next board again
+  (let [state  (fn [width zoom]
+                 (-> (base-state {:frames [{:selrect {:width width :height 874}}] :index 0})
+                     (assoc-in [:viewer-local :zoom] zoom)))
+        zoomed (fn [event width zoom] (get-in (ptk/update event (state width zoom)) [:viewer-local :zoom]))
+        zoom   (/ 1000 402)]
+    (t/is (identical? zoom (zoomed dv/zoom-to-width 401.9999999999998 zoom)) "as wide")
+    (t/is (identical? zoom (zoomed dv/zoom-to-fill 401.9999999999998 zoom)) "filled")
+    (t/is (= (/ 800 874) (zoomed dv/zoom-to-fit 401.9999999999998 zoom)) "fitted to its height, a real change")
+    (t/is (= (/ 1000 300) (zoomed dv/zoom-to-width 300 zoom)) "another width")))
+
 (t/deftest zoom-to-fill-clamps-out-of-bounds-index
   (t/testing "index exceeds frame count"
     (let [state (base-state {:frames [{:selrect {:width 100 :height 100}}]
