@@ -17,6 +17,13 @@
 (defonce viewport-ref (atom nil))
 (defonce viewport-brect (atom nil))
 
+(defonce hover-answered
+  ;; When the shapes under the pointer were found last (`performance.now`,
+  ;; see `setup-hover-shapes`) and whether the shape under it changed
+  ;; then: a finger waits for them (see
+  ;; `app.main.ui.workspace.viewport.touch`).
+  (volatile! [0 false]))
+
 (defn capture-pointer
   [event]
   (when-let [viewport @viewport-ref]

@@ -10116,6 +10116,30 @@ msgstr "Depth fade"
 msgid "workspace.animation.depth-blur"
 msgstr "Depth blur"
 
+#: src/app/main/ui/workspace/touch_bar.cljs
+msgid "workspace.touch.bar"
+msgstr "Keys for touch"
+
+#: src/app/main/ui/workspace/touch_bar.cljs
+msgid "workspace.touch.hold"
+msgstr "%s: held until tapped again"
+
+#: src/app/main/ui/workspace/touch_bar.cljs
+msgid "workspace.touch.panels"
+msgstr "Show or hide the panels"
+
+#: src/app/main/ui/workspace/touch_bar.cljs
+msgid "workspace.touch.pen-only"
+msgstr "Only the pen draws, a finger moves the canvas"
+
+#: src/app/main/ui/workspace/touch_bar.cljs
+msgid "workspace.touch.redo"
+msgstr "Redo"
+
+#: src/app/main/ui/workspace/touch_bar.cljs
+msgid "workspace.touch.undo"
+msgstr "Undo"
+
 #: src/app/main/ui/workspace/viewport/tilt_handles.cljs
 msgid "workspace.viewport.tilt-handle.x"
 msgstr "3D rotation X: drag up and down, with Shift in steps of 15°"

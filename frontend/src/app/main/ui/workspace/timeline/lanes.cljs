@@ -22,7 +22,8 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
-   [app.main.ui.workspace.timeline.easing :as easing]))
+   [app.main.ui.workspace.timeline.easing :as easing]
+   [app.util.touch :as touch]))
 
 ;; METRICS, in step with timeline.scss
 
@@ -223,7 +224,8 @@
   "The keyframe of `keyframes` under `x`, `y` (the last drawn, on top), in
   a row with its middle at `cy`."
   [geo keyframes x y cy]
-  (let [reach (inc keyframe-radius)]
+  ;; wider for a finger (see `touch/grab-scale`)
+  (let [reach (* (inc keyframe-radius) (touch/grab-scale))]
     (d/seek #(<= (+ (mth/abs (- x (time->x geo (:time %))))
                     (mth/abs (- y cy)))
                  reach)

@@ -30,6 +30,7 @@
    [app.main.ui.workspace.shapes.frame.dynamic-modifiers :as sfd]
    [app.main.ui.workspace.viewport.actions :as actions]
    [app.main.ui.workspace.viewport.utils :as utils]
+   [app.main.ui.workspace.viewport.viewport-ref :as uwvv]
    [app.main.worker :as mw]
    [app.render-wasm.api :as wasm.api]
    [app.util.debug :as dbg]
@@ -383,6 +384,8 @@
                       (filter #(or (empty? focus) (cpf/is-in-focus? objects focus %)))
                       (first)
                       (get objects)))]
+           (vreset! uwvv/hover-answered [(js/performance.now)
+                                         (not= (:id @hover) (:id hover-shape))])
            (reset! hover hover-shape)
            (reset! measure-hover measure-hover-shape)
            ;; Skip hover-ids update during drag

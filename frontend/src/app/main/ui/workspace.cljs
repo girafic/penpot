@@ -47,6 +47,7 @@
    [app.main.ui.workspace.tokens.remapping-modal]
    [app.main.ui.workspace.tokens.settings]
    [app.main.ui.workspace.tokens.themes.create-modal]
+   [app.main.ui.workspace.touch-bar :refer [touch-bar*]]
    [app.main.ui.workspace.viewport :refer [viewport*]]
    [app.main.ui.workspace.webgl-unavailable-modal]
    [app.util.debug :as dbg]
@@ -168,7 +169,11 @@
          :layout (cond-> layout pip? (conj :hide-ui))
          :palete-size
          (when (and (or colorpalette? textpalette?) (not hide-ui?))
-           @palete-size)}]]]
+           @palete-size)}]
+
+       ;; the keys a finger has no keyboard for, above the palette
+       [:> touch-bar* {:palette-size (when (and (or colorpalette? textpalette?) (not hide-ui?))
+                                       @palete-size)}]]]
 
      (when ^boolean timeline?
        [:> timeline*])

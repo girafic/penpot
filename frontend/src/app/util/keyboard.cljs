@@ -51,21 +51,35 @@
     (fn [^KeyboardEvent e]
       (= (str/upper (.-key e)) key))))
 
+(defonce ^:private latched
+  (volatile! #{}))
+
+(defn latch!
+  "The modifier `key` (`:shift`, `:alt`, `:ctrl` or `:meta`) held as by
+  its key when `on?`, without a keyboard (see the touch bar of the
+  workspace): every event counts it pressed until it is let go."
+  [key on?]
+  (vswap! latched (if on? conj disj) key))
+
+(defn latched?
+  [key]
+  (contains? @latched key))
+
 (defn ^boolean alt?
   [^js event]
-  (.-altKey event))
+  (or (true? (.-altKey event)) (latched? :alt)))
 
 (defn ^boolean ctrl?
   [^js event]
-  (.-ctrlKey event))
+  (or (true? (.-ctrlKey event)) (latched? :ctrl)))
 
 (defn ^boolean meta?
   [^js event]
-  (.-metaKey event))
+  (or (true? (.-metaKey event)) (latched? :meta)))
 
 (defn ^boolean shift?
   [^js event]
-  (.-shiftKey event))
+  (or (true? (.-shiftKey event)) (latched? :shift)))
 
 (defn ^boolean mod?
   [^js event]

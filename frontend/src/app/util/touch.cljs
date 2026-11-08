@@ -121,6 +121,19 @@
   []
   @touch-ui)
 
+(defn keyboard-lift
+  "How far (px) the canvas moves up for what is edited, its bottom at
+  `bottom`, to show above a keyboard that leaves the page visible down
+  to `visible-bottom`, with `margin` below it; 0 when it shows."
+  [bottom visible-bottom margin]
+  (max 0 (- (+ bottom margin) visible-bottom)))
+
+(defn grab-scale
+  "How much larger the handles of the canvas are to grab: a finger needs
+  more room than a mouse."
+  []
+  (if @touch-ui 2.5 1))
+
 (defn- mark-touch-ui!
   []
   (dom/add-class! (.-documentElement ^js g/document) "touch-ui")
@@ -138,10 +151,110 @@
                   (swap! storage/global assoc ::pen-seen true)))
     nil))
 
+;; --- A finger held: the context menu
+
+(def long-press-ms
+  "How long a finger stays still for the context menu."
+  500)
+
+(def ^:private press-slop-px 8)
+
+(def ^:private lift-ms
+  "How long after the finger held lifts what the browser sends for it,
+  a click and its mouse, is no click."
+  700)
+
+(defonce ^:private press
+  (volatile! nil))
+
+(defonce ^:private swallow
+  (volatile! {:armed false :until 0}))
+
+(defn menu-opened!
+  "A finger held opened a context menu: as it lifts, the browser clicks
+  where it was, on the menu now; that click is none."
+  []
+  (vswap! swallow assoc :armed true))
+
+(defn- cancel-press!
+  []
+  (when-let [timer (:timer @press)]
+    (js/clearTimeout timer))
+  (vreset! press nil))
+
+(defn- open-menu!
+  "The context menu of what the finger holds, as a right click opens it:
+  Safari opens none for a finger."
+  []
+  (when-let [{:keys [^js target x y]} @press]
+    (vswap! press assoc :timer nil :opened true)
+    (menu-opened!)
+    (.dispatchEvent target (js/MouseEvent. "contextmenu"
+                                           #js {:bubbles true :cancelable true
+                                                :clientX x :clientY y
+                                                :button 2 :buttons 2
+                                                :view g/global}))))
+
+(defn- on-press-down
+  [^js event]
+  (cancel-press!)
+  (vreset! swallow {:armed false :until 0})
+  (when (= "touch" (.-pointerType event))
+    (let [target (.-target event)]
+      ;; the canvas holds its fingers itself (see
+      ;; `app.main.ui.workspace.viewport.touch`)
+      (when-not (some-> target (.closest ".viewport-controls"))
+        (vreset! press {:id (.-pointerId event)
+                        :target target
+                        :x (.-clientX event)
+                        :y (.-clientY event)
+                        :timer (js/setTimeout open-menu! long-press-ms)})))))
+
+(defn- on-press-move
+  [^js event]
+  (when-let [{:keys [id x y opened]} @press]
+    (when (and (= id (.-pointerId event)) (not opened)
+               (> (js/Math.hypot (- (.-clientX event) x) (- (.-clientY event) y)) press-slop-px))
+      (cancel-press!))))
+
+(defn- on-press-up
+  [^js event]
+  (when (= "touch" (.-pointerType event))
+    (cancel-press!)
+    (when (:armed @swallow)
+      (vreset! swallow {:armed false :until (+ (js/Date.now) lift-ms)}))))
+
+(defn- on-lift-click
+  "A click, or its mouse, the browser sends for the finger that held a
+  menu open: swallowed."
+  [^js event]
+  (when (< (js/Date.now) (:until @swallow))
+    (.preventDefault event)
+    (.stopPropagation event)))
+
+(defn- on-press-menu
+  "A menu the browser opens for the finger itself: the press opens none
+  then, or, once it opened one, the browser's comes twice."
+  [^js event]
+  (when (.-isTrusted event)
+    (cond
+      (:opened @press)   (do (.preventDefault event)
+                             (.stopPropagation event))
+      (some? @press)     (cancel-press!))))
+
 (defn init!
-  "Notes the first finger or pen, and links the web app tags."
+  "Notes the first finger or pen, links the web app tags, and opens the
+  context menu for a finger held still."
   []
   (when @touch-ui
     (dom/add-class! (.-documentElement ^js g/document) "touch-ui"))
   (link-web-app!)
-  (.addEventListener g/global "pointerdown" on-pointer-down #js {:capture true :passive true}))
+  (let [opts #js {:capture true :passive true}]
+    (.addEventListener g/global "pointerdown" on-pointer-down opts)
+    (.addEventListener g/global "pointerdown" on-press-down opts)
+    (.addEventListener g/global "pointermove" on-press-move opts)
+    (.addEventListener g/global "pointerup" on-press-up opts)
+    (.addEventListener g/global "pointercancel" cancel-press! opts))
+  (doseq [type ["mousedown" "mouseup" "click"]]
+    (.addEventListener g/global type on-lift-click #js {:capture true}))
+  (.addEventListener g/global "contextmenu" on-press-menu #js {:capture true}))

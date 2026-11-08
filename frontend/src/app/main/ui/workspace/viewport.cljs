@@ -241,8 +241,9 @@
 
         ;; fingers: two move and zoom the canvas, a finger alone gets its
         ;; tool a moment later (see `vtouch/use-touch-handlers`)
-        [on-pointer-down on-pointer-move on-pointer-up on-pointer-cancel on-click]
-        (vtouch/use-touch-handlers on-pointer-down on-pointer-move on-pointer-up on-click)
+        [on-pointer-down on-pointer-move on-pointer-up on-pointer-cancel on-click on-context-menu
+         on-pointer-down-capture]
+        (vtouch/use-touch-handlers on-pointer-down on-pointer-move on-pointer-up on-click on-context-menu)
         on-move-selected  (actions/on-move-selected hover hover-ids selected space? z? read-only?)
         on-menu-selected  (actions/on-menu-selected hover hover-ids selected read-only?)
 
@@ -474,6 +475,7 @@
        :on-drag-end      on-drag-end
        :on-drop          on-drop
        :on-pointer-down  on-pointer-down
+       :on-pointer-down-capture on-pointer-down-capture
        :on-pointer-enter on-pointer-enter
        :on-pointer-leave on-pointer-leave
        :on-pointer-move  on-pointer-move

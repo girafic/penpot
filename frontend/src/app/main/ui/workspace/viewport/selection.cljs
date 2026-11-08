@@ -31,6 +31,7 @@
    [app.util.debug :as dbg]
    [app.util.dom :as dom]
    [app.util.object :as obj]
+   [app.util.touch :as touch]
    [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
@@ -195,7 +196,7 @@
 (mf/defc rotation-handler
   {::mf/wrap-props false}
   [{:keys [cx cy transform position rotation zoom on-rotate] :as props}]
-  (let [size    (/ rotation-handler-size zoom)
+  (let [size    (/ (* rotation-handler-size (touch/grab-scale)) zoom)
         delta-x (if (or (= position :top-left)
                         (= position :bottom-left))
                   size
@@ -249,7 +250,7 @@
                :cy cy'}]
 
      (if (= align :outside)
-       (let [resize-point-circle-radius (/ resize-point-circle-radius zoom)
+       (let [resize-point-circle-radius (/ (* resize-point-circle-radius (touch/grab-scale)) zoom)
              offset-x (if (or (= position :top-right)
                               (= position :bottom-right))
                         0
@@ -276,7 +277,7 @@
                  :on-pointer-down on-resize}])
 
        [:circle {:on-pointer-down on-resize
-                 :r (/ resize-point-circle-radius zoom)
+                 :r (/ (* resize-point-circle-radius (touch/grab-scale)) zoom)
                  :data-position (name position)
                  :cx cx'
                  :cy cy'
@@ -290,7 +291,7 @@
 (mf/defc resize-side-handler
   {::mf/wrap-props false}
   [{:keys [x y length align angle zoom position rotation transform on-resize color show-handler scale-text shape-id shape-type]}]
-  (let [height        (/ resize-side-height zoom)
+  (let [height        (/ (* resize-side-height (touch/grab-scale)) zoom)
         offset-y      (if (= align :outside) (- height) (- (/ height 2)))
         target-y      (+ y offset-y)
         transform-str (dm/str (gmt/multiply transform (gmt/rotate-matrix angle (gpt/point x y))))

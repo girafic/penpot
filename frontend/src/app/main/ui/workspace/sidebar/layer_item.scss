@@ -328,3 +328,9 @@
   min-height: 1px;
   pointer-events: none;
 }
+
+// a finger needs taller rows (see `touch/touch-ui?`)
+:global(.touch-ui) .element-list-body,
+:global(.touch-ui) .element-actions {
+  block-size: $sz-40;
+}

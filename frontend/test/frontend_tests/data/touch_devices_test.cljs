@@ -17,7 +17,9 @@
    [app.main.data.viewer.follow :as dvf]
    [app.main.data.workspace.phone :as dwph]
    [app.main.ui.workspace.phone-link :as phone-link]
+   [app.main.ui.workspace.touch-bar :as touch-bar]
    [app.main.ui.workspace.viewport.touch :as vtouch]
+   [app.util.keyboard :as kbd]
    [app.util.touch :as touch]
    [cljs.test :as t :include-macros true]
    [potok.v2.core :as ptk]))
@@ -161,3 +163,21 @@
       (finally
         (reset! touch/pen-seen pen)
         (reset! touch/fingers-pan pan)))))
+
+(t/deftest keyboard-room
+  (t/is (= 124 (touch/keyboard-lift 700 600 24)) "under the keyboard: up by as much, and a margin")
+  (t/is (= 0 (touch/keyboard-lift 500 600 24)) "above it: it stays"))
+
+(t/deftest touch-keys
+  (t/is (= [:shift :alt :meta] (map :latch (touch-bar/modifier-keys true))) "a Mac or an iPad")
+  (t/is (= ["⇧" "⌥" "⌘"] (map :label (touch-bar/modifier-keys true))))
+  (t/is (= [:shift :alt :ctrl] (map :latch (touch-bar/modifier-keys false))) "the others")
+  (try
+    (kbd/latch! :shift true)
+    (t/is (true? (kbd/shift? #js {})) "held from the bar, an event counts it pressed")
+    (t/is (false? (kbd/alt? #js {})))
+    (kbd/latch! :shift false)
+    (t/is (false? (kbd/shift? #js {})) "let go")
+    (t/is (true? (kbd/shift? #js {:shiftKey true})) "its key still counts")
+    (finally
+      (kbd/latch! :shift false))))

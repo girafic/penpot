@@ -21,6 +21,7 @@
    [app.main.ui.workspace.viewport.viewport-ref :as uwvv]
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [goog.events :as events]
    [rumext.v2 :as mf]))
@@ -147,7 +148,7 @@
                            :else white-color)}}]
      [:circle {:cx x
                :cy y
-               :r (/ point-radius-active-area zoom)
+               :r (/ (* point-radius-active-area (touch/grab-scale)) zoom)
                :on-pointer-down on-pointer-down
                :on-pointer-enter on-enter
                :on-pointer-leave on-leave
@@ -233,7 +234,7 @@
                            :else white-color)}}]
      [:circle {:cx x
                :cy y
-               :r (/ point-radius-active-area zoom)
+               :r (/ (* point-radius-active-area (touch/grab-scale)) zoom)
                :on-pointer-down on-pointer-down
                :on-pointer-enter on-enter
                :on-pointer-leave on-leave
