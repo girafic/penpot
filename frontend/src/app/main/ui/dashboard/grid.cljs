@@ -42,6 +42,7 @@
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [app.util.timers :as ts]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
@@ -84,6 +85,14 @@
        (rx/mapcat thr/render)
        (rx/mapcat (partial persist-thumbnail file-id revn))))
 
+(defn- render-thumbnail?
+  "Whether this client draws the missing thumbnail of a file. A phone
+  does not: drawing loads the whole file and starts the worker or the
+  rasterizer, more memory than iOS gives the page; the file keeps its
+  background until a computer draws the thumbnail."
+  [can-edit visible? thumbnail-id phone?]
+  (and can-edit visible? (not thumbnail-id) (not phone?)))
+
 (mf/defc grid-item-thumbnail*
   {::mf/private true}
   [{:keys [can-edit file can-restore]}]
@@ -94,10 +103,11 @@
         bg-color     (dm/get-in file [:data :background])
 
         container    (mf/use-ref)
-        visible?     (h/use-visible container :once? true)]
+        visible?     (h/use-visible container :once? true)
+        phone?       (mf/with-memo [] (touch/phone?))]
 
-    (mf/with-effect [file-id revn visible? thumbnail-id]
-      (when (and can-edit visible? (not thumbnail-id))
+    (mf/with-effect [file-id revn visible? thumbnail-id phone?]
+      (when (render-thumbnail? can-edit visible? thumbnail-id phone?)
         (let [subscription
               (->> (ask-for-thumbnail file-id revn)
                    (rx/subs! (fn [thumbnail-id]
@@ -120,7 +130,7 @@
                 :src (cf/resolve-media thumbnail-id)
                 :loading "lazy"
                 :decoding "async"}]
-         (when can-edit
+         (when (and can-edit (not phone?))
            [:> loader* {:class (stl/css :grid-loader)
                         :draggable (dm/str can-edit)
                         :overlay true

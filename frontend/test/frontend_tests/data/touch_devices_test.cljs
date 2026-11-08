@@ -8,7 +8,7 @@
   "Penpot on phones and tablets: what kind of screen it is, the view
   mode as wide as a phone, its link from the workspace, the view mode
   that follows the board selected in the workspace, and fingers on the
-  canvas."
+  canvas, and a dashboard light enough for a phone."
   (:require
    [app.common.geom.point :as gpt]
    [app.common.time :as ct]
@@ -16,6 +16,7 @@
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.follow :as dvf]
    [app.main.data.workspace.phone :as dwph]
+   [app.main.ui.dashboard.grid :as grid]
    [app.main.ui.workspace.phone-link :as phone-link]
    [app.main.ui.workspace.touch-bar :as touch-bar]
    [app.main.ui.workspace.viewport.touch :as vtouch]
@@ -181,3 +182,12 @@
     (t/is (true? (kbd/shift? #js {:shiftKey true})) "its key still counts")
     (finally
       (kbd/latch! :shift false))))
+
+(def ^:private render-thumbnail? @#'grid/render-thumbnail?)
+
+(t/deftest dashboard-thumbnails-on-a-phone
+  (t/is (true? (render-thumbnail? true true nil false)) "a computer draws a missing thumbnail")
+  (t/is (false? (render-thumbnail? true true nil true)) "a phone does not")
+  (t/is (false? (render-thumbnail? true true (uuid/next) false)) "nor anyone when it exists")
+  (t/is (false? (render-thumbnail? false true nil false)) "nor a viewer of the team")
+  (t/is (false? (render-thumbnail? true false nil false)) "nor before the file is in sight"))
