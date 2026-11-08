@@ -85,7 +85,9 @@
     {:fn-invoke-direct true
      :optimizations #shadow/env ["PENPOT_BUILD_OPTIMIZATIONS" :as :keyword :default :advanced]
      :source-map true
-     :pseudo-names true
+     ;; Readable names made shared.js 25 MB instead of 7 MB and cost a
+     ;; phone 100-160 MB; stack traces map back through the source maps.
+     :pseudo-names false
      :elide-asserts true
      :anon-fn-naming-policy :off
      :cross-chunk-method-motion false
