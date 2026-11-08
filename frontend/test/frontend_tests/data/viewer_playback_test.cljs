@@ -308,6 +308,21 @@
                         [:viewer-local :timeline :target]))
           "a pause leaves no marker to go on from")))
 
+(t/deftest a-board-plays-from-the-start-of-its-animation
+  ;; it plays once WASM drew it, in that frame, stamped with the time it
+  ;; began: its whole length skipped the start of the animation
+  (let [{:keys [state board-id]} (marker-board {:time 0})
+        raf (atom [])
+        out (atom [])]
+    (with-redefs [ts/raf        (fn [f] (swap! raf conj f) (count @raf))
+                  ts/cancel-af! (fn [_] nil)]
+      (let [sub (rx/subs! #(swap! out conj %) (ptk/watch (dv/play-timeline board-id) state (rx/subject)))]
+        (doseq [now [0 400 416 516]]
+          ((peek @raf) now))
+        (rx/dispose! sub)))
+    (t/is (= [16 32 132] (mapv #(get-in (ptk/update % state) [:viewer-local :timeline :time]) @out))
+          "a frame on (in whole ms), then as the time passes")))
+
 (t/deftest a-jump-over-several-markers-plays-faster
   (let [{:keys [state board-id]} (marker-board {:time 0})
         tl (-> (get-in state [:viewer :pages]) vals first :timelines vals first)

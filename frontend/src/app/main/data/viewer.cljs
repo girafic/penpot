@@ -1333,24 +1333,36 @@
   it goes on where it was instead of jumping."
   500)
 
+(def ^:private max-first-step
+  "The most playback moves on in its first frame, in ms: it starts as a
+  board shows, in a frame that drew the board, stamped with the time
+  that frame began; its whole length would skip the start of the
+  animation."
+  (/ 1000 60))
+
 (defn frame-times
   "The time played from `start` (ms) at each animation frame: it keeps to
   the time that passes, however long the frames take, so a slow frame is
   skipped rather than the animation slowed down. The time passes by the
   frames, or by `clock` (ms, or nil while it has none), as while sound
-  plays (see `audio/now-ms`); `clamp?` keeps a step to `max-frame-gap`."
+  plays (see `audio/now-ms`); `clamp?` keeps a step to `max-frame-gap`,
+  `first-step` (ms, or nil) the first one."
   ([start]
-   (frame-times start nil true))
-  ([start clock clamp?]
+   (frame-times start nil true nil))
+  ([start clock clamp? first-step]
    (rx/create
     (fn [subs]
       (let [frame  (volatile! nil)
             before (volatile! nil)
+            moved? (volatile! false)
             time   (volatile! start)
             tick   (fn tick [frame-now]
                      (let [now (if (some? clock) (clock) frame-now)]
                        (when-let [then (when (some? now) @before)]
-                         (vswap! time + (cond-> (max 0 (- now then)) clamp? (min max-frame-gap)))
+                         (vswap! time + (cond-> (max 0 (- now then))
+                                          clamp? (min max-frame-gap)
+                                          (and (some? first-step) (not @moved?)) (min first-step)))
+                         (vreset! moved? true)
                          (rx/push! subs @time))
                        (vreset! before now)
                        (vreset! frame (ts/raf tick))))]
@@ -1494,7 +1506,8 @@
                               (let [start (:clock-start copy 0)]
                                 (follow main-id (cltl/at-pace copy) (- t start) (and on? (>= t start)))))))]
             (rx/concat
-             (->> (frame-times start (when sound? audio/now-ms) (not sound?))
+             (->> (frame-times start (when sound? audio/now-ms) (not sound?)
+                               (when-not sound? max-first-step))
                   (rx/take-while (fn [t] (not (cltl/view-playback-ended? timeline (vals copies) t))))
                   (rx/tap sound!)
                   (rx/take-until stopper)
