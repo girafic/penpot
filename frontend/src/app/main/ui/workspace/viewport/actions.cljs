@@ -7,6 +7,7 @@
 (ns app.main.ui.workspace.viewport.actions
   (:require
    [app.common.data :as d]
+   [app.common.exceptions :as ex]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
@@ -73,9 +74,12 @@
        ;; Capture mouse pointer to detect the movements even if cursor
        ;; leaves the viewport or the browser itself
        ;; https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture
-       (if editor
-         (.setPointerCapture editor (.-pointerId event))
-         (.setPointerCapture target (.-pointerId event))))
+       ;; a tap of a finger comes as it ends (see `vtouch/use-touch-handlers`):
+       ;; its pointer may be gone then
+       (ex/ignoring
+        (if editor
+          (.setPointerCapture editor (.-pointerId event))
+          (.setPointerCapture target (.-pointerId event)))))
 
      (when (or (dom/class? (dom/get-target event) "viewport-controls")
                (dom/class? (dom/get-target event) "viewport-selrect")
@@ -322,7 +326,7 @@
 
      (let [target (dom/get-target event)]
        ;; Release pointer on mouse up
-       (.releasePointerCapture target (.-pointerId event)))
+       (ex/ignoring (.releasePointerCapture target (.-pointerId event))))
 
      (let [native-event (dom/event->native-event event)
            ctrl? (kbd/ctrl? native-event)

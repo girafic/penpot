@@ -100,6 +100,21 @@
 (defonce pen-seen
   (l/atom (boolean (get storage/global ::pen-seen))))
 
+(defonce fingers-pan
+  (l/atom (not (false? (get storage/global ::fingers-pan)))))
+
+(defn fingers-pan?
+  "Whether a finger alone moves the canvas: once a pen was used, and
+  until it is turned off (see `set-fingers-pan!`), only the pen draws
+  and selects."
+  []
+  (and @pen-seen @fingers-pan))
+
+(defn set-fingers-pan!
+  [on?]
+  (reset! fingers-pan (boolean on?))
+  (swap! storage/global assoc ::fingers-pan (boolean on?)))
+
 (defn touch-ui?
   "Whether a finger or a pen was used on this device: Penpot shows what
   helps them then (bigger targets, the touch bar)."

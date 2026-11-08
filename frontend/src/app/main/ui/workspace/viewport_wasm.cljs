@@ -58,6 +58,7 @@
    [app.main.ui.workspace.viewport.tilt-handles :refer [tilt-handles*]]
    [app.main.ui.workspace.viewport.top-bar :refer [edition-bars*
                                                    view-only-bar*]]
+   [app.main.ui.workspace.viewport.touch :as vtouch]
    [app.main.ui.workspace.viewport.utils :as utils]
    [app.main.ui.workspace.viewport.viewport-ref :as vp-ref :refer [create-viewport-ref]]
    [app.main.ui.workspace.viewport.widgets :as widgets]
@@ -381,6 +382,11 @@
         on-pointer-enter  (actions/on-pointer-enter in-viewport-ref)
         on-pointer-leave  (actions/on-pointer-leave in-viewport-ref)
         on-pointer-move   (actions/on-pointer-move move-stream)
+
+        ;; fingers: two move and zoom the canvas, a finger alone gets its
+        ;; tool a moment later (see `vtouch/use-touch-handlers`)
+        [on-pointer-down on-pointer-move on-pointer-up on-pointer-cancel on-click]
+        (vtouch/use-touch-handlers on-pointer-down on-pointer-move on-pointer-up on-click)
         on-move-selected  (actions/on-move-selected hover hover-ids selected space? z? read-only?)
         on-menu-selected  (actions/on-menu-selected hover hover-ids selected read-only?)
 
@@ -812,7 +818,8 @@
        :on-pointer-enter on-pointer-enter
        :on-pointer-leave on-pointer-leave
        :on-pointer-move  on-pointer-move
-       :on-pointer-up    on-pointer-up}
+       :on-pointer-up    on-pointer-up
+       :on-pointer-cancel on-pointer-cancel}
 
       [:defs
        ;; This clip is so the handlers are not over the rulers
