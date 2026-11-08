@@ -42,13 +42,23 @@
   enough to click what moves, seldom enough to keep playback smooth."
   100)
 
+(def ^:private hotspot-settle
+  "On a phone, ms an animation stands still before the hotspots follow
+  it: posing all the shapes of a board takes a phone a frame or two,
+  which ten times a second made the animation stutter."
+  150)
+
 (defn- use-posed-modifiers
   "The modif-tree the ref `modifiers-ref` (of a delay, see
   `interactions/viewport*`) holds, followed at most every
-  `hotspot-interval` ms, the last one always; nil without `follow?`."
+  `hotspot-interval` ms, the last one always; on a phone only once it
+  stood still `hotspot-settle` ms, the hotspots where the layers rest
+  meanwhile; nil without `follow?`."
   [modifiers-ref follow?]
-  (let [state* (mf/use-state #(when follow? (some-> modifiers-ref deref force)))]
-    (mf/with-effect [modifiers-ref follow?]
+  (let [settle? (mf/with-memo [] (touch/phone?))
+        state*  (mf/use-state #(when (and follow? (not settle?))
+                                 (some-> modifiers-ref deref force)))]
+    (mf/with-effect [modifiers-ref follow? settle?]
       (when (and follow? (some? modifiers-ref))
         (let [key     (js/Symbol "hotspots")
               last-at (volatile! 0)
@@ -56,14 +66,19 @@
               take!   (fn []
                         (vreset! last-at (js/Date.now))
                         (vreset! timer nil)
-                        (reset! state* (force @modifiers-ref)))]
-          (take!)
+                        (reset! state* (force @modifiers-ref)))
+              settle! (fn []
+                        (some-> @timer js/clearTimeout)
+                        (vreset! timer (js/setTimeout take! hotspot-settle)))]
+          (if settle? (settle!) (take!))
           (add-watch modifiers-ref key
                      (fn [_ _ _ _]
-                       (let [wait (- hotspot-interval (- (js/Date.now) @last-at))]
-                         (cond
-                           (not (pos? wait)) (take!)
-                           (nil? @timer)     (vreset! timer (js/setTimeout take! wait))))))
+                       (if settle?
+                         (settle!)
+                         (let [wait (- hotspot-interval (- (js/Date.now) @last-at))]
+                           (cond
+                             (not (pos? wait)) (take!)
+                             (nil? @timer)     (vreset! timer (js/setTimeout take! wait)))))))
           (fn []
             (remove-watch modifiers-ref key)
             (some-> @timer js/clearTimeout)))))
