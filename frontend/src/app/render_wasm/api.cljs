@@ -2426,15 +2426,17 @@
 (defn resize-offscreen-canvas!
   "Resize a persistent OffscreenCanvas to new physical-pixel dimensions and
   update the WASM render surfaces accordingly (via `_resize_viewbox`). The
-  design state (shape pool) is preserved so `set-objects` is not needed again."
-  [canvas new-physical-w new-physical-h]
-  (when (wasm/live?)
-    (let [dpr     (get-dpr)
-          [pw ph] (webgl/clamp-physical-size new-physical-w new-physical-h)]
-      (set! (.-width canvas) pw)
-      (set! (.-height canvas) ph)
-      (set-render-options! dpr)
-      (resize-viewbox (/ new-physical-w dpr) (/ new-physical-h dpr)))))
+  design state (shape pool) is preserved so `set-objects` is not needed again.
+  `dpr`, the pixel ratio of the picture (`get-dpr` by default)."
+  ([canvas new-physical-w new-physical-h]
+   (resize-offscreen-canvas! canvas new-physical-w new-physical-h (get-dpr)))
+  ([canvas new-physical-w new-physical-h dpr]
+   (when (wasm/live?)
+     (let [[pw ph] (webgl/clamp-physical-size new-physical-w new-physical-h)]
+       (set! (.-width canvas) pw)
+       (set! (.-height canvas) ph)
+       (set-render-options! dpr)
+       (resize-viewbox (/ new-physical-w dpr) (/ new-physical-h dpr))))))
 
 (defn resize-canvas!
   "Sizes the canvas drawing buffer, the WASM render surface and the DPR from a
@@ -2510,14 +2512,13 @@
 (defonce ^:private webgl-context-restored-listener
   (fn [event] (on-webgl-context-restored event)))
 
-(defn init-canvas-context
-  [canvas]
+(defn- init-canvas-context*
+  [canvas dpr]
   (if-not (wasm/module-ready?)
     false
     (let [flags      (debug-flags)
           context-id (if (dbg/enabled? :wasm-gl-context-init-error) "fail" "webgl2")
           browser    (sr/translate-browser cf/browser)
-          dpr        (get-dpr)
           [css-w css-h] (webgl/canvas-css-size canvas dpr)
           ;; Avoid 0×0 Skia/GL surfaces (crashes on some browsers).
           css-w      (mth/max 1 css-w)
@@ -2563,6 +2564,14 @@
             (resize-viewbox css-w css-h))))
 
       context-init?)))
+
+(defn init-canvas-context
+  "Starts WASM rendering on `canvas` at the pixel ratio `dpr` (`get-dpr`
+  by default)."
+  ([canvas]
+   (init-canvas-context canvas (get-dpr)))
+  ([canvas dpr]
+   (init-canvas-context* canvas dpr)))
 
 (defn clear-canvas
   ([]

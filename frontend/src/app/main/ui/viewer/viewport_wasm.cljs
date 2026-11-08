@@ -17,17 +17,25 @@
    [app.main.ui.viewer.shapes :as shapes]
    [app.main.ui.viewer.viewport-common :as vpc]
    [app.render-wasm.api :as wasm.api]
+   [app.util.touch :as touch]
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
 
 (defn- canvas-dimensions
-  "Physical canvas pixels (CSS layout size × DPR), matching the workspace WASM path."
+  "Physical canvas pixels (CSS layout size × DPR), matching the workspace
+  WASM path, and the DPR, lower on a phone for a board taller than the
+  screen (see `rwv/canvas-dpr`)."
   [scale size]
   (let [css-w (js/Math.round (* scale (:base-width size)))
         css-h (js/Math.round (* scale (:base-height size)))
-        dpr   (wasm.api/get-dpr)]
+        ;; the screen, not the window: Safari's bars come and go as the
+        ;; page scrolls, and each change would draw the board again
+        dpr   (rwv/canvas-dpr (wasm.api/get-dpr) css-w css-h
+                              (.-width js/screen) (.-height js/screen)
+                              (touch/phone?))]
     {:width  (js/Math.round (* css-w dpr))
-     :height (js/Math.round (* css-h dpr))}))
+     :height (js/Math.round (* css-h dpr))
+     :dpr    dpr}))
 
 (def ^:private hotspot-interval
   "How often, ms, the hotspots follow the animation as it plays: often
@@ -176,7 +184,7 @@
   [{:keys [canvas-ref pass scale size vbox
            posed prepared-all prepared-frame class shape-filter
            objects frame scroll-ref scrolls fixed-layer pins sheet-root]}]
-  (let [{:keys [width height]} (canvas-dimensions scale size)]
+  (let [{:keys [width height dpr]} (canvas-dimensions scale size)]
     [:div {:data-scroll-layer scrolls
            :data-fixed-layer fixed-layer
            :style {:position "absolute"
@@ -186,6 +194,7 @@
                    :height (:height size)}}
      [:canvas {:ref canvas-ref
                :data-pass pass
+               :data-dpr dpr
                :width width
                :height height
                :style {:width "100%"

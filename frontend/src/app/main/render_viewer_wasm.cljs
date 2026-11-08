@@ -215,6 +215,26 @@
    (fn []
      (render-to-canvas* objects canvas bounds scale object-id on-render))))
 
+(defn canvas-dpr
+  "The pixel ratio of a canvas of the view mode `css-w`×`css-h` px on a
+  screen `screen-w`×`screen-h` px of pixel ratio `dpr`. On a phone
+  (`phone?`) a canvas gets no more pixels than the screen, at a ratio of
+  at least 1: a board taller than the screen is drawn whole for the page
+  to scroll, and one of six screens at ratio 3 took about 1 GB of the GPU
+  memory iOS gives Safari."
+  [dpr css-w css-h screen-w screen-h phone?]
+  (let [area   (* css-w css-h)
+        screen (* screen-w screen-h)]
+    (if (and phone? (pos? screen) (> area screen))
+      (min dpr (max 1 (* dpr (js/Math.sqrt (/ screen area)))))
+      dpr)))
+
+(defn- pixel-ratio
+  "The pixel ratio `canvas` was sized for (`data-dpr`, see `canvas-dpr`)."
+  [^js canvas]
+  (let [dpr (js/parseFloat (.. canvas -dataset -dpr))]
+    (if (and (number? dpr) (pos? dpr)) dpr (wasm.api/get-dpr))))
+
 (defn- render-viewer-frame*
   "Render the board `object-id` of `page-objects` into `canvas`. The
   shapes load into WASM once per page; `modifiers`, an animation at a
@@ -232,7 +252,7 @@
                           (resolve nil))
            vis-w        (.-width canvas)
            vis-h        (.-height canvas)
-           dpr          (wasm.api/get-dpr)
+           dpr          (pixel-ratio canvas)
            snap         @viewer-snapshot
            same-page?   (and (some? page-key) (identical? page-key (:page-key snap)))
            same-size?   (and (= vis-w (:canvas-w snap))
@@ -267,7 +287,7 @@
          (if (and same-page? (wasm.api/initialized?) os)
            (do
              (when-not same-size?
-               (wasm.api/resize-offscreen-canvas! os vis-w vis-h)
+               (wasm.api/resize-offscreen-canvas! os vis-w vis-h dpr)
                (swap! viewer-snapshot assoc :canvas-w vis-w :canvas-h vis-h :dpr dpr))
              ;; While an animation plays the shapes stay loaded: only its
              ;; modifiers change (see `show-animation!`).
@@ -279,7 +299,7 @@
            (let [os-canvas (js/OffscreenCanvas. vis-w vis-h)]
              (when (wasm.api/initialized?)
                (wasm.api/clear-canvas {:lose-browser-context? false}))
-             (if (wasm.api/init-canvas-context os-canvas)
+             (if (wasm.api/init-canvas-context os-canvas dpr)
                (do
                  (reset! viewer-snapshot
                          {:os-canvas os-canvas

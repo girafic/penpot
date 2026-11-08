@@ -8,7 +8,7 @@
   "Penpot on phones and tablets: what kind of screen it is, the view
   mode as wide as a phone, its link from the workspace, the view mode
   that follows the board selected in the workspace, and fingers on the
-  canvas, and a dashboard light enough for a phone."
+  canvas, and a dashboard and a view mode light enough for a phone."
   (:require
    [app.common.geom.point :as gpt]
    [app.common.time :as ct]
@@ -16,6 +16,7 @@
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.follow :as dvf]
    [app.main.data.workspace.phone :as dwph]
+   [app.main.render-viewer-wasm :as rwv]
    [app.main.ui.dashboard.grid :as grid]
    [app.main.ui.workspace.phone-link :as phone-link]
    [app.main.ui.workspace.touch-bar :as touch-bar]
@@ -191,3 +192,12 @@
   (t/is (false? (render-thumbnail? true true (uuid/next) false)) "nor anyone when it exists")
   (t/is (false? (render-thumbnail? false true nil false)) "nor a viewer of the team")
   (t/is (false? (render-thumbnail? true false nil false)) "nor before the file is in sight"))
+
+(t/deftest view-mode-canvas-pixels-on-a-phone
+  (let [close? (fn [a b] (< (abs (- a b)) 0.01))]
+    (t/is (= 3 (rwv/canvas-dpr 3 393 852 393 852 true)) "a board of one screen keeps the ratio")
+    (t/is (= 3 (rwv/canvas-dpr 3 393 1773 393 852 false)) "anything goes on a computer")
+    (t/is (close? 2.08 (rwv/canvas-dpr 3 393 1773 393 852 true))
+          "a board of two screens: the pixels of one")
+    (t/is (= 1 (rwv/canvas-dpr 3 393 20000 393 852 true)) "never below ratio 1")
+    (t/is (= 1 (rwv/canvas-dpr 1 393 1773 393 852 true)) "never above the screen's")))
