@@ -17,6 +17,7 @@
    [app.main.ui.viewer.shapes :as shapes]
    [app.main.ui.viewer.viewport-common :as vpc]
    [app.render-wasm.api :as wasm.api]
+   [app.util.timers :as ts]
    [app.util.touch :as touch]
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
@@ -45,7 +46,9 @@
 (def ^:private hotspot-settle
   "On a phone, ms an animation stands still before the hotspots follow
   it: posing all the shapes of a board takes a phone a frame or two,
-  which ten times a second made the animation stutter."
+  which ten times a second made the animation stutter. Two frames
+  without a change have to come after (see `use-posed-modifiers`): a
+  frame that takes longer, as one that first blurs, is no stop."
   150)
 
 (defn- use-posed-modifiers
@@ -53,23 +56,29 @@
   `interactions/viewport*`) holds, followed at most every
   `hotspot-interval` ms, the last one always; on a phone only once it
   stood still `hotspot-settle` ms, the hotspots where the layers rest
-  meanwhile; nil without `follow?`."
-  [modifiers-ref follow?]
+  meanwhile; nil without `follow?`. Taken for the board `frame-id`: when
+  the board changes, the ones of the board before pose nothing."
+  [modifiers-ref follow? frame-id]
   (let [settle? (mf/with-memo [] (touch/phone?))
         state*  (mf/use-state #(when (and follow? (not settle?))
-                                 (some-> modifiers-ref deref force)))]
-    (mf/with-effect [modifiers-ref follow? settle?]
+                                 [frame-id (some-> modifiers-ref deref force)]))]
+    (mf/with-effect [modifiers-ref follow? settle? frame-id]
       (when (and follow? (some? modifiers-ref))
         (let [key     (js/Symbol "hotspots")
               last-at (volatile! 0)
               timer   (volatile! nil)
+              changes (volatile! 0)
               take!   (fn []
                         (vreset! last-at (js/Date.now))
                         (vreset! timer nil)
-                        (reset! state* (force @modifiers-ref)))
+                        (reset! state* [frame-id (force @modifiers-ref)]))
               settle! (fn []
                         (some-> @timer js/clearTimeout)
-                        (vreset! timer (js/setTimeout take! hotspot-settle)))]
+                        (let [change (vswap! changes inc)
+                              still? #(= change @changes)]
+                          (vreset! timer (js/setTimeout
+                                          #(ts/raf (fn [] (ts/raf (fn [] (when (still?) (take!))))))
+                                          hotspot-settle))))]
           (if settle? (settle!) (take!))
           (add-watch modifiers-ref key
                      (fn [_ _ _ _]
@@ -81,8 +90,11 @@
                              (nil? @timer)     (vreset! timer (js/setTimeout take! wait)))))))
           (fn []
             (remove-watch modifiers-ref key)
+            (vswap! changes inc)
             (some-> @timer js/clearTimeout)))))
-    (when follow? (deref state*))))
+    (let [[id modifiers] (deref state*)]
+      (when (and follow? (= id frame-id))
+        modifiers))))
 
 (defn- use-posed-objects
   "The objects `prepared` of the board `frame` (see `vpc/prepare-objects`)
@@ -91,7 +103,7 @@
   `follow?`. One for all the hotspots of a viewport: posing all its
   shapes takes a while."
   [modifiers-ref follow? prepared objects frame size delta]
-  (let [modifiers (use-posed-modifiers modifiers-ref follow?)]
+  (let [modifiers (use-posed-modifiers modifiers-ref follow? (:id frame))]
     (mf/with-memo [prepared modifiers objects frame size delta]
       (if (and (seq modifiers) (some? objects))
         (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
