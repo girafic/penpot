@@ -319,8 +319,9 @@
   block-size: 0;
 }
 
-.viewer-section.in-device[data-overscroll] .screen-overlay [data-scroll-layer="true"],
-[data-phone="true"] .viewer-section[data-overscroll] .screen-overlay [data-scroll-layer="true"] {
+// it stays as the section gives at an end: as specific as the rules that
+// move what scrolls, of a device and of a phone, and after them
+.viewer-section[data-overscroll] .screen-overlay [data-scroll-layer="true"] {
   transform: none;
 }
 
