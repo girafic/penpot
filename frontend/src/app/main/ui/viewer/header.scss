@@ -304,17 +304,38 @@
 }
 
 // On a phone the board fills the screen: the header shows over it on
-// request, below the notch (see `phone-bars-button*`), scrolling sideways
-// when it does not fit.
+// request, below the notch (see `phone-bars-button*`), in two rows as
+// high as `--phone-header-size` (see the view mode): the file and the
+// sections, then the options, whatever is too long cut short.
 [data-phone="true"] .viewer-header {
   position: fixed;
-  grid-template-columns: auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: $sz-40 $sz-32;
   gap: var(--sp-s);
-  block-size: calc(#{$sz-48} + env(safe-area-inset-top));
+  block-size: calc(var(--phone-header-size) + env(safe-area-inset-top));
   padding-block-start: calc(env(safe-area-inset-top) + var(--sp-s));
-  overflow-x: auto;
+  padding-inline: calc(env(safe-area-inset-left) + var(--sp-m)) calc(env(safe-area-inset-right) + var(--sp-m));
   transform: translateY(-100%);
   transition: transform 200ms ease;
+}
+
+[data-phone="true"] .nav-zone,
+[data-phone="true"] .sitemap-zone {
+  min-inline-size: 0;
+}
+
+[data-phone="true"] .breadcrumb-text {
+  max-inline-size: 30vw;
+}
+
+[data-phone="true"] .options-zone {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+  min-inline-size: 0;
+}
+
+[data-phone="true"] .share-btn {
+  margin-inline-start: auto;
 }
 
 [data-bars="true"] .viewer-header {

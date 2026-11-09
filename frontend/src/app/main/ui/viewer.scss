@@ -417,7 +417,11 @@
   block-size: 100dvh;
 }
 
+// how high the header of a phone is under the notch (see `.viewer-header`):
+// two rows of the file, the sections and the options
 [data-phone="true"] {
+  --phone-header-size: calc(#{$sz-40} + #{$sz-32} + 3 * var(--sp-s));
+
   grid-template-rows: 1fr;
   block-size: 100dvh;
 }
@@ -444,9 +448,15 @@
   display: none;
 }
 
+// on a bar of its own, as the header: not over the board, which a tap
+// beside its buttons reached
 [data-phone="true"] .viewer-bottom {
+  align-items: center;
   padding-block-end: env(safe-area-inset-bottom);
-  block-size: calc(#{$sz-40} + env(safe-area-inset-bottom));
+  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+  block-size: calc(#{$sz-48} + env(safe-area-inset-bottom));
+  background-color: var(--color-background-primary);
+  pointer-events: all;
   transform: translateY(100%);
 }
 
@@ -454,11 +464,13 @@
   transform: translateY(0);
 }
 
+// as high as the header, which comes after it: the menus of the header
+// open over it
 .phone-bars-button {
   position: fixed;
   inset-block-start: calc(env(safe-area-inset-top) + var(--sp-xs));
   inset-inline-end: calc(env(safe-area-inset-right) + var(--sp-xs));
-  z-index: deprecated.$z-index-4;
+  z-index: deprecated.$z-index-3;
   display: grid;
   place-items: center;
   inline-size: $sz-32;
@@ -473,7 +485,7 @@
 }
 
 .phone-bars-shown {
-  inset-block-start: calc(env(safe-area-inset-top) + #{$sz-48} + var(--sp-xs));
+  inset-block-start: calc(env(safe-area-inset-top) + var(--phone-header-size) + var(--sp-xs));
   background-color: var(--color-background-primary);
   color: var(--color-foreground-primary);
   opacity: 1;

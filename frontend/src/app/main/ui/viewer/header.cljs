@@ -135,7 +135,10 @@
                    :key (dm/str "zoom-fullscreen-" sc)} sc])]]]]]))
 
 (mf/defc header-options
-  [{:keys [section zoom page file index permissions interactions-mode share device framed turns]}]
+  "The options of the view mode. On a phone (`phone`) without the device
+  (it shows none), the zoom (its boards are as wide as its screen) and
+  full screen (its bars come on request, see `phone-bars-button*`)."
+  [{:keys [section zoom page file index permissions interactions-mode share device framed turns phone]}]
   (let [fullscreen?    (mf/deref fullscreen-ref)
 
         toggle-fullscreen
@@ -190,19 +193,21 @@
                         [:> flows-menu* {:page page :index index}])
                       [:> interactions-menu*
                        {:interactions-mode interactions-mode}]
-                      [:> device-menu* {:device device :turns turns}]]
+                      (when-not phone
+                        [:> device-menu* {:device device :turns turns}])]
        :comments [:& comments-menu]
        [:div {:class (stl/css :view-options)}])
 
-     [:& zoom-widget
-      {:zoom zoom
-       :framed framed
-       :on-increase handle-increase
-       :on-decrease handle-decrease
-       :on-zoom-reset handle-zoom-reset
-       :on-zoom-fill handle-zoom-fill
-       :on-zoom-fit  handle-zoom-fit
-       :on-fullscreen toggle-fullscreen}]
+     (when-not phone
+       [:& zoom-widget
+        {:zoom zoom
+         :framed framed
+         :on-increase handle-increase
+         :on-decrease handle-decrease
+         :on-zoom-reset handle-zoom-reset
+         :on-zoom-fill handle-zoom-fill
+         :on-zoom-fit  handle-zoom-fit
+         :on-fullscreen toggle-fullscreen}])
 
      (when (:in-team permissions)
        [:> icon-button* {:variant "ghost"
@@ -210,11 +215,12 @@
                          :icon i/curve
                          :on-click go-to-workspace}])
 
-     [:> icon-button* {:variant "ghost"
-                       :aria-label (tr "viewer.header.fullscreen")
-                       :aria-pressed (boolean fullscreen?)
-                       :icon i/expand
-                       :on-click toggle-fullscreen}]
+     (when-not phone
+       [:> icon-button* {:variant "ghost"
+                         :aria-label (tr "viewer.header.fullscreen")
+                         :aria-pressed (boolean fullscreen?)
+                         :icon i/expand
+                         :on-click toggle-fullscreen}])
 
      (when (:in-team permissions)
        [:> button* {:variant "primary"
@@ -293,7 +299,7 @@
 
 (mf/defc header
   [{:keys [project file page frame zoom section permissions index interactions-mode shown-thumbnails share
-           device framed turns]}]
+           device framed turns phone]}]
   (let [go-to-dashboard
         (mf/use-fn
          #(st/emit! (dv/go-to-dashboard)))
@@ -388,4 +394,5 @@
                          :share share
                          :device device
                          :framed framed
-                         :turns turns}]]))
+                         :turns turns
+                         :phone phone}]]))

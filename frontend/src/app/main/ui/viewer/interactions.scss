@@ -10,10 +10,12 @@
 @use "ds/_borders.scss" as *;
 @use "ds/_sizes.scss" as *;
 @use "ds/_utils.scss" as *;
+@use "ds/mixins.scss" as *;
 @use "ds/typography.scss" as *;
 
 .view-options-wrapper {
   position: relative;
+  min-inline-size: 0;
 }
 
 .view-options {
@@ -27,11 +29,14 @@
   border-radius: $br-8;
   background-color: var(--color-background-tertiary);
   padding: var(--sp-s);
+  max-inline-size: 100%;
   cursor: pointer;
 }
 
+// one line, cut short when too long (a phone's header is narrow)
 .dropdown-title {
   @include use-typography("body-small");
+  @include text-ellipsis;
 
   flex-grow: 1;
   color: var(--color-foreground-primary);
@@ -51,6 +56,16 @@
   padding: px2rem(6);
   max-block-size: calc(100vh - #{px2rem(150)});
   overflow: auto;
+}
+
+// on a phone as wide as its screen under the header, which an option at
+// its right end would leave it out of (see `--phone-header-size`)
+[data-phone="true"] .dropdown {
+  position: fixed;
+  inset-inline: calc(env(safe-area-inset-left) + var(--sp-m)) calc(env(safe-area-inset-right) + var(--sp-m));
+  inset-block-start: calc(env(safe-area-inset-top) + var(--phone-header-size));
+  inline-size: auto;
+  max-block-size: calc(100dvh - env(safe-area-inset-top) - var(--phone-header-size) - var(--sp-m));
 }
 
 .dropdown-element {

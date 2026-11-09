@@ -1398,7 +1398,8 @@
                           :share share
                           :device (:device local)
                           :framed (some? device)
-                          :turns (and (some? device) (dvd/turns? (:kind device)))}])]))
+                          :turns (and (some? device) (dvd/turns? (:kind device)))
+                          :phone phone?}])]))
 
 ;; --- Component: Viewer
 
