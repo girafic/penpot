@@ -58,16 +58,6 @@
   overflow: auto;
 }
 
-// on a phone as wide as its screen under the header, which an option at
-// its right end would leave it out of (see `--phone-header-size`)
-[data-phone="true"] .dropdown {
-  position: fixed;
-  inset-inline: calc(env(safe-area-inset-left) + var(--sp-m)) calc(env(safe-area-inset-right) + var(--sp-m));
-  inset-block-start: calc(env(safe-area-inset-top) + var(--phone-header-size));
-  inline-size: auto;
-  max-block-size: calc(100dvh - env(safe-area-inset-top) - var(--phone-header-size) - var(--sp-m));
-}
-
 .dropdown-element {
   @extend %dropdown-element-base;
 

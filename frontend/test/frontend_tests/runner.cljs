@@ -185,6 +185,7 @@
    [frontend-tests.ui.motion-split-test]
    [frontend-tests.ui.offset-lines-menu-test]
    [frontend-tests.ui.organization-team-switch-test]
+   [frontend-tests.ui.phone-sheet-test]
    [frontend-tests.ui.prototype-preview-test]
    [frontend-tests.ui.routes-test]
    [frontend-tests.ui.settings-password-schema-test]
@@ -410,6 +411,7 @@
    'frontend-tests.ui.device-frame-test
    'frontend-tests.ui.device-menu-test
    'frontend-tests.ui.drag-scroll-test
+   'frontend-tests.ui.phone-sheet-test
    'frontend-tests.ui.drawarea-test
    'frontend-tests.ui.ds-controls-numeric-input-test
    'frontend-tests.ui.dynamic-modifiers-test

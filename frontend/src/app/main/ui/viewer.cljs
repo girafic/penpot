@@ -22,6 +22,7 @@
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.comments :as dcm]
+   [app.main.data.notifications :as ntf]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.devices :as dvd]
    [app.main.data.viewer.follow :as dvf]
@@ -49,6 +50,7 @@
    [app.main.ui.viewer.inspect :as inspect]
    [app.main.ui.viewer.interactions :as interactions]
    [app.main.ui.viewer.login]
+   [app.main.ui.viewer.phone-sheet :as phone-sheet]
    [app.main.ui.viewer.share-link]
    [app.main.ui.viewer.thumbnails :refer [thumbnails-panel*]]
    [app.util.audio :as audio]
@@ -58,6 +60,7 @@
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [app.util.object :as obj]
+   [app.util.storage :as storage]
    [app.util.webapi :as wapi]
    [cuerdas.core :as str]
    [goog.events :as events]
@@ -557,18 +560,6 @@
                           :page page
                           :zoom zoom}])]])
 
-(mf/defc phone-bars-button*
-  "On a phone, where the board fills the screen, the button that shows
-  the header and the bar at the bottom over it, and hides them again."
-  {::mf/private true}
-  [{:keys [shown on-toggle]}]
-  [:button {:class (stl/css-case :phone-bars-button true
-                                 :phone-bars-shown shown)
-            :aria-label (if shown (tr "viewer.phone.hide-bars") (tr "viewer.phone.show-bars"))
-            :aria-pressed shown
-            :on-click on-toggle}
-   [:> icon* {:icon-id (if shown i/close i/menu) :size "m"}]])
-
 (mf/defc viewer-content*
   [{:keys [data page-id share-id section index interactions-mode share preview]}]
   (let [{:keys [file users project permissions]} data
@@ -622,10 +613,10 @@
         ;; the other way than a board stands, a phone or a tablet shows
         ;; it turned, or its counterpart (see `dvt/shown`)
         {device-choice :choice device-finish :finish device-hold :hold} (:device local)
-        ;; on a phone the board fills its screen, no device round it (see
-        ;; `phone-bars-button*`); held the other way than a board stands,
-        ;; the phone shows it turned or its counterpart, as a device does
-        ;; (see `dv/phone-hold`)
+        ;; on a phone the board fills its screen, no device round it, no
+        ;; bars (see `phone-sheet/phone-sheet*`); held the other way than
+        ;; a board stands, the phone shows it turned or its counterpart, as
+        ;; a device does (see `dv/phone-hold`)
         phone?      (and (not preview) (true? (:phone? local)))
         turn-choice (if phone? "auto" device-choice)
         turn-hold   (if phone? (dv/phone-hold (:viewport-size local)) device-hold)
@@ -714,8 +705,9 @@
         framed-ref (mf/use-ref false)
 
         fullscreen? (mf/deref header/fullscreen-ref)
-        bars*       (mf/use-state false)
-        bars?       (deref bars*)
+        ;; the sheet of a phone, open (see `phone-sheet/phone-sheet*`)
+        sheet*      (mf/use-state false)
+        sheet?      (deref sheet*)
         overlays    (mf/deref current-overlays-ref)
         ;; where the view box of each overlay starts on the page (see
         ;; `vpc/prepare-objects`), for the wheel over its containers
@@ -1067,6 +1059,18 @@
                           (and (some? device-layout) (dvd/touch? (:kind device)))
                           (some-> frame :fills first :fill-color))
 
+    ;; two fingers held on a phone open its sheet; the first time it
+    ;; shows a prototype it says so
+    (phone-sheet/use-two-finger-hold! phone? #(reset! sheet* true))
+
+    (mf/with-effect [phone?]
+      (when (and phone? (not (get storage/user ::phone-hold-hint)))
+        (swap! storage/user assoc ::phone-hold-hint true)
+        (st/emit! (ntf/show {:level :info
+                             :type :toast
+                             :content (tr "viewer.phone.hold-hint")
+                             :timeout 5000}))))
+
     ;; a phone scrolls the board itself, and it gives past an end as that
     ;; screen does, its fixed layers staying
     (dds/use-touch-rubber! viewer-section-ref
@@ -1269,7 +1273,6 @@
       :data-force-visible (:show-thumbnails local)
       :data-preview (true? preview)
       :data-phone phone?
-      :data-bars (and phone? bars?)
       ;; the device alone, on the workspace (see `.window.framed` of
       ;; the preview)
       :data-device-only (and (true? preview) (some? device-layout))}
@@ -1380,9 +1383,20 @@
                               :finish device-finish
                               :cutouts true}]])]
 
-     (when phone?
-       [:> phone-bars-button* {:shown bars?
-                               :on-toggle #(swap! bars* not)}])
+     ;; on a phone the board alone: two fingers held open what the
+     ;; bars hold elsewhere
+     (when (and phone? sheet?)
+       [:> phone-sheet/phone-sheet*
+        {:page page
+         :file file
+         :frame frame
+         :index index
+         :permissions permissions
+         :section section
+         :interactions-mode interactions-mode
+         :timeline (when (some? clock)
+                     (mf/html [:> timeline-controls* {:board-id (:id frame) :sound? board-sound?}]))
+         :on-close #(reset! sheet* false)}])
 
      (when-not preview
        [:& header/header {:project project
@@ -1398,8 +1412,7 @@
                           :share share
                           :device (:device local)
                           :framed (some? device)
-                          :turns (and (some? device) (dvd/turns? (:kind device)))
-                          :phone phone?}])]))
+                          :turns (and (some? device) (dvd/turns? (:kind device)))}])]))
 
 ;; --- Component: Viewer
 

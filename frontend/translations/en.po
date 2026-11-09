@@ -6420,12 +6420,12 @@ msgid "viewer.frame-not-found"
 msgstr "Board not found."
 
 #: src/app/main/ui/viewer.cljs
-msgid "viewer.phone.hide-bars"
-msgstr "Hide the bars"
+msgid "viewer.phone.hold-hint"
+msgstr "Hold two fingers on the screen for the options of the prototype."
 
-#: src/app/main/ui/viewer.cljs
-msgid "viewer.phone.show-bars"
-msgstr "Show the bars"
+#: src/app/main/ui/viewer/phone_sheet.cljs
+msgid "viewer.phone.options"
+msgstr "Options of the prototype"
 
 #: src/app/main/ui/viewer.cljs:127
 msgid "viewer.go-to-first-board"

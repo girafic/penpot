@@ -1,0 +1,141 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
+@use "ds/_utils.scss" as *;
+@use "ds/mixins.scss" as *;
+@use "ds/typography.scss" as *;
+
+// what is beside the sheet: a tap there closes it
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: deprecated.$z-index-4;
+  background-color: rgb(0 0 0 / 0.3);
+  animation: fade-in 0.2s ease;
+}
+
+// from the bottom, at most half as high as the screen: its grip stays,
+// what is under it scrolls
+.sheet {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: deprecated.$z-index-4;
+  display: flex;
+  flex-direction: column;
+  max-block-size: 50dvh;
+  border-radius: $br-12 $br-12 0 0;
+  background-color: var(--color-background-primary);
+  color: var(--color-foreground-primary);
+  transition: transform 200ms ease;
+  animation: slide-up 0.2s ease;
+}
+
+// what drags the sheet down
+.grip-zone {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  block-size: $sz-24;
+  touch-action: none;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+  min-block-size: 0;
+  padding: 0 calc(env(safe-area-inset-right) + var(--sp-m)) calc(env(safe-area-inset-bottom) + var(--sp-m))
+    calc(env(safe-area-inset-left) + var(--sp-m));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.grip {
+  inline-size: $sz-36;
+  block-size: px2rem(5);
+  border-radius: $br-circle;
+  background-color: var(--color-background-quaternary);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-block-size: $sz-32;
+}
+
+.board-name {
+  @include use-typography("body-medium");
+  @include text-ellipsis;
+
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.counter {
+  @include use-typography("body-small");
+
+  color: var(--color-foreground-secondary);
+  white-space: nowrap;
+}
+
+.gap {
+  flex: 1;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block-start: $b-1 solid var(--color-background-tertiary);
+  padding-block-start: var(--sp-s);
+}
+
+.item {
+  @include use-typography("body-medium");
+
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+  inline-size: 100%;
+  min-block-size: $sz-40;
+  padding: 0 var(--sp-s);
+  border: none;
+  border-radius: $br-8;
+  background: none;
+  color: var(--color-foreground-secondary);
+  text-align: start;
+
+  &[aria-pressed="true"] {
+    color: var(--color-foreground-primary);
+    background-color: var(--color-background-tertiary);
+  }
+}
+
+.label {
+  @include text-ellipsis;
+
+  flex: 1;
+  min-inline-size: 0;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}

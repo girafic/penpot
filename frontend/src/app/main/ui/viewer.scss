@@ -403,11 +403,11 @@
   transform: translateX(0);
 }
 
-/** PHONE: the board as wide as the screen, the header and the bar at the
-  bottom over it on request (see `phone-bars-button*`); the page itself
-  never bounces nor reloads by a pull, and is as high as what the
-  browser shows (`100vh` there is as high as without its bars: the page
-  scrolled, the board, its fixed layers and all) */
+/** PHONE: the board as wide as the screen, what the header and the bar at
+  the bottom hold in a sheet two fingers open (see `phone-sheet*`); the
+  page itself never bounces nor reloads by a pull, and is as high as what
+  the browser shows (`100vh` there is as high as without its bars: the
+  page scrolled, the board, its fixed layers and all) */
 :global(html:has([data-phone="true"])),
 :global(body:has([data-phone="true"])) {
   overscroll-behavior: none;
@@ -418,11 +418,7 @@
   block-size: 100dvh;
 }
 
-// how high the header of a phone is under the notch (see `.viewer-header`):
-// two rows of the file, the sections and the options
 [data-phone="true"] {
-  --phone-header-size: calc(#{$sz-40} + #{$sz-32} + 3 * var(--sp-s));
-
   grid-template-rows: 1fr;
   block-size: 100dvh;
 }
@@ -449,45 +445,8 @@
   display: none;
 }
 
-// on a bar of its own, as the header: not over the board, which a tap
-// beside its buttons reached
+// what the bar at the bottom holds is in the sheet (see `phone-sheet*`)
 [data-phone="true"] .viewer-bottom {
-  align-items: center;
-  padding-block-end: env(safe-area-inset-bottom);
-  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
-  block-size: calc(#{$sz-48} + env(safe-area-inset-bottom));
-  background-color: var(--color-background-primary);
-  pointer-events: all;
-  transform: translateY(100%);
+  display: none;
 }
 
-[data-bars="true"] .viewer-bottom {
-  transform: translateY(0);
-}
-
-// as high as the header, which comes after it: the menus of the header
-// open over it
-.phone-bars-button {
-  position: fixed;
-  inset-block-start: calc(env(safe-area-inset-top) + var(--sp-xs));
-  inset-inline-end: calc(env(safe-area-inset-right) + var(--sp-xs));
-  z-index: deprecated.$z-index-3;
-  display: grid;
-  place-items: center;
-  inline-size: $sz-32;
-  block-size: $sz-32;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background-color: rgb(0 0 0 / 0.35);
-  color: var(--color-static-white);
-  opacity: 0.7;
-  transition: inset-block-start 200ms ease;
-}
-
-.phone-bars-shown {
-  inset-block-start: calc(env(safe-area-inset-top) + var(--phone-header-size) + var(--sp-xs));
-  background-color: var(--color-background-primary);
-  color: var(--color-foreground-primary);
-  opacity: 1;
-}
