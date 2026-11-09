@@ -6419,7 +6419,7 @@ msgstr "No boards found on the page."
 msgid "viewer.frame-not-found"
 msgstr "Board not found."
 
-#: src/app/main/ui/viewer.cljs
+#: src/app/main/ui/viewer/phone_sheet.cljs
 msgid "viewer.phone.hold-hint"
 msgstr "Hold two fingers on the screen for the options of the prototype."
 

@@ -23,6 +23,7 @@
    [app.main.ui.viewer.header :as header]
    [app.util.globals :as g]
    [app.util.i18n :refer [tr]]
+   [app.util.storage :as storage]
    [rumext.v2 :as mf]))
 
 (def hold-ms
@@ -36,6 +37,10 @@
 (def ^:private close-drag-px
   "How far down the sheet is dragged to close."
   80)
+
+(def hint-ms
+  "How long the note of how the sheet opens shows."
+  5000)
 
 (defn- touch-points
   "`{identifier [x y]}` of the touches of `touches`."
@@ -97,6 +102,27 @@
             (.removeEventListener target "touchend" cancel! #js {:passive true})
             (.removeEventListener target "touchcancel" cancel! #js {:passive true})
             (cancel!)))))))
+
+(mf/defc hold-hint*
+  "At the bottom of a phone, where the sheet comes from: how it opens,
+  the first time the view mode shows there. It goes after `hint-ms`, at
+  a tap and as the sheet opens."
+  []
+  (let [shown* (mf/use-state #(not (get storage/user ::hold-hint)))
+        shown? (deref shown*)
+        hide!  (mf/use-fn #(reset! shown* false))]
+
+    (mf/with-effect []
+      (when shown?
+        (swap! storage/user assoc ::hold-hint true)
+        (let [timer (js/setTimeout hide! hint-ms)]
+          #(js/clearTimeout timer))))
+
+    (when shown?
+      [:div {:class (stl/css :hint)
+             :role "status"
+             :on-click hide!}
+       (tr "viewer.phone.hold-hint")])))
 
 (mf/defc phone-sheet*
   "The sheet of a phone over the board `frame`, the `index`th of `page`

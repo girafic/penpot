@@ -22,7 +22,6 @@
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.comments :as dcm]
-   [app.main.data.notifications :as ntf]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.devices :as dvd]
    [app.main.data.viewer.follow :as dvf]
@@ -60,7 +59,6 @@
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [app.util.object :as obj]
-   [app.util.storage :as storage]
    [app.util.webapi :as wapi]
    [cuerdas.core :as str]
    [goog.events :as events]
@@ -1059,17 +1057,8 @@
                           (and (some? device-layout) (dvd/touch? (:kind device)))
                           (some-> frame :fills first :fill-color))
 
-    ;; two fingers held on a phone open its sheet; the first time it
-    ;; shows a prototype it says so
+    ;; two fingers held on a phone open its sheet
     (phone-sheet/use-two-finger-hold! phone? #(reset! sheet* true))
-
-    (mf/with-effect [phone?]
-      (when (and phone? (not (get storage/user ::phone-hold-hint)))
-        (swap! storage/user assoc ::phone-hold-hint true)
-        (st/emit! (ntf/show {:level :info
-                             :type :toast
-                             :content (tr "viewer.phone.hold-hint")
-                             :timeout 5000}))))
 
     ;; a phone scrolls the board itself, and it gives past an end as that
     ;; screen does, its fixed layers staying
@@ -1384,7 +1373,11 @@
                               :cutouts true}]])]
 
      ;; on a phone the board alone: two fingers held open what the
-     ;; bars hold elsewhere
+     ;; bars hold elsewhere, which a note tells the first time, once the
+     ;; board shows
+     (when (and phone? drawn? (not sheet?))
+       [:> phone-sheet/hold-hint*])
+
      (when (and phone? sheet?)
        [:> phone-sheet/phone-sheet*
         {:page page

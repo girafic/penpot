@@ -9,6 +9,7 @@
   the sheet with what its bars hold elsewhere (Penpot Motion)."
   (:require
    [app.main.ui.viewer.phone-sheet :as phone-sheet]
+   [app.util.storage :as storage]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [rumext.v2 :as mf]))
@@ -62,3 +63,17 @@
                  (t/is (false? lifted) "one lifted before")))
         (.catch (fn [cause] (t/is false (ex-message cause))))
         (.finally (fn [] (done) nil)))))
+
+(t/deftest the-hint-shows-once
+  (swap! storage/user dissoc ::phone-sheet/hold-hint)
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (thd/render! root (mf/element phone-sheet/hold-hint* #js {}))
+      (let [hint (.querySelector document "[role=status]")]
+        (t/is (some? hint) "the first time")
+        (thd/click! window hint)
+        (t/is (nil? (.querySelector document "[role=status]")) "gone at a tap"))))
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (thd/render! root (mf/element phone-sheet/hold-hint* #js {}))
+      (t/is (nil? (.querySelector document "[role=status]")) "not again"))))
