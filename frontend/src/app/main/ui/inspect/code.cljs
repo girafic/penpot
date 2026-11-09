@@ -374,10 +374,12 @@
        ;;              :options [{:label "CSS" :value "css"}]}]
 
        [:div {:class (stl/css :action-btns)}
-        [:> icon-button* {:variant "ghost"
-                          :aria-label (tr "inspect.code.expand-panel")
-                          :icon i/code
-                          :on-click on-expand}]
+        ;; none in a sheet of a phone, which its grip makes higher
+        (when (fn? on-expand)
+          [:> icon-button* {:variant "ghost"
+                            :aria-label (tr "inspect.code.expand-panel")
+                            :icon i/code
+                            :on-click on-expand}])
 
         [:> copy-button* {:data copy-css-fn
                           :class (stl/css :css-copy-btn)
@@ -417,10 +419,12 @@
                           :id :svg}]]
 
        [:div {:class (stl/css :action-btns)}
-        [:> icon-button* {:variant "ghost"
-                          :aria-label (tr "inspect.code.expand-panel")
-                          :icon i/code
-                          :on-click on-expand}]
+        ;; none in a sheet of a phone, which its grip makes higher
+        (when (fn? on-expand)
+          [:> icon-button* {:variant "ghost"
+                            :aria-label (tr "inspect.code.expand-panel")
+                            :icon i/code
+                            :on-click on-expand}])
 
         [:> copy-button* {:data copy-html-fn
                           :class (stl/css :html-copy-btn)

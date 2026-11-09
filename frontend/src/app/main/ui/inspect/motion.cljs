@@ -158,9 +158,11 @@
           [:& radio-button {:value "react" :id :motion-react}]]
 
          [:div {:class (stl/css :action-btns)}
-          [:button {:class (stl/css :expand-button)
-                    :on-click on-expand}
-           deprecated-icon/code]
+          ;; none in a sheet of a phone, which its grip makes higher
+          (when (fn? on-expand)
+            [:button {:class (stl/css :expand-button)
+                      :on-click on-expand}
+             deprecated-icon/code])
           [:> copy-button* {:data copy-code
                             :class (stl/css :copy-btn)
                             :on-copied on-copied}]]]

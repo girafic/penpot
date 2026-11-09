@@ -215,7 +215,7 @@
               :code
               [:> code* {:frame frame
                          :shapes shapes
-                         :on-expand handle-expand
+                         :on-expand (when (fn? on-expand) handle-expand)
                          :from from
                          :page-id page-id
                          :libraries libraries}]
@@ -227,7 +227,7 @@
                                  :page-id page-id
                                  :libraries libraries
                                  :from from
-                                 :on-expand handle-expand}]))]
+                                 :on-expand (when (fn? on-expand) handle-expand)}]))]
            [:> tab-switcher* {:tabs tabs
                               :selected (name @section)
                               :on-change handle-change-tab
@@ -246,7 +246,7 @@
               :code
               [:> code* {:frame frame
                          :shapes shapes
-                         :on-expand handle-expand
+                         :on-expand (when (fn? on-expand) handle-expand)
                          :from from
                          :page-id page-id
                          :libraries libraries}]
@@ -258,7 +258,7 @@
                                  :page-id page-id
                                  :libraries libraries
                                  :from from
-                                 :on-expand handle-expand}]))])]]
+                                 :on-expand (when (fn? on-expand) handle-expand)}]))])]]
 
        [:*
         [:div {:class (stl/css :empty)}
