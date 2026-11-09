@@ -350,3 +350,132 @@
             (set-offset! section 0 nil)
             (set! (.. section -style -cursor) "")
             (reset! state* nil)))))))
+
+(defn- touch-of
+  "The touch `id` among those `event` changed, if it did."
+  [^js event id]
+  (some #(when (= id (.-identifier %)) %) (array-seq (.-changedTouches event))))
+
+(defn use-touch-rubber!
+  "On a phone (`enabled?`) the element of `section-ref` scrolls by itself,
+  without its own bounce: that moved the layers fixed when scrolling with
+  the board. A finger that drags it past an end makes it give as rubber
+  and spring back, and a coast that runs into an end bounces off it, as
+  the screen of a touch device does (see `use-drag-scroll!`): what
+  scrolls moves, the fixed layers stay, over `color`. A finger a board
+  in it took to scroll its content (see
+  `app.main.ui.viewer.container-scroll`) is none of its."
+  [section-ref enabled? color]
+  (let [color-ref (mf/use-ref color)]
+    (mf/set-ref-val! color-ref color)
+    (mf/with-effect [enabled?]
+      (when-let [section (when enabled? (mf/ref-val section-ref))]
+        (let [touch*  (volatile! nil)
+              frame*  (volatile! nil)
+              offset* (volatile! 0)
+              ;; the last scroll, `[t top v]`, for the speed of a coast
+              scroll* (volatile! nil)
+
+              max-scroll #(- (.-scrollHeight section) (.-clientHeight section))
+
+              offset!
+              (fn [offset]
+                (vreset! offset* offset)
+                (set-offset! section offset (mf/ref-val color-ref)))
+
+              stop!
+              (fn []
+                (some-> @frame* js/cancelAnimationFrame)
+                (vreset! frame* nil))
+
+              animate!
+              (fn [f]
+                (stop!)
+                (let [t0 (js/performance.now)]
+                  (letfn [(step [now]
+                            (if (f (- now t0))
+                              (vreset! frame* (js/requestAnimationFrame step))
+                              (vreset! frame* nil)))]
+                    (vreset! frame* (js/requestAnimationFrame step)))))
+
+              spring!
+              (fn [x0]
+                (animate! (fn [t]
+                            (let [x (spring-back x0 t)]
+                              (offset! (if (< (mth/abs x) 0.5) 0 x))
+                              (>= (mth/abs x) 0.5)))))
+
+              bounce!
+              (fn [v]
+                (animate! (fn [t]
+                            (let [x (bounce v t)
+                                  done? (and (> t (* 2 spring-ms)) (< (mth/abs x) 0.5))]
+                              (offset! (if done? 0 x))
+                              (not done?)))))
+
+              let-go!
+              (fn []
+                (vreset! touch* nil)
+                (when-not (zero? @offset*)
+                  (spring! @offset*)))
+
+              on-touch-start
+              (fn [^js event]
+                (vreset! scroll* nil)
+                (if (= 1 (.. event -touches -length))
+                  (let [touch  (aget (.-touches event) 0)
+                        offset @offset*
+                        size   (.-clientHeight section)]
+                    (stop!)
+                    ;; caught past an end: the drag goes on from there
+                    (vreset! touch* {:id (.-identifier touch)
+                                     :y0 (.-clientY touch)
+                                     :top0 (cond-> (.-scrollTop section)
+                                             (pos? offset) (- (unrubber offset size))
+                                             (neg? offset) (+ (unrubber (- offset) size)))}))
+                  (let-go!)))
+
+              on-touch-move
+              (fn [^js event]
+                (when-let [{:keys [id y0 top0]} @touch*]
+                  (if (.-defaultPrevented event)
+                    (let-go!)
+                    (when-let [touch (touch-of event id)]
+                      (let [top (- top0 (- (.-clientY touch) y0))]
+                        (offset! (:offset (split-top top (max-scroll) (.-clientHeight section)))))))))
+
+              on-touch-end
+              (fn [^js event]
+                (when-let [{:keys [id]} @touch*]
+                  (when (touch-of event id)
+                    (let-go!))))
+
+              ;; a coast the browser runs on: the speed it reaches an end at
+              on-scroll
+              (fn [^js event]
+                (when (and (nil? @touch*) (nil? @frame*))
+                  (let [t     (.-timeStamp event)
+                        top   (.-scrollTop section)
+                        limit (max-scroll)
+                        [t0 top0 v0] @scroll*
+                        v     (if (and (some? t0) (> t t0)) (/ (- top top0) (- t t0)) v0)]
+                    (vreset! scroll* [t top v])
+                    (when (and (some? v) (> (mth/abs v) min-speed)
+                               (or (and (<= top 0) (neg? v))
+                                   (and (>= top limit) (pos? v))))
+                      (vreset! scroll* nil)
+                      (bounce! v)))))]
+
+          (.addEventListener section "touchstart" on-touch-start #js {:passive true})
+          (.addEventListener section "touchmove" on-touch-move #js {:passive true})
+          (.addEventListener section "touchend" on-touch-end #js {:passive true})
+          (.addEventListener section "touchcancel" on-touch-end #js {:passive true})
+          (.addEventListener section "scroll" on-scroll #js {:passive true})
+          (fn []
+            (.removeEventListener section "touchstart" on-touch-start #js {:passive true})
+            (.removeEventListener section "touchmove" on-touch-move #js {:passive true})
+            (.removeEventListener section "touchend" on-touch-end #js {:passive true})
+            (.removeEventListener section "touchcancel" on-touch-end #js {:passive true})
+            (.removeEventListener section "scroll" on-scroll #js {:passive true})
+            (stop!)
+            (set-offset! section 0 nil)))))))

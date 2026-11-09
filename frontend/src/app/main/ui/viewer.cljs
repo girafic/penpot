@@ -1067,9 +1067,15 @@
                           (and (some? device-layout) (dvd/touch? (:kind device)))
                           (some-> frame :fills first :fill-color))
 
+    ;; a phone scrolls the board itself, and it gives past an end as that
+    ;; screen does, its fixed layers staying
+    (dds/use-touch-rubber! viewer-section-ref
+                           (and phone? (= section :interactions))
+                           (some-> frame :fills first :fill-color))
+
     ;; the wheel over a board that scrolls its content scrolls it
     (cscroll/use-container-scroll! viewer-section-ref current-viewport-ref page frame size
-                                   (when-not (:turned? shown) (fixed-drop frame device))
+                                   (when drops? (fixed-drop frame screen))
                                    overlay-origins
                                    (and wasm? (= section :interactions)))
 

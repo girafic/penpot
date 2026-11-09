@@ -10,7 +10,9 @@
   (:require
    [app.common.math :as mth]
    [app.main.ui.viewer.drag-scroll :as dds]
-   [cljs.test :as t :include-macros true]))
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.dom :as thd]
+   [rumext.v2 :as mf]))
 
 (t/deftest a-press-drags-once-it-moves-far-enough
   (let [g (dds/start 300 0 0)]
@@ -84,3 +86,49 @@
   (t/is (dds/dragged?) "it dragged: its release is no tap")
   (dds/note-touch-start)
   (t/is (not (dds/dragged?)) "the next one starts afresh"))
+
+;; --- A phone (see `dds/use-touch-rubber!`)
+
+(mf/defc rubber-section*
+  {::mf/private true}
+  []
+  (let [section-ref (mf/use-ref nil)]
+    (dds/use-touch-rubber! section-ref true "#f5efe6")
+    [:div {:ref section-ref :id "section"}]))
+
+(defn- touch!
+  "A finger `type` (\"touchstart\", \"touchmove\") at `y` on `node`."
+  [^js window node type y]
+  (let [event (new (.-Event window) type #js {:bubbles true :cancelable true})
+        touch #js {:identifier 1 :clientY y}]
+    (set! (.-touches event) #js [touch])
+    (set! (.-changedTouches event) #js [touch])
+    (thd/act #(.dispatchEvent node event))))
+
+(defn- pulled
+  "How far down past its top a section 600 px high that scrolls 400 px
+  gives as a finger drags it 200 px down from the top: its offset, nil
+  for none. `taken?`: a board in it took the finger (see
+  `app.main.ui.viewer.container-scroll`)."
+  [taken?]
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (thd/render! root (mf/element rubber-section*))
+      (let [section (.getElementById document "section")]
+        (js/Object.defineProperty section "scrollHeight" #js {:value 1000})
+        (js/Object.defineProperty section "clientHeight" #js {:value 600})
+        (when taken?
+          (.addEventListener section "touchmove" #(.preventDefault %) #js {:capture true}))
+        (touch! window section "touchstart" 100)
+        (touch! window section "touchmove" 300)
+        (when (.hasAttribute section "data-overscroll")
+          (js/parseFloat (.. section -style (getPropertyValue "--overscroll"))))))))
+
+(t/deftest a-phone-gives-past-an-end-as-rubber
+  ;; the bounce of Safari moved the layers fixed when scrolling with the
+  ;; board: only what scrolls moves (see `.viewer-section[data-overscroll]`)
+  (let [offset (pulled false)]
+    (t/is (mth/close? (dds/rubber 200 600) offset) "down past its top, less than the finger")
+    (t/is (< 0 offset 200)))
+  (t/is (nil? (pulled true)) "a finger a board in it took is none of its"))
+

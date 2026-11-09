@@ -137,14 +137,16 @@
   place-items: start center;
 }
 
-// a touch screen dragged past an end (see `app.main.ui.viewer.drag-scroll`):
-// what scrolls moves, the layers fixed when scrolling stay, and the screen
-// shows the background of the board
-.viewer-section.in-device[data-overscroll] {
+// a touch screen dragged past an end, or a phone (see
+// `app.main.ui.viewer.drag-scroll`): what scrolls moves, the layers fixed
+// when scrolling stay, and the screen shows the background of the board
+.viewer-section.in-device[data-overscroll],
+[data-phone="true"] .viewer-section[data-overscroll] {
   background-color: var(--overscroll-color, var(--color-static-black));
 }
 
-.viewer-section.in-device[data-overscroll] [data-scroll-layer="true"] {
+.viewer-section.in-device[data-overscroll] [data-scroll-layer="true"],
+[data-phone="true"] .viewer-section[data-overscroll] [data-scroll-layer="true"] {
   transform: translateY(var(--overscroll));
 }
 
@@ -317,7 +319,8 @@
   block-size: 0;
 }
 
-.viewer-section.in-device[data-overscroll] .screen-overlay [data-scroll-layer="true"] {
+.viewer-section.in-device[data-overscroll] .screen-overlay [data-scroll-layer="true"],
+[data-phone="true"] .viewer-section[data-overscroll] .screen-overlay [data-scroll-layer="true"] {
   transform: none;
 }
 
@@ -429,9 +432,11 @@
   touch-action: manipulation;
 }
 
-// the board bounces at its ends, the page never
+// the board gives at its ends as rubber of its own, its fixed layers
+// staying (see `dds/use-touch-rubber!`): the bounce of the browser moved
+// them with it; the page never bounces
 [data-phone="true"] .viewer-section {
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
 }
 
 [data-phone="true"] .viewer-go-next,
