@@ -7,6 +7,7 @@
 // The shared modal placeholders, as the other modals of the workspace.
 @use "refactor/common-refactor.scss" as deprecated;
 @use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
 @use "ds/_utils.scss" as *;
 @use "ds/typography.scss" as *;
 
@@ -68,14 +69,18 @@
 
 .link-row {
   display: flex;
+  align-items: center;
   gap: var(--sp-s);
 }
 
+// as high as the button next to it (inputs get a margin below elsewhere)
 .link {
   @include use-typography("body-small");
 
   flex: 1;
   min-inline-size: 0;
+  block-size: $sz-32;
+  margin: 0;
   padding: 0 var(--sp-s);
   border: $b-1 solid var(--color-background-quaternary);
   border-radius: $br-8;
