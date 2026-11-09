@@ -146,6 +146,11 @@
 (def ^:private ref:viewport-size
   (l/derived #(dm/get-in % [:viewer-local :viewport-size]) st/state))
 
+;; a phone shows an open thread at the bottom of its screen (see
+;; `cmt/comment-floating-thread*`)
+(def ^:private ref:phone?
+  (l/derived #(true? (dm/get-in % [:viewer-local :phone?])) st/state))
+
 (mf/defc comments-layer
   {::mf/props :obj}
   [{:keys [zoom file frame page]}]
@@ -159,6 +164,7 @@
         file-id        (:id file)
         frame-id       (:id frame)
         vsize          (mf/deref ref:viewport-size)
+        phone?         (mf/deref ref:phone?)
 
         tpos-ref     (mf/with-memo [page-id]
                        (-> (l/in [:pages page-id :comment-thread-positions])
@@ -305,7 +311,8 @@
            :on-show-time on-show-time
            :origin :viewer
            :viewport {:offset-x 0 :offset-y 0 :width (:width vsize) :height (:height vsize)}
-           :zoom zoom}])
+           :zoom zoom
+           :docked phone?}])
 
        (when-let [draft (:draft local)]
          [:> cmt/comment-floating-thread-draft*
@@ -314,7 +321,8 @@
            :on-cancel on-draft-cancel
            :on-submit on-draft-submit
            :viewport nil
-           :zoom zoom}])]]]))
+           :zoom zoom
+           :docked phone?}])]]]))
 
 (mf/defc comments-sidebar*
   [{:keys [profiles frame page]}]

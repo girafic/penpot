@@ -1021,8 +1021,19 @@
         v-dir (if orientation-top? :top :bottom)]
     {:x x :y y :h-dir h-dir :v-dir v-dir}))
 
+(defn- dock
+  "`form` where it is, or `docked` at the bottom of the screen: a phone
+  shows a thread there, as wide as its screen (see `.docked`), out of
+  what moves and clips the board."
+  [form docked]
+  (if docked
+    (mf/portal form (dom/get-body))
+    form))
+
 (mf/defc comment-floating-thread-draft*
-  [{:keys [draft zoom on-cancel on-submit position-modifier viewport]}]
+  "A new thread at the `:position` of `draft`, its form beside it, or at
+  the bottom of the screen when `docked`."
+  [{:keys [draft zoom on-cancel on-submit position-modifier viewport docked]}]
   (let [profile   (mf/deref refs/profile)
 
         mentions-s (mf/use-memo #(rx/subject))
@@ -1084,31 +1095,36 @@
       [:> comment-avatar* {:class (stl/css :avatar-lg)
                            :image (cfg/resolve-profile-photo-url profile)}]]
 
-     [:div {:class (stl/css-case :floating-thread-draft-inner-wrapper true
-                                 :cursor-auto true
-                                 :left (= (:h-dir pos) :left)
-                                 :top (= (:v-dir pos) :top))
-            :style {:top (str pos-y "px")
-                    :left (str pos-x "px")}
-            :on-click dom/stop-propagation}
-      [:div {:class (stl/css :form)}
-       (when-let [time (:animation-time draft)]
-         [:> thread-moment* {:time time
-                             :on-remove on-remove-moment}])
-       [:> comment-input*
-        {:placeholder (tr "labels.write-new-comment")
-         :value (or content "")
-         :autofocus true
-         :on-esc on-esc
-         :on-change on-change
-         :on-ctrl-enter on-submit*}]
-       (when (exceeds-length? content)
-         [:div {:class (stl/css :error-text)}
-          (tr "errors.character-limit-exceeded")])
-       [:> comment-form-buttons* {:on-submit on-submit*
-                                  :on-cancel on-esc
-                                  :is-disabled disabled?}]]
-      [:> mentions-panel*]]]))
+     (dock
+      (mf/html
+       [:div {:class (stl/css-case :floating-thread-draft-inner-wrapper true
+                                   :cursor-auto true
+                                   :docked docked
+                                   :left (and (not docked) (= (:h-dir pos) :left))
+                                   :top (and (not docked) (= (:v-dir pos) :top)))
+              ;; a map literal: rumext passes only these to React as styles
+              :style {:top (when-not docked (str pos-y "px"))
+                      :left (when-not docked (str pos-x "px"))}
+              :on-click dom/stop-propagation}
+        [:div {:class (stl/css :form)}
+         (when-let [time (:animation-time draft)]
+           [:> thread-moment* {:time time
+                               :on-remove on-remove-moment}])
+         [:> comment-input*
+          {:placeholder (tr "labels.write-new-comment")
+           :value (or content "")
+           :autofocus true
+           :on-esc on-esc
+           :on-change on-change
+           :on-ctrl-enter on-submit*}]
+         (when (exceeds-length? content)
+           [:div {:class (stl/css :error-text)}
+            (tr "errors.character-limit-exceeded")])
+         [:> comment-form-buttons* {:on-submit on-submit*
+                                    :on-cancel on-esc
+                                    :is-disabled disabled?}]]
+        [:> mentions-panel*]])
+      docked)]))
 
 (mf/defc comment-floating-thread-header*
   {::mf/private true}
@@ -1264,11 +1280,12 @@
   (l/derived (l/in [:comments thread-id]) st/state))
 
 (mf/defc comment-floating-thread*
-  "An open comment thread. Given `on-show-time`, a click on the moment
-  of the animation it is about, or on a timestamp in its comments, calls
-  it with that moment (ms)."
+  "An open comment thread, beside its bubble, or at the bottom of the
+  screen when `docked`. Given `on-show-time`, a click on the moment of the
+  animation it is about, or on a timestamp in its comments, calls it with
+  that moment (ms)."
   {::mf/wrap [mf/memo]}
-  [{:keys [thread zoom origin position-modifier viewport on-show-time]}]
+  [{:keys [thread zoom origin position-modifier viewport on-show-time docked]}]
   (let [ref           (mf/use-ref)
         mentions-s    (mf/use-memo #(rx/subject))
         thread-id     (:id thread)
@@ -1324,41 +1341,45 @@
     (mf/with-effect [thread-id]
       (st/emit! (dcm/update-comment-thread-status thread-id)))
 
-    (mf/with-layout-effect [thread-pos comments-map]
-      (when-let [node (mf/ref-val ref)]
+    (mf/with-layout-effect [thread-pos comments-map docked]
+      (when-let [node (when-not docked (mf/ref-val ref))]
         (dom/scroll-into-view-if-needed! node)))
 
     [:> (mf/provider mentions-context) {:value mentions-s}
      (when (some? first-comment)
-       [:div {:class (stl/css-case :floating-thread-wrapper true
-                                   :cursor-auto true
-                                   :left (= (:h-dir pos) :left)
-                                   :top (= (:v-dir pos) :top))
-              :id (str "thread-" thread-id)
-              :style {:left (str pos-x "px")
-                      :top (str pos-y "px")
-                      "--comment-height" (str max-height "px")}
-              :on-key-down on-key-down
-              :on-click dom/stop-propagation}
+       (dock
+        (mf/html
+         [:div {:class (stl/css-case :floating-thread-wrapper true
+                                     :cursor-auto true
+                                     :docked docked
+                                     :left (and (not docked) (= (:h-dir pos) :left))
+                                     :top (and (not docked) (= (:v-dir pos) :top)))
+                :id (str "thread-" thread-id)
+                :style {:left (when-not docked (str pos-x "px"))
+                        :top (when-not docked (str pos-y "px"))
+                        "--comment-height" (when-not docked (str max-height "px"))}
+                :on-key-down on-key-down
+                :on-click dom/stop-propagation}
 
-        [:div {:class (stl/css :floating-thread-header)}
-         [:> comment-floating-thread-header* {:thread thread
-                                              :origin origin
-                                              :on-show-time on-show-time}]]
+          [:div {:class (stl/css :floating-thread-header)}
+           [:> comment-floating-thread-header* {:thread thread
+                                                :origin origin
+                                                :on-show-time on-show-time}]]
 
-        [:div {:class (stl/css :floating-thread-main)}
-         [:> comment-floating-thread-item* {:comment first-comment
-                                            :thread thread
-                                            :on-show-time on-show-time}]
-         (for [item (rest comments)]
-           [:* {:key (dm/str (:id item))}
-            [:> comment-floating-thread-item* {:comment item
-                                               :on-show-time on-show-time}]])]
+          [:div {:class (stl/css :floating-thread-main)}
+           [:> comment-floating-thread-item* {:comment first-comment
+                                              :thread thread
+                                              :on-show-time on-show-time}]
+           (for [item (rest comments)]
+             [:* {:key (dm/str (:id item))}
+              [:> comment-floating-thread-item* {:comment item
+                                                 :on-show-time on-show-time}]])]
 
-        [:> comment-reply-form* {:on-submit on-submit
-                                 :on-cancel (when (= origin :viewer) on-cancel)}]
+          [:> comment-reply-form* {:on-submit on-submit
+                                   :on-cancel (when (= origin :viewer) on-cancel)}]
 
-        [:> mentions-panel*]])]))
+          [:> mentions-panel*]])
+        docked))]))
 
 ;; Screen-space gap (px) between concentric rings of an expanded cluster.
 (def ^:private expanded-ring-gap 44)

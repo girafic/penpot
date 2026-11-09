@@ -98,11 +98,13 @@
               :component-child? component-tree?}]))])]))
 
 (mf/defc left-sidebar
-  [{:keys [frame page local]}]
+  "The layers of `frame`, as wide as a sidebar, or as what holds them when
+  `fill` (a sheet of a phone)."
+  [{:keys [frame page local fill]}]
   (let [selected (:selected local)
         objects  (:objects page)]
 
-    [:aside {:class (stl/css :settings-bar-left)}
+    [:aside {:class (stl/css-case :settings-bar-left true :fill fill)}
      [:div {:class (stl/css :settings-bar-inside)}
       [:div {:class (stl/css :element-list)}
        [:& layer-item

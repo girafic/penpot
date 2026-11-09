@@ -28,6 +28,22 @@
   min-block-size: unset;
 }
 
+// a phone shows it as a sheet from its bottom, as wide as its screen
+:global(body:has([data-phone="true"])) .share-modal {
+  position: fixed;
+  inset: auto 0 0;
+}
+
+:global(body:has([data-phone="true"])) .share-link-dialog {
+  min-inline-size: 0;
+  max-inline-size: none;
+  max-block-size: 85dvh;
+  padding-block-end: calc(env(safe-area-inset-bottom) + var(--sp-xxl));
+  padding-inline: calc(env(safe-area-inset-left) + var(--sp-xl)) calc(env(safe-area-inset-right) + var(--sp-xl));
+  overflow-y: auto;
+  border-radius: $br-12 $br-12 0 0;
+}
+
 .share-link-header {
   margin-block-end: var(--sp-xxl);
 }

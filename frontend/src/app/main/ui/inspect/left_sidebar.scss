@@ -10,6 +10,10 @@
   background-color: var(--panel-background-color);
   height: 100%;
   width: deprecated.$s-256;
+
+  &.fill {
+    width: 100%;
+  }
 }
 
 .settings-bar-inside {

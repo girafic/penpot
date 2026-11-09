@@ -28,13 +28,17 @@
   [:div])
 
 (defn- touch!
-  "The fingers `points` (`[[x y]...]`) `type` on `window`."
-  [^js window type points]
-  (let [event   (new (.-Event window) type #js {:bubbles true})
+  "The fingers `points` (`[[x y]...]`) `type` on `target`, the window of
+  jsdom or a node of it."
+  [^js target type points]
+  (let [window  (or (some-> target .-ownerDocument .-defaultView) target)
+        event   (new (.-Event window) type #js {:bubbles true})
         touches (into-array (map-indexed (fn [i [x y]] #js {:identifier i :clientX x :clientY y}) points))]
+    ;; a TouchList
+    (set! (.-item touches) #(aget touches %))
     (set! (.-touches event) touches)
     (set! (.-changedTouches event) touches)
-    (.dispatchEvent window event)))
+    (.dispatchEvent target event)))
 
 (defn- held
   "Whether the sheet opened as two fingers come down and do `then`."
@@ -77,3 +81,37 @@
     (fn [{:keys [root document]}]
       (thd/render! root (mf/element phone-sheet/hold-hint* #js {}))
       (t/is (nil? (.querySelector document "[role=status]")) "not again"))))
+
+(defn- sheet
+  "How a sheet `props` renders: `[dialog? backdrop?]`, and whether a tap
+  on its backdrop closed it."
+  [props]
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [closed? (atom false)]
+        (thd/render! root (mf/element phone-sheet/sheet*
+                                      (js/Object.assign #js {:label "Options"
+                                                             :onClose #(reset! closed? true)
+                                                             :children (mf/html [:p "content"])}
+                                                        props)))
+        (let [dialog   (.querySelector document "[role=dialog][aria-label=Options]")
+              backdrop (.querySelector document "[class*=backdrop]")]
+          (some->> backdrop (thd/click! window))
+          [(some? dialog) (some? backdrop) @closed?])))))
+
+(t/deftest a-sheet-dims-what-it-covers-unless-open-beside
+  (t/is (= [true true true] (sheet #js {})) "a tap beside it closes it")
+  (t/is (= [true false false] (sheet #js {:openBeside true})) "what shows above it takes taps"))
+
+(t/deftest a-sheet-follows-the-finger-down-its-grip
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (thd/render! root (mf/element phone-sheet/sheet* #js {:label "Options" :onClose (fn [])}))
+      (let [grip (.querySelector document "[class*=grip-zone]")]
+        (thd/act #(do (touch! grip "touchstart" [[100 400]])
+                      (touch! grip "touchmove" [[100 440]])))
+        (t/is (= "translateY(40px)"
+                 (.. document (querySelector "[role=dialog]") -style -transform)))
+        (thd/act #(touch! grip "touchend" []))
+        (t/is (= "" (.. document (querySelector "[role=dialog]") -style -transform)) "back")))))
+

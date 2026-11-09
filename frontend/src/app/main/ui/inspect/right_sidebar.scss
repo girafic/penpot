@@ -22,6 +22,11 @@
   &.viewer-code {
     block-size: calc(100vh - $sz-48);
   }
+
+  &.fill {
+    block-size: 100%;
+    min-inline-size: 0;
+  }
 }
 
 .tool-windows {

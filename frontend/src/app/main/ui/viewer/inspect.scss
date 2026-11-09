@@ -51,3 +51,14 @@
   z-index: deprecated.$z-index-10;
   cursor: ew-resize;
 }
+
+// on a phone the sheet covers the bottom half of the screen: the board
+// scrolls as far as to show its bottom above it (see `phone-viewport*`)
+.above-sheet {
+  padding-block-end: 50dvh;
+}
+
+.phone-tabs {
+  flex: 1;
+  min-block-size: 0;
+}

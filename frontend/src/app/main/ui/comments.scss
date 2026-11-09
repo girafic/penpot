@@ -304,6 +304,37 @@
   }
 }
 
+// a phone shows an open thread and a new one at the bottom of its screen,
+// as wide as it, above its keyboard (see `phone-sheet/use-keyboard-inset!`)
+.floating-thread-wrapper.docked,
+.floating-thread-draft-inner-wrapper.docked {
+  position: fixed;
+  inset-inline: 0;
+  inset-block: auto var(--keyboard-inset, 0);
+  z-index: var(--z-index-panels);
+  inline-size: auto;
+  max-block-size: 60dvh;
+  padding: var(--sp-m) calc(env(safe-area-inset-right) + var(--sp-m)) calc(env(safe-area-inset-bottom) + var(--sp-m))
+    calc(env(safe-area-inset-left) + var(--sp-m));
+  border: none;
+  border-radius: $br-12 $br-12 0 0;
+  box-shadow: 0 0 px2rem(16) rgb(0 0 0 / 0.2);
+  transform: none;
+}
+
+.docked .floating-thread-main {
+  flex: 1;
+  min-block-size: 0;
+  max-block-size: none;
+}
+
+// as wide as the screen; the text at least 16px high, or Safari zooms
+// the page in as the field gets the focus
+.docked .comment-input {
+  max-inline-size: none;
+  font-size: px2rem(16);
+}
+
 .floating-thread-header {
   position: relative;
   display: flex;

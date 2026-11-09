@@ -1057,8 +1057,10 @@
                           (and (some? device-layout) (dvd/touch? (:kind device)))
                           (some-> frame :fills first :fill-color))
 
-    ;; two fingers held on a phone open its sheet
+    ;; two fingers held on a phone open its sheet; what docks at its
+    ;; bottom, a comment, stays above its keyboard
     (phone-sheet/use-two-finger-hold! phone? #(reset! sheet* true))
+    (phone-sheet/use-keyboard-inset! phone?)
 
     ;; a phone scrolls the board itself, and it gives past an end as that
     ;; screen does, its fixed layers staying
@@ -1324,7 +1326,8 @@
              :index index
              :viewer-pagination viewer-pagination
              :interactions-mode interactions-mode
-             :share-id share-id}]
+             :share-id share-id
+             :phone phone?}]
 
            [:& (mf/provider ctx/current-zoom) {:value zoom}
             [:& viewer-wrapper

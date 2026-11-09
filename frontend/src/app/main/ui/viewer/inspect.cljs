@@ -12,11 +12,14 @@
    [app.main.constants :refer [right-sidebar-default-width right-sidebar-default-max-width]]
    [app.main.data.viewer :as dv]
    [app.main.store :as st]
+   [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
    [app.main.ui.hooks.resize :refer [use-resize-hook]]
    [app.main.ui.inspect.left-sidebar :refer [left-sidebar]]
    [app.main.ui.inspect.render :refer [render-frame-svg]]
    [app.main.ui.inspect.right-sidebar :refer [right-sidebar*]]
+   [app.main.ui.viewer.phone-sheet :as phone-sheet]
    [app.util.dom :as dom]
+   [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [goog.events :as events]
    [rumext.v2 :as mf])
@@ -40,8 +43,57 @@
         (dom/remove-class! layout "force-visible")
         (dom/add-class! layout "force-visible")))))
 
+(mf/defc phone-viewport*
+  "Inspect on a phone: the board alone, a tap on a layer selects it and
+  opens a sheet over the bottom half of the screen with what it is and its
+  code, or the layers of the board. Above the sheet the board still takes
+  taps, and it scrolls as far as to show its bottom there."
+  {::mf/private true}
+  [{:keys [local file page frame size share-id]}]
+  (let [sheet* (mf/use-state false)
+        sheet? (deref sheet*)
+        tab*   (mf/use-state "info")
+        tab    (deref tab*)
+
+        open-sheet
+        (mf/use-fn #(reset! sheet* true))
+
+        close-sheet
+        (mf/use-fn #(reset! sheet* false))]
+
+    [:*
+     [:div#inspect-svg-wrapper {:class (stl/css :inspect-svg-wrapper)
+                                :data-value (pr-str (:id frame))
+                                :on-click handle-select-frame
+                                :on-click-capture open-sheet}
+      [:div#inspect-svg-container {:class (stl/css-case :inspect-svg-container true
+                                                        :above-sheet sheet?)}
+       [:& render-frame-svg {:frame frame :page page :local local :size size}]]]
+
+     (when sheet?
+       [:> phone-sheet/sheet* {:label (tr "workspace.options.inspect")
+                               :height :half
+                               :open-beside true
+                               :on-close close-sheet}
+        [:> tab-switcher* {:tabs [{:label (tr "inspect.layer-info") :id "info"}
+                                  {:label (tr "workspace.sidebar.layers") :id "layers"}]
+                           :selected tab
+                           :on-change #(reset! tab* %)
+                           :class (stl/css :phone-tabs)}
+         (if (= tab "layers")
+           [:& left-sidebar {:frame frame
+                             :local local
+                             :page page
+                             :fill true}]
+           [:> right-sidebar* {:frame frame
+                               :selected (:selected local)
+                               :page page
+                               :file file
+                               :share-id share-id
+                               :fill true}])]])]))
+
 (mf/defc viewport
-  [{:keys [local file page frame index viewer-pagination size share-id]}]
+  [{:keys [local file page frame index viewer-pagination size share-id phone]}]
   (let [inspect-svg-container-ref (mf/use-ref nil)
         current-section* (mf/use-state :info)
         current-section  (deref current-section*)
@@ -91,32 +143,39 @@
      (fn []
        (st/emit! (dv/select-shape (:id frame)))))
 
-    [:*
-     [:& left-sidebar {:frame frame
-                       :local local
-                       :page page}]
-     [:div#inspect-svg-wrapper {:class (stl/css :inspect-svg-wrapper)
-                                :data-value (pr-str (:id frame))
-                                :on-click handle-select-frame}
-      [:& viewer-pagination {:index index :num-frames (count (:frames page)) :left-bar true :right-bar true}]
-      [:div#inspect-svg-container {:class (stl/css :inspect-svg-container)
-                                   :ref inspect-svg-container-ref}
-       [:& render-frame-svg {:frame frame :page page :local local :size size}]]]
+    (if phone
+      [:> phone-viewport* {:local local
+                           :file file
+                           :page page
+                           :frame frame
+                           :size size
+                           :share-id share-id}]
+      [:*
+       [:& left-sidebar {:frame frame
+                         :local local
+                         :page page}]
+       [:div#inspect-svg-wrapper {:class (stl/css :inspect-svg-wrapper)
+                                  :data-value (pr-str (:id frame))
+                                  :on-click handle-select-frame}
+        [:& viewer-pagination {:index index :num-frames (count (:frames page)) :left-bar true :right-bar true}]
+        [:div#inspect-svg-container {:class (stl/css :inspect-svg-container)
+                                     :ref inspect-svg-container-ref}
+         [:& render-frame-svg {:frame frame :page page :local local :size size}]]]
 
-     [:div {:class (stl/css-case :sidebar-container true
-                                 :not-expand (not can-be-expanded?)
-                                 :expanded can-be-expanded?)
+       [:div {:class (stl/css-case :sidebar-container true
+                                   :not-expand (not can-be-expanded?)
+                                   :expanded can-be-expanded?)
 
-            :style #js {"--right-sidebar-width" (when can-be-expanded? (dm/str right-size "px"))}}
-      (when can-be-expanded?
-        [:div {:class (stl/css :resize-area)
-               :on-pointer-down on-pointer-down
-               :on-lost-pointer-capture on-lost-pointer-capture
-               :on-pointer-move on-pointer-move}])
-      [:> right-sidebar* {:frame frame
-                          :selected (:selected local)
-                          :page page
-                          :file file
-                          :on-change-section handle-change-section
-                          :on-expand handle-expand
-                          :share-id share-id}]]]))
+              :style #js {"--right-sidebar-width" (when can-be-expanded? (dm/str right-size "px"))}}
+        (when can-be-expanded?
+          [:div {:class (stl/css :resize-area)
+                 :on-pointer-down on-pointer-down
+                 :on-lost-pointer-capture on-lost-pointer-capture
+                 :on-pointer-move on-pointer-move}])
+        [:> right-sidebar* {:frame frame
+                            :selected (:selected local)
+                            :page page
+                            :file file
+                            :on-change-section handle-change-section
+                            :on-expand handle-expand
+                            :share-id share-id}]]])))

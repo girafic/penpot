@@ -42,7 +42,9 @@
                      :data local})))))
 
 (mf/defc right-sidebar*
-  [{:keys [frame page objects file selected shapes page-id file-id share-id from on-change-section on-expand]
+  "What `shapes` or the `selected` of `page` are and their code, as high as
+  the window, or as what holds it when `fill` (a sheet of a phone)."
+  [{:keys [frame page objects file selected shapes page-id file-id share-id from on-change-section on-expand fill]
     :or {from :viewer}}]
   (let [color-space*   (mf/use-state "hex")
         color-space    (deref color-space*)
@@ -132,7 +134,8 @@
          (handle-change-tab (if (contains? cf/flags :inspect-styles) :styles :info)))))
 
     [:aside {:class (stl/css-case :settings-bar-right true
-                                  :viewer-code (= from :viewer))}
+                                  :viewer-code (= from :viewer)
+                                  :fill fill)}
      (if (seq shapes)
        [:div {:class (stl/css :tool-windows)}
         [:div {:class (stl/css-case :shape-info true :shape-info-subtitle (some? subtitle))}
