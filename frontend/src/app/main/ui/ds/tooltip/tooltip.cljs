@@ -257,6 +257,15 @@
                                  (reset! active-tooltip {:id tooltip-id :trigger trigger-el})
                                  (reset! visible* true))))))))
 
+        ;; not for a finger: a touch screen keeps it over what it tapped
+        ;; until it taps elsewhere, the tooltip stayed
+        on-pointer-enter
+        (mf/use-fn
+         (mf/deps on-show)
+         (fn [event]
+           (when-not (= "touch" (.-pointerType event))
+             (on-show event))))
+
         on-show-focus
         (mf/use-fn
          (mf/deps on-show)
@@ -303,8 +312,8 @@
           content)
         props
         (mf/spread-props props
-                         {:on-mouse-enter on-show
-                          :on-mouse-leave on-hide
+                         {:on-pointer-enter on-pointer-enter
+                          :on-pointer-leave on-hide
                           :on-focus on-show-focus
                           :on-blur on-hide
                           :ref internal-trigger-ref
