@@ -43,7 +43,8 @@
 
 (mf/defc right-sidebar*
   "What `shapes` or the `selected` of `page` are and their code, as high as
-  the window, or as what holds it when `fill` (a sheet of a phone)."
+  the window; when `fill` (a sheet of a phone), as wide as what holds it
+  and as high as what it shows."
   [{:keys [frame page objects file selected shapes page-id file-id share-id from on-change-section on-expand fill]
     :or {from :viewer}}]
   (let [color-space*   (mf/use-state "hex")

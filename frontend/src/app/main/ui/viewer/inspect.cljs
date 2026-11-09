@@ -79,6 +79,8 @@
                                   {:label (tr "workspace.sidebar.layers") :id "layers"}]
                            :selected tab
                            :on-change #(reset! tab* %)
+                           ;; its tabs stay as what they show scrolls
+                           :scrollable-panel true
                            :class (stl/css :phone-tabs)}
          (if (= tab "layers")
            [:& left-sidebar {:frame frame

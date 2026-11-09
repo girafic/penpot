@@ -23,8 +23,13 @@
     block-size: calc(100vh - $sz-48);
   }
 
+  // as high as what it shows, which the tab it is in scrolls, not
+  // stretched to it; in no area of a grid there, which would add a
+  // column before it
   &.fill {
-    block-size: 100%;
+    grid-area: auto;
+    align-self: start;
+    block-size: auto;
     min-inline-size: 0;
   }
 }
