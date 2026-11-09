@@ -401,10 +401,17 @@
 
 /** PHONE: the board as wide as the screen, the header and the bar at the
   bottom over it on request (see `phone-bars-button*`); the page itself
-  never bounces nor reloads by a pull */
+  never bounces nor reloads by a pull, and is as high as what the
+  browser shows (`100vh` there is as high as without its bars: the page
+  scrolled, the board, its fixed layers and all) */
 :global(html:has([data-phone="true"])),
 :global(body:has([data-phone="true"])) {
   overscroll-behavior: none;
+}
+
+:global(body:has([data-phone="true"])),
+:global(#app:has([data-phone="true"])) {
+  block-size: 100dvh;
 }
 
 [data-phone="true"] {
@@ -420,6 +427,11 @@
 [data-phone="true"] .device-stage {
   block-size: 100dvh;
   touch-action: manipulation;
+}
+
+// the board bounces at its ends, the page never
+[data-phone="true"] .viewer-section {
+  overscroll-behavior: contain;
 }
 
 [data-phone="true"] .viewer-go-next,
