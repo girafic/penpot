@@ -283,3 +283,15 @@
 
     (t/testing "generate"
       (t/is (true? (sm/validate ::sm/user-provided-uuid (sg/generate ::sm/user-provided-uuid)))))))
+
+(t/deftest test-check-fn
+  (t/testing "checks a value"
+    (let [check (sm/check-fn [:map [:x :int]] :hint "bad x")]
+      (t/is (= {:x 1} (check {:x 1})))
+      (t/is (thrown-with-msg? #?(:clj Exception :cljs js/Error) #"bad x" (check {:x "1"})))))
+
+  #?(:cljs
+     (t/testing "in the browser builds its schema on the first check"
+       (let [check (sm/check-fn [:map [:x ::not-registered]])]
+         (t/is (fn? check))
+         (t/is (thrown-with-msg? js/Error #"Invalid schema" (check {:x 1})))))))

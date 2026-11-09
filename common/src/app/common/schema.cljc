@@ -321,24 +321,28 @@
   ([registry s] (schema (mr/schema registry s))))
 
 (defn check-fn
-  "Create a predefined check function"
+  "Create a predefined check function. In the browser the schema is
+  built on the first check: built as the namespaces load, the schemas
+  of all the check functions were most of what the app allocated to
+  start (WebKit keeps that memory, a phone ran short of it)."
   [s & {:keys [hint type code]}]
-  (let [s          #?(:clj
-                      (schema s)
+  (let [s*         #?(:clj
+                      (let [s (schema s)] (delay s))
                       :cljs
-                      (try
-                        (schema s)
-                        (catch :default cause
-                          (let [data (ex-data cause)]
-                            (if (= :malli.core/invalid-schema (:type data))
-                              (throw (ex-info
-                                      (str "Invalid schema\n"
-                                           (pp/pprint-str (:data data)))
-                                      {}))
-                              (throw cause))))))
+                      (delay
+                        (try
+                          (schema s)
+                          (catch :default cause
+                            (let [data (ex-data cause)]
+                              (if (= :malli.core/invalid-schema (:type data))
+                                (throw (ex-info
+                                        (str "Invalid schema\n"
+                                             (pp/pprint-str (:data data)))
+                                        {}))
+                                (throw cause)))))))
 
-        validator* (delay (m/validator s))
-        explainer* (delay (m/explainer s))
+        validator* (delay (m/validator @s*))
+        explainer* (delay (m/explainer @s*))
         hint       (or ^boolean hint "check error")
         type       (or ^boolean type :assertion)
         code       (or ^boolean code :data-validation)]
