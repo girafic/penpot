@@ -90,7 +90,8 @@
   no listeners.
 
   - `opts` has keys `module`, `context-id`, `css-width`, `css-height`, `dpr`,
-     `flags`, `browser`, and `params`.
+     `flags`, `browser`, `params` and `reduce-render-passes?` (on a phone: see
+     `GpuState::try_new` in render-wasm).
   - `module` is the Emscripten module object holding `GL`, `_init`,
     `_set_render_options`, and `_set_browser`. `context-id` is `\"webgl2\"`
     (or `\"fail\"` to force the debug failure path).
@@ -106,7 +107,7 @@
   Returns `{:context :handle}` or nil when `getContext` returns nil.
   On failure, releases acquired resources before rethrowing. On success,
   ownership transfers to the caller."
-  [canvas {:keys [module context-id css-width css-height dpr flags browser params]}]
+  [canvas {:keys [module context-id css-width css-height dpr flags browser params reduce-render-passes?]}]
   (let [gl      (unchecked-get module "GL")
         context (.getContext ^js canvas context-id default-context-options)]
     (when-not (nil? context)
@@ -119,7 +120,7 @@
           (.getExtension context "WEBGL_debug_renderer_info")
 
           ;; Initialize Wasm Render Engine
-          (h/call module "_init" css-width css-height)
+          (h/call module "_init" css-width css-height (boolean reduce-render-passes?))
           (h/call module "_set_render_options" flags dpr)
 
           ;; Configurable parameters, fixed order to match the editor path.

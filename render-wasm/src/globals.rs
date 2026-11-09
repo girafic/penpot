@@ -149,10 +149,11 @@ impl Drop for TestRenderResourcesGuard {
     }
 }
 
-/// Initializes GPUState.
-fn gpu_init() {
+/// Initializes GPUState (see `GpuState::try_new` for `reduce_render_passes`).
+fn gpu_init(reduce_render_passes: bool) {
     unsafe {
-        let gpu_state = GpuState::try_new().expect("Cannot initialize GPU State");
+        let gpu_state =
+            GpuState::try_new(reduce_render_passes).expect("Cannot initialize GPU State");
         GPU_STATE = Box::into_raw(Box::new(gpu_state));
     }
 }
@@ -209,10 +210,10 @@ fn ui_init() {
 
 #[no_mangle]
 #[wasm_error]
-pub extern "C" fn init(width: i32, height: i32) -> Result<()> {
+pub extern "C" fn init(width: i32, height: i32, reduce_render_passes: bool) -> Result<()> {
     #[cfg(target_arch = "wasm32")]
     init_gl!();
-    gpu_init();
+    gpu_init(reduce_render_passes);
     resources_init();
     render_init(width, height);
     text_editor_init();

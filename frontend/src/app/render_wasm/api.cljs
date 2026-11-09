@@ -61,6 +61,7 @@
    [app.util.modules :as mod]
    [app.util.text.content :as tc]
    [app.util.timers :as timers]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
    [potok.v2.core :as ptk]
@@ -2535,7 +2536,8 @@
                                                  :dpr        dpr
                                                  :flags      flags
                                                  :browser    browser
-                                                 :params     params})
+                                                 :params     params
+                                                 :reduce-render-passes? (touch/phone?)})
           context-init? (some? result)
           can-listen? (fn? (.-addEventListener ^js canvas))]
       (when result

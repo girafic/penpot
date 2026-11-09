@@ -12,7 +12,8 @@
 
 (defn- fake-env
   "Builds `{canvas context module calls}` fakes.
-  - `calls` records `:register`, `:delete`, `:clean` and `:lose` events.
+  - `calls` records `:register`, `:delete`, `:clean`, `:lose` and `:init`
+    (with its arguments) events.
   - Options:
     - `:throw-in` makes that module fn throw (`:_init`, `:_set_browser`, ...),
     - `:register-throws?` fails Emscripten registration (no handle exists),
@@ -38,7 +39,9 @@
                       (throw (js/Error. (str "fake " (pr-str name) " failure"))))
                     nil))
         module  #js {:GL gl
-                     :_init (thrower :_init)
+                     :_init (fn [& args]
+                              (swap! calls conj (into [:init] args))
+                              (apply (thrower :_init) args))
                      :_set_render_options (thrower :_set_render_options)
                      :_set_browser (thrower :_set_browser)
                      :_clean_up (fn [& _] (swap! calls conj [:clean]) nil)}
@@ -103,3 +106,12 @@
           "no handle exists to delete")
     (t/is (= 1 (effect-count @calls :lose))
           "the browser context is still released")))
+
+(t/deftest init-asks-for-fewer-render-passes-on-a-phone
+  ;; the GPU of a phone pays for each switch of render target (see
+  ;; `GpuState::try_new` in render-wasm)
+  (let [{:keys [canvas module calls]} (fake-env {})]
+    (webgl/init-context canvas (assoc (init-opts module) :reduce-render-passes? true))
+    (webgl/init-context canvas (init-opts module))
+    (t/is (= [[:init 100 100 true] [:init 100 100 false]]
+             (filter #(= :init (first %)) @calls)))))

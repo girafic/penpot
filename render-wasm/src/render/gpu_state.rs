@@ -19,14 +19,23 @@ pub struct GpuState {
 }
 
 impl GpuState {
-    pub fn try_new() -> Result<Self> {
+    /// `reduce_render_passes` on a phone: Skia orders its work to switch
+    /// render targets less. A switch cost an iPhone 13 mini ~60 µs, as big
+    /// as the target or not, and a frame of an animation in the view mode
+    /// took ~1000 of them; on a desktop the ordering costs more CPU than
+    /// the switches it saves.
+    pub fn try_new(reduce_render_passes: bool) -> Result<Self> {
         let interface = gpu::gl::Interface::new_native().ok_or(Error::CriticalError(
             "Failed to create GL interface".to_string(),
         ))?;
 
         // We tweak some options to enhance performance.
         let mut context_options = ContextOptions::default();
-        context_options.reduce_ops_task_splitting = Enable::No;
+        context_options.reduce_ops_task_splitting = if reduce_render_passes {
+            Enable::Yes
+        } else {
+            Enable::No
+        };
         context_options.skip_gl_error_checks = Enable::Yes;
         // context_options.runtime_program_cache_size = 1024;
         // context_options.allow_multiple_glyph_cache_textures = Enable::Yes;
