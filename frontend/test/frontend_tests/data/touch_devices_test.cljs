@@ -49,6 +49,26 @@
   (t/is (false? (touch/phone-screen? 393 852 false)) "not touched: no phone")
   (t/is (false? (touch/phone-screen? nil nil true)) "no screen"))
 
+(t/deftest a-press-that-acted-has-no-click
+  ;; a finger on a hotspot of the view mode: the board changes as it
+  ;; lifts, and the click Safari sends 0.6 to 1.5 s later landed on the
+  ;; next board, showing its hotspots as for a click on none
+  (let [swallowed (atom [])
+        event     (fn [type] #js {:type type
+                                  :preventDefault #(swap! swallowed conj type)
+                                  :stopPropagation (fn [])})
+        lift!     #(#'touch/on-lift-click (event %))]
+    (touch/press-acted!)
+    (lift! "mouseup")
+    (lift! "click")
+    (lift! "click")
+    (t/is (= ["click"] @swallowed) "its click is none, once; its mouse goes on")
+    (reset! swallowed [])
+    (touch/press-acted!)
+    (#'touch/on-press-down #js {:pointerType "mouse"})
+    (lift! "click")
+    (t/is (empty? @swallowed) "a new press clicks again")))
+
 (t/deftest viewport-tags
   (t/is (= "width=device-width, initial-scale=1, viewport-fit=cover"
            (touch/viewport-content :viewer true true)

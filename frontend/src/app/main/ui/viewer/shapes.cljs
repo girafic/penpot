@@ -35,6 +35,7 @@
    [app.util.dom :as dom]
    [app.util.object :as obj]
    [app.util.timers :as tm]
+   [app.util.touch :as touch]
    [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
@@ -330,6 +331,7 @@
                                        (= (:event-type %) :mouse-press))))]
     (when (seq interactions)
       (dom/stop-propagation event)
+      (touch/press-acted!)
       (doseq [interaction interactions]
         (activate-interaction interaction shape base-frame frame-offset objects overlays)))))
 
@@ -344,6 +346,7 @@
                         (filter #(= (:event-type %) :click))))]
     (when (or (seq releases) (seq taps))
       (dom/stop-propagation event)
+      (touch/press-acted!)
       (doseq [interaction releases]
         (deactivate-interaction interaction shape base-frame frame-offset objects overlays))
       (doseq [interaction taps]

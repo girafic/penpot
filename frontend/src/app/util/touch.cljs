@@ -170,6 +170,31 @@
 (defonce ^:private swallow
   (volatile! {:armed false :until 0}))
 
+(def ^:private act-ms
+  "How long after a press acted the click the browser sends for it may
+  come: a finger's comes once the page did what the press does, up to a
+  second and a half later on a busy phone."
+  2000)
+
+(defonce ^:private acted
+  (volatile! 0))
+
+(defn press-acted!
+  "A press did what it does itself (an interaction of the view mode):
+  the click the browser sends as it ends is none. A finger's comes late,
+  on what the press brought up, where it showed the hotspots of the
+  next board as for a click on none of them (see `dv/flash-interactions`)."
+  []
+  (vreset! acted (+ (js/Date.now) act-ms)))
+
+(defn- acted-click?
+  "Whether `event` is the click of a press that acted (see
+  `press-acted!`): the first one after it, in time."
+  [^js event]
+  (when (and (= "click" (.-type event)) (< (js/Date.now) @acted))
+    (vreset! acted 0)
+    true))
+
 (defn menu-opened!
   "A finger held opened a context menu: as it lifts, the browser clicks
   where it was, on the menu now; that click is none."
@@ -199,6 +224,7 @@
   [^js event]
   (cancel-press!)
   (vreset! swallow {:armed false :until 0})
+  (vreset! acted 0)
   (when (= "touch" (.-pointerType event))
     (let [target (.-target event)]
       ;; the canvas holds its fingers itself (see
@@ -226,9 +252,9 @@
 
 (defn- on-lift-click
   "A click, or its mouse, the browser sends for the finger that held a
-  menu open: swallowed."
+  menu open, or the click of a press that acted: swallowed."
   [^js event]
-  (when (< (js/Date.now) (:until @swallow))
+  (when (or (< (js/Date.now) (:until @swallow)) (acted-click? event))
     (.preventDefault event)
     (.stopPropagation event)))
 
