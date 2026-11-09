@@ -230,6 +230,40 @@
   (let [state (device-state "none" 402 874 402 {})]
     (t/is (= state (ptk/update dv/turn-device state)) "nor does no device")))
 
+(defn- board
+  [n name w h & {:as attrs}]
+  (merge {:id (uuid/custom 2 n) :type :frame :name name
+          :parent-id uuid/zero :frame-id uuid/zero
+          :selrect {:width w :height h}}
+         attrs))
+
+(defn- phone-state
+  "The view mode of a phone (no device drawn round its boards) showing
+  the first of `frames`, a page `vw` × `vh` CSS px."
+  [frames vw vh]
+  {:route {:params {:query {:page-id (str page-id) :index "0"}}}
+   :viewer {:pages {page-id {:frames frames :all-frames frames}}}
+   :viewer-local {:viewport-size {:width vw :height vh}
+                  :phone? true
+                  :device {:choice "none" :finish "dark"}}})
+
+(t/deftest a-phone-shows-the-board-held-as-it-is
+  ;; Safari on an iPhone 13 mini: 375 × 610 CSS px standing, 812 × 311
+  ;; on its side, where the board stood as tall as the page was wide
+  (let [menu (board 1 "Menu" 402 874)
+        zoom #(get-in (ptk/update dv/zoom-to-width %) [:viewer-local :zoom])]
+    (t/is (= :portrait (dv/phone-hold {:width 375 :height 610})))
+    (t/is (= :landscape (dv/phone-hold {:width 812 :height 311})))
+    (t/is (nil? (dv/phone-hold nil)) "none before the page has a size")
+    (t/is (= (/ 375 402) (zoom (phone-state [menu] 375 610))) "standing, as wide as the board")
+    (t/is (= (/ 812 874) (zoom (phone-state [menu] 812 311)))
+          "on its side, as wide as the board turned to the screen of a phone")
+    (let [land (board 2 "Menu landscape" 900 402)
+          menu (assoc menu :counterpart (:id land))]
+      (t/is (= (/ 812 900) (zoom (phone-state [menu land] 812 311)))
+            "on its side, as wide as its counterpart"))
+    (t/is (nil? (dv/device-shown (phone-state [menu] 812 311))) "no device round it")))
+
 (t/deftest picking-a-device-keeps-it-in-the-url
   (let [state  (device-state "none" 402 874 201 {:zoom "fit"})
         ;; the state it leaves and the navigation of the URL it asks

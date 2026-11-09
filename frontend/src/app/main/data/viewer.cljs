@@ -558,6 +558,31 @@
       (when (and (number? width) (pos? width) (number? screen-w) (pos? screen-w))
         (/ width screen-w)))))
 
+(defn phone-hold
+  "How a phone is held, by `viewport-size`, the part of the page its
+  browser shows (see `set-viewport-size`): `:landscape` wider than high,
+  else `:portrait`; nil before the page has a size. Held the other way
+  than a board stands, it shows the board turned or its counterpart, as
+  a device does (see `dvt/shown`)."
+  [{:keys [width height]}]
+  (when (and (number? width) (number? height) (pos? width) (pos? height))
+    (if (> width height) :landscape :portrait)))
+
+(defn- phone-width
+  "How wide the board shown on a phone is, held as the view mode in
+  `state` has it (see `phone-hold`): as it is, its counterpart, or it
+  turned to the screen of the device \"auto\" (see `dvt/shown`); nil off
+  a phone."
+  [state]
+  (when (phone? state)
+    (when-let [frame (shown-frame state)]
+      (let [frames (:all-frames (shown-page state))
+            hold   (phone-hold (dm/get-in state [:viewer-local :viewport-size]))
+            {:keys [frame-id device turned?]} (dvt/shown frames frame "auto" hold)]
+        (if turned?
+          (:screen-w device)
+          (dm/get-in (d/seek #(= frame-id (:id %)) frames) [:selrect :width]))))))
+
 (def ^:private update-device-querystring
   (ptk/reify ::update-device-querystring
     ptk/WatchEvent
@@ -759,7 +784,8 @@
             index   (some-> (rt/get-query-param params :index) parse-long)
             frames  (dm/get-in state [:viewer :pages page-id :frames])
             index   (min (or index 0) (max 0 (dec (count frames))))
-            width   (dm/get-in frames [index :selrect :width])
+            ;; on a phone the board shown held as it is (see `phone-width`)
+            width   (or (phone-width state) (dm/get-in frames [index :selrect :width]))
             vwidth  (dm/get-in state [:viewer-local :viewport-size :width])]
         ;; until the view mode has its size, it keeps the zoom it has,
         ;; to fit once it gets it (see `refit-zoom`)

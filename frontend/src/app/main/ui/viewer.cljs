@@ -622,17 +622,24 @@
         ;; the other way than a board stands, a phone or a tablet shows
         ;; it turned, or its counterpart (see `dvt/shown`)
         {device-choice :choice device-finish :finish device-hold :hold} (:device local)
-        held?     (and (= section :interactions) (some? device-hold))
+        ;; on a phone the board fills its screen, no device round it (see
+        ;; `phone-bars-button*`); held the other way than a board stands,
+        ;; the phone shows it turned or its counterpart, as a device does
+        ;; (see `dv/phone-hold`)
+        phone?      (and (not preview) (true? (:phone? local)))
+        turn-choice (if phone? "auto" device-choice)
+        turn-hold   (if phone? (dv/phone-hold (:viewport-size local)) device-hold)
+        held?     (and (= section :interactions) (some? turn-hold))
 
         ;; The page as it is, but for the boards that show turned: only
         ;; the viewport of the board plays its animation (see
         ;; `animated-viewport*`), so the header, the thumbnails and the
         ;; rest do not render again at each frame.
         files (mf/deref refs/files)
-        page  (mf/with-memo [base-page held? device-choice device-hold]
+        page  (mf/with-memo [base-page held? turn-choice turn-hold]
                 (if held?
                   (let [objects (dvt/turn-objects (:objects base-page) (:all-frames base-page)
-                                                  device-choice device-hold)
+                                                  turn-choice turn-hold)
                         lookup  #(get objects (:id %))]
                     (-> base-page
                         (assoc :objects objects)
@@ -643,12 +650,12 @@
         ;; the board shown in place of `drawn`, a board of the page as it
         ;; is drawn: it, turned, or its counterpart
         show-board (mf/use-fn
-                    (mf/deps base-page page held? device-choice device-hold)
+                    (mf/deps base-page page held? turn-choice turn-hold)
                     (fn [drawn]
                       (if (and held? (some? drawn))
                         (get (:objects page)
                              (:frame-id (dvt/shown (:all-frames base-page) drawn
-                                                   device-choice device-hold)))
+                                                   turn-choice turn-hold)))
                         drawn)))
 
         text-shapes
@@ -663,10 +670,10 @@
         frames    (:frames page)
         drawn     (get (:frames base-page) index)
         frame     (show-board drawn)
-        shown     (mf/with-memo [base-page drawn section device-choice device-hold]
+        shown     (mf/with-memo [base-page drawn section turn-choice turn-hold]
                     (when (and (= section :interactions) (some? drawn))
-                      (dvt/shown (:all-frames base-page) drawn device-choice device-hold)))
-        device    (:device shown)
+                      (dvt/shown (:all-frames base-page) drawn turn-choice turn-hold)))
+        device    (when-not phone? (:device shown))
 
         ;; What the board on screen plays on, its timeline or the
         ;; animations of the component copies in it (see `dv/board-clock`).
@@ -707,9 +714,6 @@
         framed-ref (mf/use-ref false)
 
         fullscreen? (mf/deref header/fullscreen-ref)
-        ;; on a phone the board fills the screen: its bars show on
-        ;; request (see `phone-bars-button*`)
-        phone?      (and (not preview) (true? (:phone? local)))
         bars*       (mf/use-state false)
         bars?       (deref bars*)
         overlays    (mf/deref current-overlays-ref)
@@ -759,7 +763,10 @@
         ;; placed by the screen go up on its screen; turned, its layers
         ;; are where the screen turned has them
         on-screen?   (or (some? screen) (some? (dvs/screen-h frame)))
-        overlay-drop (when-not (:turned? shown) (overlay-drop frame screen))
+        ;; turned in a device, its layers are where the screen turned has
+        ;; them; a phone shows less of it (see `phone-screen`)
+        drops?       (or phone? (not (:turned? shown)))
+        overlay-drop (when drops? (overlay-drop frame screen))
 
         click-on-screen
         (mf/use-fn
@@ -1340,9 +1347,9 @@
               :index index
               :animated (some? clock)
               :sound board-sound?
-              ;; turned, its fixed layers are where the screen
-              ;; turned has them (see `dvt/turn-objects`)
-              :fixed-drop (when-not (:turned? shown) (fixed-drop frame screen))
+              ;; turned in a device, its fixed layers are where the
+              ;; screen turned has them (see `dvt/turn-objects`)
+              :fixed-drop (when drops? (fixed-drop frame screen))
               :on-screen on-screen?
               :overlay-drop overlay-drop
               ;; containers scroll in the prototype, with WASM (see
