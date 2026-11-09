@@ -285,7 +285,8 @@
   and share, its boards, its animation (`timeline`, the controls of the
   view mode), then what the header holds in the `section` shown: its
   flows and how its interactions show (`interactions-mode`), or which
-  comments show and their list. What changes the view closes it."
+  comments show and their list. What changes the view closes it, but
+  going to another section."
   [{:keys [page file frame index permissions section interactions-mode timeline on-close]}]
   (let [frames     (:frames page)
         total      (count frames)
@@ -300,10 +301,11 @@
           (on-close)
           (apply st/emit! events))
 
+        ;; the sheet stays, with what the section holds
         go-to-section
         (fn [section]
           (if (or (= section :interactions) (:is-logged permissions))
-            (act! dv/close-thumbnails-panel (dv/go-to-section section))
+            (st/emit! dv/close-thumbnails-panel (dv/go-to-section section))
             (do (on-close) (header/open-login-dialog))))
 
         open-share
