@@ -19,7 +19,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.code-block :refer [code-block*]]
-   [app.main.ui.components.copy-button :refer [copy-button*]]
+   [app.main.ui.components.copy-button :as copy :refer [copy-button*]]
    [app.main.ui.components.radio-buttons :refer [radio-button radio-buttons]]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
@@ -27,7 +27,6 @@
    [app.main.ui.hooks.resize :refer [use-resize-hook]]
    [app.main.ui.inspect.motion :as motion]
    [app.main.ui.shapes.text.fontfaces :refer [shapes->fonts]]
-   [app.util.clipboard :as clipboard]
    [app.util.code-beautify :as cb]
    [app.util.code-gen :as cg]
    [app.util.code-gen.markup-svg-wasm :as svg.wasm]
@@ -270,7 +269,7 @@
         (mf/use-fn
          (mf/deps all-style-code markup-code images-data fonts-data)
          (fn []
-           (clipboard/to-clipboard (gen-all-code all-style-code markup-code images-data fonts-data))
+           (copy/copy-text! (gen-all-code all-style-code markup-code images-data fonts-data))
            (let [origin (if (= :workspace from)
                           "workspace"
                           "viewer")]

@@ -9,12 +9,28 @@
   (:require
    [app.common.data.macros :as dm]
    [app.main.data.event :as-alias ev]
+   [app.main.data.notifications :as ntf]
+   [app.main.store :as st]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.util.clipboard :as clipboard]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.timers :as tm]
    [rumext.v2 :as mf]))
+
+(defn copy-text!
+  "Copy `text`: a clipboard that copies not tells why as a toast, instead
+  of the error of the app (a page over plain HTTP, see
+  `clipboard/to-clipboard`)."
+  [text]
+  (-> (clipboard/to-clipboard text)
+      (.catch (fn [cause]
+                (if-let [message (clipboard/error-message cause)]
+                  (st/emit! (ntf/show {:content message
+                                       :type :toast
+                                       :level :warning
+                                       :timeout 5000}))
+                  (throw cause))))))
 
 (mf/defc copy-button*
   [{:keys [data on-copied children class aria-label]}]
@@ -34,8 +50,7 @@
              (reset! active* true)
              (tm/schedule 1000 #(reset! active* false))
              (when (fn? on-copied) (on-copied event))
-             (clipboard/to-clipboard
-              (if (fn? data) (data) data)))))]
+             (copy-text! (if (fn? data) (data) data)))))]
 
     [:button {:class class
               :aria-label (or aria-label (tr "labels.copy"))

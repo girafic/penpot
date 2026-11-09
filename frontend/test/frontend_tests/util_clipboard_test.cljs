@@ -15,7 +15,8 @@
   representation is lost too and the rejection escapes unhandled."
   (:require
    [app.util.clipboard :as clipboard]
-   [cljs.test :as t :include-macros true]))
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.dom :as thd]))
 
 (def ^:private svg-markup "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>")
 
@@ -203,3 +204,47 @@
         (.catch (fn [err]
                   (t/is (instance? js/Error err))
                   (done))))))
+
+;; --- A page served over plain HTTP, with no `navigator.clipboard`: the
+;; `copy` command of the document (Safari on a phone on the LAN)
+
+(defn- copy-over-http
+  "What `copy!` copied, with no Clipboard API and a `copy` command that
+  `works?`: `{:copied :resolved? :fields}`, the text the command found
+  selected and the fields left after."
+  [copy! works?]
+  (thd/with-dom
+    (fn [{:keys [document]}]
+      (let [copied (atom nil)]
+        (unchecked-set js/navigator "clipboard" nil)
+        (set! (.-execCommand document)
+              (fn [command]
+                (let [field (.-activeElement document)]
+                  (reset! copied [command (subs (.-value field) (.-selectionStart field) (.-selectionEnd field))]))
+                works?))
+        (-> (copy!)
+            (.then (fn [_] true) (fn [_] false))
+            (.then (fn [resolved?]
+                     {:copied @copied
+                      :resolved? resolved?
+                      :fields (.-length (.querySelectorAll document "textarea"))})))))))
+
+(t/deftest over-http-text-goes-by-the-copy-command
+  (t/async done
+    (-> (copy-over-http #(clipboard/to-clipboard "a { color: red; }") true)
+        (.then (fn [{:keys [copied resolved? fields]}]
+                 (t/is (= ["copy" "a { color: red; }"] copied) "selected all of it")
+                 (t/is (true? resolved?))
+                 (t/is (zero? fields) "the field goes")
+                 (copy-over-http #(clipboard/to-clipboard-multi {"image/svg+xml" svg-markup
+                                                                 "text/plain" "<svg/>"})
+                                 true)))
+        (.then (fn [{:keys [copied resolved?]}]
+                 (t/is (= ["copy" "<svg/>"] copied) "the text of several")
+                 (t/is (true? resolved?))
+                 (copy-over-http #(clipboard/to-clipboard "x") false)))
+        (.then (fn [{:keys [resolved? fields]}]
+                 (t/is (false? resolved?) "the command copied not: it rejects as before")
+                 (t/is (zero? fields))))
+        (.catch (fn [cause] (t/is false (str cause))))
+        (.then (fn [_] (done))))))

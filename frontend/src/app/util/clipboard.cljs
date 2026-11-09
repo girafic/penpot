@@ -9,6 +9,7 @@
    ["./clipboard.js" :as impl]
    [app.common.transit :as t]
    [app.util.dom :as dom]
+   [app.util.globals :as globals]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]))
@@ -100,19 +101,52 @@
   []
   (js/Promise.reject (js/Error. unavailable-error-message)))
 
+(defn- copy-by-command
+  "Copy `text` the old way, by the `copy` command of the document on a
+  field of its own selected: what a page served over plain HTTP, with no
+  `navigator.clipboard`, still copies by (Safari on a phone on the LAN,
+  say), in the event of a click or a key. Whether it copied."
+  [text]
+  (let [^js doc globals/document]
+    (if (and (fn? (unchecked-get doc "execCommand")) (some? (.-body doc)))
+      (let [field  (.createElement doc "textarea")
+            active (.-activeElement doc)]
+        (set! (.-value field) text)
+        ;; no keyboard on a phone; out of view; 16px, or Safari zooms in
+        (.setAttribute field "readonly" "")
+        (set! (.. field -style -cssText) "position:fixed;top:0;left:0;opacity:0;font-size:16px")
+        (.appendChild (.-body doc) field)
+        (.focus field #js {:preventScroll true})
+        (.select field)
+        (.setSelectionRange field 0 (count text))
+        (let [copied? (try (.execCommand doc "copy") (catch :default _ false))]
+          (.remove field)
+          (some-> ^js active (.focus #js {:preventScroll true}))
+          (true? copied?)))
+      false)))
+
+(defn- copy-text-or-fail
+  "A Promise of `text` copied by `copy-by-command`, rejected as when the
+  Clipboard API is unavailable if it copied not."
+  [text]
+  (if (copy-by-command text)
+    (js/Promise.resolve)
+    (unavailable-error)))
+
 (defn to-clipboard
   "Write a plain-text string to the system clipboard.
 
    Always returns a Promise. Resolves on success; rejects with a clear
    `Error` when `navigator.clipboard` is unavailable (insecure origin)
-   so callers can chain error handling instead of crashing the UI on a
-   synchronous `TypeError` like #4478."
+   and the `copy` command copied not either, so callers can chain error
+   handling instead of crashing the UI on a synchronous `TypeError` like
+   #4478."
   [data]
   (assert (string? data) "`data` should be string")
   (let [clipboard (get-clipboard)]
     (if (and clipboard (unchecked-get clipboard "writeText"))
       (.writeText ^js clipboard data)
-      (unavailable-error))))
+      (copy-text-or-fail data))))
 
 (defn- create-clipboard-item
   [mimetype promise]
@@ -191,9 +225,10 @@
    type falls back to `writeText` with the `text/plain` payload (or the
    first available payload), which is also the path taken when
    `clipboard.write` or `ClipboardItem` are missing altogether. Any other
-   rejection is propagated. If no path is reachable (e.g. insecure origin),
-   returns a rejected Promise mirroring `to-clipboard`'s contract instead
-   of throwing synchronously."
+   rejection is propagated. Without the Clipboard API (e.g. insecure
+   origin) that payload goes by the `copy` command of the document; if
+   that copies not either, returns a rejected Promise mirroring
+   `to-clipboard`'s contract instead of throwing synchronously."
   [items]
   (let [clipboard (get-clipboard)
         writable  (when clipboard
@@ -212,7 +247,9 @@
       (to-clipboard-text clipboard items)
 
       :else
-      (unavailable-error))))
+      (if-let [text (or (get items "text/plain") (first (vals items)))]
+        (copy-text-or-fail text)
+        (unavailable-error)))))
 
 (defn read-text
   "Read the system clipboard as plain text. Always returns a Promise, rejecting
