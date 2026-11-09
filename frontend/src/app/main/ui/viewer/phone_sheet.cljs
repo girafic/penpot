@@ -12,6 +12,7 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
+   [app.common.math :as mth]
    [app.common.types.page :as ctp]
    [app.main.data.comments :as dcm]
    [app.main.data.modal :as modal]
@@ -22,6 +23,7 @@
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
+   [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.viewer.header :as header]
    [app.util.globals :as g]
    [app.util.i18n :refer [tr]]
@@ -37,8 +39,52 @@
   10)
 
 (def ^:private close-drag-px
-  "How far down the sheet is dragged to close."
+  "How far down its lower height the sheet is dragged to close."
   80)
+
+(def ^:private flick-speed
+  "How fast, px/ms, a drag of the grip let go goes on to the next height
+  of the sheet the way it went."
+  0.5)
+
+(def ^:private most-of-screen
+  "How high a sheet grows, of the screen: as `.full` and `.grown`."
+  0.9)
+
+(defn sheet-heights
+  "The heights, px, a sheet rests at on a screen `vh` px high, `[low
+  high]`: half the screen and most of it for a sheet as high as `:half`;
+  else as high as what it holds, `natural` px, up to them."
+  [height vh natural]
+  (let [half (* 0.5 vh)
+        most (* most-of-screen vh)]
+    (if (= height :half)
+      [half most]
+      (let [low (min half natural)]
+        [low (max low (min most natural))]))))
+
+(defn sheet-rest
+  "Where a sheet let go rests, dragged by its grip to `h` px high going
+  `v` px/ms (down more than 0), between its heights `low` and `high`:
+  `:low`, `:high`, or `:closed` once dragged further than
+  `close-drag-px` below `low`, or flicked down below it."
+  [h v low high]
+  (cond
+    (or (< h (- low close-drag-px))
+        (and (< h low) (> v flick-speed)))
+    :closed
+
+    (< v (- flick-speed)) :high
+    (> v flick-speed)     :low
+    (< (- high h) (- h low)) :high
+    :else :low))
+
+(defn- drag-style
+  "How a sheet dragged to `h` px high shows between its heights `low` and
+  `high`: as high, or, below `low`, as `low` and moved down."
+  [h low high]
+  {:block-size (dm/str (mth/clamp h low high) "px")
+   :transform  (when (< h low) (dm/str "translateY(" (- low h) "px)"))})
 
 (def hint-ms
   "How long the note of how the sheet opens shows."
@@ -130,45 +176,78 @@
 
 (mf/defc sheet*
   "A sheet from the bottom of a phone named `label`: `children` scroll
-  under its grip. A drag down by its grip calls `on-close`, as does a tap
-  beside it, which dims what it covers, unless `open-beside`: then what
-  shows above it takes taps. It reaches at most half the screen, or
-  always as high as `height` says, `:half` or `:tall` (most of it)."
+  under its grip. It reaches at most half the screen, or always as high
+  as `height` says, `:half`. Its grip drags it higher, up to most of the
+  screen, and lower: let go, it rests at the nearer of the two heights,
+  or the one it was flicked to, or it calls `on-close` (see
+  `sheet-rest`). A tap beside it closes it too, which dims what it
+  covers, unless `open-beside`: then what shows above it takes taps."
   [{:keys [label height open-beside on-close children]}]
-  (let [drag*     (mf/use-state nil)
-        drag      (deref drag*)
-        start-ref (mf/use-ref nil)
+  (let [expanded*  (mf/use-state false)
+        expanded?  (deref expanded*)
+        drag*      (mf/use-state nil)
+        drag       (deref drag*)
+        sheet-ref  (mf/use-ref nil)
+        ;; the drag going on: where it started, its heights, its speed
+        gesture-ref (mf/use-ref nil)
 
         on-drag-start
         (mf/use-fn
+         (mf/deps height expanded?)
          (fn [^js event]
-           (mf/set-ref-val! start-ref (.. event -touches (item 0) -clientY))))
+           (let [y       (.. event -touches (item 0) -clientY)
+                 sheet   (mf/ref-val sheet-ref)
+                 natural (+ (some-> sheet .-firstChild .-offsetHeight)
+                            (some-> sheet .-lastChild .-scrollHeight))
+                 [low high] (sheet-heights height (.-innerHeight g/window) natural)
+                 shown   (some-> sheet .-offsetHeight)]
+             (mf/set-ref-val! gesture-ref {:y0 y
+                                           :h0 (if (pos? shown) shown (if expanded? high low))
+                                           :low low
+                                           :high high
+                                           :speed (dds/start y 0 (.-timeStamp event))}))))
 
         on-drag-move
         (mf/use-fn
          (fn [^js event]
-           (when-let [y0 (mf/ref-val start-ref)]
-             (reset! drag* (max 0 (- (.. event -touches (item 0) -clientY) y0))))))
+           (when-let [{:keys [y0 h0] :as gesture} (mf/ref-val gesture-ref)]
+             (let [y (.. event -touches (item 0) -clientY)]
+               (mf/set-ref-val! gesture-ref (update gesture :speed dds/move y (.-timeStamp event)))
+               (reset! drag* (- h0 (- y y0)))))))
 
         on-drag-end
         (mf/use-fn
          (mf/deps drag on-close)
-         (fn [_]
-           (mf/set-ref-val! start-ref nil)
-           (reset! drag* nil)
-           (when (and (some? drag) (> drag close-drag-px))
-             (on-close))))]
+         (fn [^js event]
+           (let [{:keys [low high speed]} (mf/ref-val gesture-ref)]
+             (mf/set-ref-val! gesture-ref nil)
+             (reset! drag* nil)
+             (when (some? drag)
+               ;; the screen's speed up: the finger's down
+               (case (sheet-rest drag (- (dds/speed speed (.-timeStamp event))) low high)
+                 :closed (on-close)
+                 :high   (reset! expanded* true)
+                 :low    (reset! expanded* false))))))
+
+        {:keys [block-size transform]}
+        (when (some? drag)
+          (let [{:keys [low high]} (mf/ref-val gesture-ref)]
+            (drag-style drag low high)))]
 
     [:*
      (when-not open-beside
        [:div {:class (stl/css :backdrop) :on-click on-close}])
      [:div {:class (stl/css-case :sheet true
-                                 :half (= height :half)
-                                 :tall (= height :tall))
+                                 :half (and (= height :half) (not expanded?))
+                                 :full (and (= height :half) expanded?)
+                                 :grown (and (nil? height) expanded?))
+            :ref sheet-ref
             :role "dialog"
             :aria-label label
             ;; a map literal: rumext passes only these to React as styles
-            :style {:transform (when (some? drag) (dm/str "translateY(" drag "px)"))
+            :style {:block-size block-size
+                    :max-block-size (when (some? drag) "none")
+                    :transform transform
                     :transition (when (some? drag) "none")}}
       [:div {:class (stl/css :grip-zone)
              :on-touch-start on-drag-start

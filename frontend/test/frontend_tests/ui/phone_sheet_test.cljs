@@ -115,3 +115,36 @@
         (thd/act #(touch! grip "touchend" []))
         (t/is (= "" (.. document (querySelector "[role=dialog]") -style -transform)) "back")))))
 
+
+(t/deftest a-sheet-rests-at-half-the-screen-or-most-of-it
+  (t/is (= [400 720] (phone-sheet/sheet-heights :half 800 100)) "as high as `:half`")
+  (t/is (= [150 150] (phone-sheet/sheet-heights nil 800 150)) "what it holds, short")
+  (t/is (= [400 600] (phone-sheet/sheet-heights nil 800 600)) "longer than half the screen")
+  (t/is (= [400 720] (phone-sheet/sheet-heights nil 800 2000))))
+
+(t/deftest a-sheet-let-go-rests-at-the-nearer-height-or-where-flicked
+  (t/is (= :high (phone-sheet/sheet-rest 600 0 400 720)) "nearer most of the screen")
+  (t/is (= :low (phone-sheet/sheet-rest 500 0 400 720)))
+  (t/is (= :high (phone-sheet/sheet-rest 450 -1 400 720)) "flicked up")
+  (t/is (= :low (phone-sheet/sheet-rest 700 1 400 720)) "flicked down")
+  (t/is (= :low (phone-sheet/sheet-rest 350 0 400 720)) "a little below half: back")
+  (t/is (= :closed (phone-sheet/sheet-rest 300 0 400 720)) "dragged far down")
+  (t/is (= :closed (phone-sheet/sheet-rest 390 1 400 720)) "flicked down below half"))
+
+(t/deftest a-sheet-grows-and-shrinks-by-its-grip
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (thd/render! root (mf/element phone-sheet/sheet* #js {:label "Inspect" :height :half :onClose (fn [])}))
+      (let [grip   (.querySelector document "[class*=grip-zone]")
+            dialog #(.querySelector document "[role=dialog]")
+            half   (* 0.5 (.-innerHeight window))]
+        (thd/act #(do (touch! grip "touchstart" [[100 400]])
+                      (touch! grip "touchmove" [[100 150]])))
+        (t/is (= (str (+ half 250) "px") (.. (dialog) -style -blockSize)) "it follows the finger up")
+        (thd/act #(touch! grip "touchend" []))
+        (t/is (re-find #"full" (.-className (dialog))) "most of the screen")
+        (t/is (= "" (.. (dialog) -style -blockSize)))
+        (thd/act #(do (touch! grip "touchstart" [[100 100]])
+                      (touch! grip "touchmove" [[100 350]])))
+        (thd/act #(touch! grip "touchend" []))
+        (t/is (re-find #"half" (.-className (dialog))) "and back to half of it")))))

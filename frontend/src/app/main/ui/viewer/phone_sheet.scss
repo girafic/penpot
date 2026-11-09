@@ -33,26 +33,35 @@
   border-radius: $br-12 $br-12 0 0;
   background-color: var(--color-background-primary);
   color: var(--color-foreground-primary);
-  transition: transform 200ms ease;
+  transition:
+    transform 0.2s ease,
+    block-size 0.2s ease,
+    max-block-size 0.2s ease;
   animation: slide-up 0.2s ease;
 }
 
-// always as high, half the screen or most of it: what it holds fills it
+// always as high, half the screen, or most of it once its grip dragged it
+// up (see `sheet-heights`): what it holds fills it
 .half {
   block-size: 50dvh;
 }
 
-.tall {
-  block-size: 85dvh;
-  max-block-size: none;
+.full {
+  block-size: 90dvh;
+  max-block-size: 90dvh;
 }
 
-// what drags the sheet down
+// as high as what it holds, up to most of the screen
+.grown {
+  max-block-size: 90dvh;
+}
+
+// what drags the sheet up and down
 .grip-zone {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  block-size: $sz-24;
+  block-size: $sz-32;
   touch-action: none;
 }
 
@@ -71,8 +80,8 @@
 .grip {
   inline-size: $sz-36;
   block-size: px2rem(5);
-  border-radius: $br-circle;
-  background-color: var(--color-background-quaternary);
+  border-radius: $br-4;
+  background-color: var(--color-foreground-secondary);
 }
 
 .row {
