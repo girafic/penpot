@@ -75,6 +75,18 @@
     (t/is (= 874 (dvd/first-screen-h 402 1814)) "the first screen of a long board")
     (t/is (= 500 (dvd/first-screen-h 500 500)) "all of a board no device takes")))
 
+(t/deftest on-a-phone-the-screen-is-what-the-browser-shows
+  ;; Safari on an iPhone 13 mini shows 610 of 815 CSS px of a board 402
+  ;; px wide as wide as the screen: its tab bar went below it
+  (let [zoom   (/ 375 402)
+        screen (viewer/phone-screen {:width 375 :height 610} zoom)
+        board  {:selrect {:width 402 :height 874}}]
+    (t/is (= 654 (js/Math.round (:screen-h screen))) "in px of the board")
+    (t/is (= 220 (js/Math.round (viewer/fixed-drop board screen))) "its fixed layers at the bottom go up so far")
+    (t/is (nil? (viewer/fixed-drop board (viewer/phone-screen {:width 375 :height 900} zoom)))
+          "nothing below on a screen as high as the board")
+    (t/is (nil? (viewer/phone-screen nil zoom)) "none before the page has a size")))
+
 ;; --- Fixed layers in containers (see `app.main.data.viewer.scroll`)
 
 (def ^:private list-id (uuid/custom 10 8))

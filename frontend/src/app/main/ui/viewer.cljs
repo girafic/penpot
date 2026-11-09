@@ -139,16 +139,27 @@
 
 (defn fixed-drop
   "Px of the first screen of the board `frame` below the screen of
-  `device` (see `dvd/resolve-device`) it shows in: the screen of the
-  device \"auto\" gives it, else all of it, or its box when it scrolls
-  through its content (see `dvd/board-first-screen-h`). Its layers fixed
-  when scrolling sit on its first screen; those at its bottom stay at the
-  bottom of a lower one (see `vpc/fixed-pins`). Nil without a device or
-  with nothing below."
+  `device` it shows in (see `dvd/resolve-device`, or `phone-screen`):
+  the screen of the device \"auto\" gives it, else all of it, or its box
+  when it scrolls through its content (see `dvd/board-first-screen-h`).
+  Its layers fixed when scrolling sit on its first screen; those at its
+  bottom stay at the bottom of a lower one (see `vpc/fixed-pins`). Nil
+  without a device or with nothing below."
   [frame device]
   (when (some? device)
     (let [drop (- (dvd/board-first-screen-h frame) (:screen-h device))]
       (when (pos? drop) drop))))
+
+(defn phone-screen
+  "The screen of a board in the view mode of a phone, as a device has
+  one (see `dvd/resolve-device`): the part of the page the browser
+  shows, `viewport-size` (CSS px) at `zoom`, in px of the board. Its
+  layers fixed at the bottom go up to it (see `fixed-drop`), as do its
+  overlays placed by the screen; nil before the page has a size."
+  [viewport-size zoom]
+  (let [height (:height viewport-size)]
+    (when (and (number? height) (pos? height) (number? zoom) (pos? zoom))
+      {:screen-h (/ height zoom)})))
 
 (defn calculate-delta
   "Calculate the displacement we need to apply so that the original selrect appears in the
@@ -330,10 +341,10 @@
 
 (defn overlay-drop
   "Px the box of the board `frame` reaches below the screen of `device`
-  (see `dvd/resolve-device`), its first screen when it scrolls through its
-  content (see `dvs/design-box`): an overlay placed by the screen goes up
-  so far (see `overlay-on-screen`). Nil without a device or with nothing
-  below."
+  (see `dvd/resolve-device`, or `phone-screen`), its first screen when
+  it scrolls through its content (see `dvs/design-box`): an overlay
+  placed by the screen goes up so far (see `overlay-on-screen`). Nil
+  without a device or with nothing below."
   [frame device]
   (when (some? device)
     (let [drop (- (dm/get-in (dvs/design-box frame) [:selrect :height]) (:screen-h device))]
@@ -739,12 +750,16 @@
         (mf/with-memo [size orig-size zoom]
           (calculate-wrapper size orig-size zoom))
 
+        ;; the screen it shows in: of its device, or on a phone the part
+        ;; of the page the browser shows (see `phone-screen`)
+        screen       (or device (when phone? (phone-screen (:viewport-size local) zoom)))
+
         ;; whether the board shows as a screen, its overlays on it as
         ;; its page scrolls (see `viewer-wrapper`), and how far those
-        ;; placed by the screen go up on the screen of its device; turned,
-        ;; its layers are where the screen turned has them
-        on-screen?   (or (some? device) (some? (dvs/screen-h frame)))
-        overlay-drop (when-not (:turned? shown) (overlay-drop frame device))
+        ;; placed by the screen go up on its screen; turned, its layers
+        ;; are where the screen turned has them
+        on-screen?   (or (some? screen) (some? (dvs/screen-h frame)))
+        overlay-drop (when-not (:turned? shown) (overlay-drop frame screen))
 
         click-on-screen
         (mf/use-fn
@@ -1327,7 +1342,7 @@
               :sound board-sound?
               ;; turned, its fixed layers are where the screen
               ;; turned has them (see `dvt/turn-objects`)
-              :fixed-drop (when-not (:turned? shown) (fixed-drop frame device))
+              :fixed-drop (when-not (:turned? shown) (fixed-drop frame screen))
               :on-screen on-screen?
               :overlay-drop overlay-drop
               ;; containers scroll in the prototype, with WASM (see
