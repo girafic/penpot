@@ -351,6 +351,72 @@
             (set! (.. section -style -cursor) "")
             (reset! state* nil)))))))
 
+(def ^:private coast-stop-ms
+  "How soon, ms, after the screen last scrolled a finger coming down on
+  it stops it coasting, which is no tap."
+  100)
+
+(defn listen-touch-taps!
+  "A finger on a real touch screen lifting from `section`, the screen,
+  taps nothing (see `dragged?`) if it moved, if the screen scrolled under
+  it, or if it came down on the screen coasting to stop it: Safari on an
+  iPhone lets go of a press that scrolled the screen, as of a tap, where
+  Chrome cancels it. A function that stops listening."
+  [^js section]
+  (let [press*    (volatile! nil)
+        scrolled* (volatile! nil)
+        moved?    (fn [^js event {:keys [x y]}]
+                    (> (max (mth/abs (- (.-clientX event) x))
+                            (mth/abs (- (.-clientY event) y)))
+                       threshold))
+        coasting? (fn []
+                    (when-let [t @scrolled*]
+                      (< (- (js/performance.now) t) coast-stop-ms)))
+        on-down   (fn [^js event]
+                    (when (= "touch" (.-pointerType event))
+                      (note-touch-start)
+                      (vreset! press* {:id (.-pointerId event)
+                                       :x (.-clientX event)
+                                       :y (.-clientY event)
+                                       :dragged (coasting?)})))
+        on-move   (fn [^js event]
+                    (when-let [press @press*]
+                      (when (and (= (:id press) (.-pointerId event)) (moved? event press))
+                        (vswap! press* assoc :dragged true))))
+        ;; in the capture phase: before the hotspot it lifts from reads it
+        on-up     (fn [^js event]
+                    (when-let [press @press*]
+                      (when (= (:id press) (.-pointerId event))
+                        (vreset! press* nil)
+                        (when (or (:dragged press) (moved? event press))
+                          (note-touch-drag)))))
+        on-cancel (fn [^js event]
+                    (when (= (:id @press*) (.-pointerId event))
+                      (vreset! press* nil)))
+        on-scroll (fn [_]
+                    (vreset! scrolled* (js/performance.now))
+                    (when (some? @press*)
+                      (vswap! press* assoc :dragged true)))]
+    (.addEventListener section "pointerdown" on-down true)
+    (.addEventListener section "pointermove" on-move true)
+    (.addEventListener section "pointerup" on-up true)
+    (.addEventListener section "pointercancel" on-cancel true)
+    (.addEventListener section "scroll" on-scroll #js {:passive true})
+    (fn []
+      (.removeEventListener section "pointerdown" on-down true)
+      (.removeEventListener section "pointermove" on-move true)
+      (.removeEventListener section "pointerup" on-up true)
+      (.removeEventListener section "pointercancel" on-cancel true)
+      (.removeEventListener section "scroll" on-scroll #js {:passive true}))))
+
+(defn use-touch-taps!
+  "A finger on a real touch screen that scrolled the screen of
+  `section-ref` taps nothing as it lifts (see `listen-touch-taps!`)."
+  [section-ref enabled?]
+  (mf/with-effect [enabled?]
+    (when-let [section (when enabled? (mf/ref-val section-ref))]
+      (listen-touch-taps! section))))
+
 (defn- touch-of
   "The touch `id` among those `event` changed, if it did."
   [^js event id]

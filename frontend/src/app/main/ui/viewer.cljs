@@ -1068,6 +1068,9 @@
                            (and phone? (= section :interactions))
                            (some-> frame :fills first :fill-color))
 
+    ;; a finger that scrolled the screen taps nothing as it lifts
+    (dds/use-touch-taps! viewer-section-ref (= section :interactions))
+
     ;; the wheel over a board that scrolls its content scrolls it
     (cscroll/use-container-scroll! viewer-section-ref current-viewport-ref page frame size
                                    (when drops? (fixed-drop frame screen))

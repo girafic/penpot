@@ -132,3 +132,58 @@
     (t/is (< 0 offset 200)))
   (t/is (nil? (pulled true)) "a finger a board in it took is none of its"))
 
+
+;; --- A finger that scrolled the screen (see `dds/listen-touch-taps!`)
+
+(defn- finger!
+  "A finger's pointer event `type` at `[x y]` on `target`."
+  [target type [x y]]
+  (let [event (js/Event. type)]
+    (set! (.-pointerType event) "touch")
+    (set! (.-pointerId event) 7)
+    (set! (.-clientX event) x)
+    (set! (.-clientY event) y)
+    (.dispatchEvent target event)))
+
+(defn- scroll! [target]
+  (.dispatchEvent target (js/Event. "scroll")))
+
+(defn- tapped?
+  "Whether a finger down at `[100 100]` and up at `up`, with `between`
+  done to the screen meanwhile, tapped as it lifted. `before`: done to
+  the screen before the finger comes down."
+  [screen & {:keys [up before between] :or {up [100 100]}}]
+  (when before (before screen))
+  (finger! screen "pointerdown" [100 100])
+  (when between (between screen))
+  (finger! screen "pointerup" up)
+  (not (dds/dragged?)))
+
+(t/deftest a-finger-that-scrolled-the-screen-taps-nothing
+  (let [screen (js/EventTarget.)
+        stop!  (dds/listen-touch-taps! screen)]
+    (try
+      (t/is (tapped? screen :up [103 102]) "a tap trembles")
+      (t/is (not (tapped? screen :up [100 40]))
+            "it moved: Safari sends no move as the screen scrolls, then lets go")
+      (t/is (not (tapped? screen :between #(finger! % "pointermove" [100 60])))
+            "it moved, and came back")
+      (finger! screen "pointerdown" [100 100])
+      (finger! screen "pointercancel" [100 100])
+      (t/is (tapped? screen) "a press the browser took away leaves the next alone")
+      ;; last: the screen coasts a while after it scrolled
+      (t/is (not (tapped? screen :between scroll!)) "the screen scrolled under it")
+      (t/is (not (tapped? screen :before scroll!)) "it stopped the screen coasting")
+      (finally (stop!)))))
+
+(t/deftest a-tap-once-the-screen-stood-still-acts
+  (t/async
+    done
+    (let [screen (js/EventTarget.)
+          stop!  (dds/listen-touch-taps! screen)]
+      (scroll! screen)
+      (js/setTimeout (fn []
+                       (t/is (tapped? screen) "it coasted no more")
+                       (stop!)
+                       (done))
+                     150))))
