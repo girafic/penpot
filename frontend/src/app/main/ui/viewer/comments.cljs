@@ -13,6 +13,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.math :as mth]
    [app.main.data.comments :as dcm]
    [app.main.data.event :as ev]
    [app.main.data.viewer :as dv]
@@ -22,6 +23,7 @@
    [app.main.ui.comments :as cmt]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
+   [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.workspace.comments :as wc]
    [app.main.ui.workspace.viewport.utils :as utils]
    [app.util.dom :as dom]
@@ -151,6 +153,10 @@
 (def ^:private ref:phone?
   (l/derived #(true? (dm/get-in % [:viewer-local :phone?])) st/state))
 
+;; who may move the bubbles of the others too
+(def ^:private ref:can-edit?
+  (l/derived #(true? (dm/get-in % [:viewer :permissions :can-edit])) st/state))
+
 (mf/defc comments-layer
   {::mf/props :obj}
   [{:keys [zoom file frame page]}]
@@ -165,6 +171,7 @@
         frame-id       (:id frame)
         vsize          (mf/deref ref:viewport-size)
         phone?         (mf/deref ref:phone?)
+        can-edit?      (mf/deref ref:can-edit?)
 
         tpos-ref     (mf/with-memo [page-id]
                        (-> (l/in [:pages page-id :comment-thread-positions])
@@ -200,6 +207,26 @@
                        (dcm/close-thread)
                        (-> (dcm/open-thread thread)
                            (with-meta {::ev/origin "viewer"}))))))
+
+        ;; a bubble dropped stays in the board: out of it, the view mode
+        ;; would show it no more
+        on-bubble-move
+        (mf/use-fn
+         (mf/deps frame modifier2)
+         (fn [thread [x y]]
+           (let [{:keys [x1 y1 x2 y2]} (-> frame :points grc/points->rect)
+                 position (gpt/transform (gpt/point x y) modifier2)
+                 position (gpt/point (mth/clamp (:x position) x1 x2)
+                                     (mth/clamp (:y position) y1 y2))]
+             (st/emit! (dcm/update-comment-thread-position-on-viewer thread position)))))
+
+        ;; one's own threads, and all those of a file one edits
+        movable?     (fn [thread]
+                       (or can-edit? (= (:owner-id thread) (:id profile))))
+
+        ;; the screen of a device a mouse drags leaves a press here alone
+        on-threads-pointer-down
+        (mf/use-fn #(dds/claim-press))
 
         expanded     (:expanded local)
 
@@ -262,7 +289,8 @@
     [:div {:class (stl/css :comments-section)
            :on-click on-click}
      [:div {:class (dm/str cursor " " (stl/css :viewer-comments-container))}
-      [:div {:class (stl/css :threads)}
+      [:div {:class (stl/css :threads)
+             :on-pointer-down-capture on-threads-pointer-down}
        (for [thread-group (dwcm/group-bubbles zoom threads)]
          (let [group?    (> (count thread-group) 1)
                thread    (first thread-group)
@@ -283,6 +311,7 @@
                   :offset offset
                   :ring ring
                   :on-click on-bubble-click
+                  :on-move (when (movable? thread) on-bubble-move)
                   :is-open false
                   :origin :viewer
                   :key (:seqn thread)}])]
@@ -300,6 +329,7 @@
                :position-modifier modifier1
                :zoom zoom
                :on-click on-bubble-click
+               :on-move (when (movable? thread) on-bubble-move)
                :is-open (= (:id thread) (:open local))
                :origin :viewer
                :key (:seqn thread)}])))

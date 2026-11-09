@@ -1499,11 +1499,21 @@
        :variant "read"}
       num-threads]]))
 
+;; How far (px) a press on a bubble goes before it drags it: a finger
+;; trembles as it taps.
+(def ^:private bubble-drag-slop-px 3)
+(def ^:private bubble-touch-drag-slop-px 10)
+
 (mf/defc comment-floating-bubble*
+  "A bubble of a thread. The view mode drags it only given `on-move`,
+  called with the thread and its new position where it is dropped."
   {::mf/wrap [mf/memo]}
-  [{:keys [thread zoom is-open on-click origin position-modifier offset ring]}]
+  [{:keys [thread zoom is-open on-click on-move origin position-modifier offset ring]}]
   (let [owner        (mf/with-memo [thread]
                        (dcm/get-owner thread))
+
+        viewer?      (= origin :viewer)
+        movable?     (or (not viewer?) (fn? on-move))
 
         position     (:position thread)
         position     (cond-> position
@@ -1560,12 +1570,14 @@
 
         on-pointer-down
         (mf/use-fn
-         (mf/deps origin was-open? is-open drag?)
+         (mf/deps movable? viewer? was-open? is-open drag?)
          (fn [event]
-           (when (not= origin :viewer)
+           (when movable?
              (swap! state assoc :is-grabbing true)
-             (mf/set-ref-val! was-open? is-open)
-             (when is-open (st/emit! (dcm/close-thread)))
+             ;; the view mode leaves an open thread open: a tap toggles it
+             (when-not viewer?
+               (mf/set-ref-val! was-open? is-open)
+               (when is-open (st/emit! (dcm/close-thread))))
              (mf/set-ref-val! drag? false)
              (dom/stop-propagation event)
              (dom/capture-pointer event)
@@ -1574,9 +1586,9 @@
 
         on-pointer-up
         (mf/use-fn
-         (mf/deps origin thread expanded? (select-keys @state [:new-position-x :new-position-y :new-frame-id]))
+         (mf/deps movable? on-move thread expanded? (select-keys @state [:new-position-x :new-position-y :new-frame-id]))
          (fn [event]
-           (when (not= origin :viewer)
+           (when movable?
              (swap! state assoc :is-grabbing false)
              (dom/stop-propagation event)
              (dom/release-pointer event)
@@ -1585,8 +1597,10 @@
              (when (and
                     (some? (:new-position-x @state))
                     (some? (:new-position-y @state)))
-               (st/emit! (dwcm/update-comment-thread-position thread [(:new-position-x @state)
-                                                                      (:new-position-y @state)]))
+               (let [position [(:new-position-x @state) (:new-position-y @state)]]
+                 (if (fn? on-move)
+                   (on-move thread position)
+                   (st/emit! (dwcm/update-comment-thread-position thread position))))
                ;; Dropping a fanned-out bubble commits its new spot and closes
                ;; the temporary cluster expansion.
                (when expanded? (st/emit! (dcm/collapse-comment-group)))
@@ -1594,21 +1608,36 @@
                       :new-position-x nil
                       :new-position-y nil)))))
 
+        ;; the browser took the press away: the bubble goes back
+        on-pointer-cancel
+        (mf/use-fn
+         (fn [_]
+           (mf/set-ref-val! dragging-ref false)
+           (mf/set-ref-val! start-ref nil)
+           (swap! state assoc
+                  :is-grabbing false
+                  :new-position-x nil
+                  :new-position-y nil)))
+
         on-pointer-move
         (mf/use-fn
-         (mf/deps origin drag? drag-base-x drag-base-y zoom)
+         (mf/deps movable? drag? drag-base-x drag-base-y zoom)
          (fn [event]
-           (when (not= origin :viewer)
-             (mf/set-ref-val! drag? true)
+           (when movable?
              (dom/stop-propagation event)
-             (when-let [_ (mf/ref-val dragging-ref)]
-               (let [start-pt   (mf/ref-val start-ref)
-                     current-pt (dom/get-client-position event)
-                     delta-x    (/ (- (:x current-pt) (:x start-pt)) zoom)
-                     delta-y    (/ (- (:y current-pt) (:y start-pt)) zoom)]
-                 (swap! state assoc
-                        :new-position-x (+ drag-base-x delta-x)
-                        :new-position-y (+ drag-base-y delta-y)))))))
+             (when-let [start-pt (mf/ref-val start-ref)]
+               (let [current-pt (dom/get-client-position event)
+                     dx         (- (:x current-pt) (:x start-pt))
+                     dy         (- (:y current-pt) (:y start-pt))
+                     slop       (if (= "touch" (.-pointerType (dom/event->native-event event)))
+                                  bubble-touch-drag-slop-px
+                                  bubble-drag-slop-px)]
+                 (when (or (mf/ref-val drag?)
+                           (> (max (mth/abs dx) (mth/abs dy)) slop))
+                   (mf/set-ref-val! drag? true)
+                   (swap! state assoc
+                          :new-position-x (+ drag-base-x (/ dx zoom))
+                          :new-position-y (+ drag-base-y (/ dy zoom)))))))))
 
         on-pointer-enter
         (mf/use-fn
@@ -1626,15 +1655,20 @@
 
         on-click*
         (mf/use-fn
-         (mf/deps origin thread on-click was-open? drag?)
+         (mf/deps viewer? thread on-click was-open? drag?)
          (fn [event]
            (dom/stop-propagation event)
-           (when (or (and (mf/ref-val was-open?) (mf/ref-val drag?))
-                     (and (not (mf/ref-val was-open?)) (not (mf/ref-val drag?))))
-             (swap! state assoc :is-hover false)
-             (st/emit! (dcm/open-thread thread)))
-           (when (= origin :viewer)
-             (on-click thread))))]
+           (cond
+             ;; the release of a drag is no tap
+             viewer?
+             (when-not (mf/ref-val drag?)
+               (swap! state assoc :is-hover false)
+               (on-click thread))
+
+             (or (and (mf/ref-val was-open?) (mf/ref-val drag?))
+                 (and (not (mf/ref-val was-open?)) (not (mf/ref-val drag?))))
+             (do (swap! state assoc :is-hover false)
+                 (st/emit! (dcm/open-thread thread))))))]
 
     [:div {:style {:top (dm/str pos-y "px")
                    :left (dm/str pos-x "px")
@@ -1650,6 +1684,7 @@
      ;; click, so hovering the preview card below never keeps the tooltip open.
      [:div {:on-pointer-down on-pointer-down
             :on-pointer-up on-pointer-up
+            :on-pointer-cancel on-pointer-cancel
             :on-pointer-move on-pointer-move
             :on-pointer-enter on-pointer-enter
             :on-pointer-leave on-pointer-leave

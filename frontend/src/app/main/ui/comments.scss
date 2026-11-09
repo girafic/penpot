@@ -177,6 +177,9 @@
   display: flex;
   block-size: $sz-32;
   inline-size: $sz-32;
+
+  // a finger drags the bubble, not the page under it
+  touch-action: none;
 }
 
 // The clock on the bubble of a thread about a moment of the animation.

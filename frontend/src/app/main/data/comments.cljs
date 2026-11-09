@@ -379,6 +379,32 @@
                  {::ev/name "delete-comment-thread"
                   ::ev/origin "viewer"
                   :id id})))))))
+
+(defn update-comment-thread-position-on-viewer
+  "Moves the bubble of a thread to `position` on the page, in the board
+  it is about, in the view mode."
+  [{:keys [id page-id frame-id] :as thread} position]
+  (dm/assert!
+   "expected valid comment thread"
+   (check-comment-thread! thread))
+  (ptk/reify ::update-comment-thread-position-on-viewer
+    ptk/UpdateEvent
+    (update [_ state]
+      (-> state
+          (d/update-in-when [:comment-threads id] assoc :position position)
+          (d/update-in-when [:viewer :pages page-id :comment-thread-positions id]
+                            assoc :position position)))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [share-id (-> state :viewer-local :share-id)]
+        (->> (rp/cmd! :update-comment-thread-position {:id id
+                                                       :position position
+                                                       :frame-id frame-id
+                                                       :share-id share-id})
+             (rx/catch #(rx/throw {:type :comment-error}))
+             (rx/ignore))))))
+
 (defn delete-comment
   [{:keys [id thread-id] :as comment}]
   (dm/assert!
