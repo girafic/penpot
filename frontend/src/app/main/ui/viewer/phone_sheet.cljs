@@ -238,6 +238,7 @@
      (when-not open-beside
        [:div {:class (stl/css :backdrop) :on-click on-close}])
      [:div {:class (stl/css-case :sheet true
+                                 :floating (not expanded?)
                                  :half (and (= height :half) (not expanded?))
                                  :full (and (= height :half) expanded?)
                                  :grown (and (nil? height) expanded?))

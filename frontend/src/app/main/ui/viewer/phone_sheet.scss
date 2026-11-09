@@ -20,6 +20,16 @@
   animation: fade-in 0.2s ease;
 }
 
+// how a sheet of a phone rounds its corners, and how far in from the
+// edges of the screen it floats below its full height, as on iOS 26: its
+// corners as round as the screen's, less the gap. All the sheets of a
+// phone: this one, a comment (`comments.scss`), the list of them
+// (`viewer/comments.scss`) and sharing (`viewer/share_link.scss`)
+:global(:root) {
+  --phone-sheet-gap: var(--sp-s);
+  --phone-sheet-radius: #{px2rem(36)};
+}
+
 // from the bottom, at most half as high as the screen: its grip stays,
 // what is under it scrolls
 .sheet {
@@ -30,14 +40,23 @@
   display: flex;
   flex-direction: column;
   max-block-size: 50dvh;
-  border-radius: $br-12 $br-12 0 0;
+  overflow: hidden;
+  border-radius: var(--phone-sheet-radius) var(--phone-sheet-radius) 0 0;
   background-color: var(--color-background-primary);
   color: var(--color-foreground-primary);
   transition:
     transform 0.2s ease,
     block-size 0.2s ease,
-    max-block-size 0.2s ease;
+    max-block-size 0.2s ease,
+    margin 0.2s ease,
+    border-radius 0.2s ease;
   animation: slide-up 0.2s ease;
+}
+
+// below its full height: in from the edges of the screen, round all round
+.floating {
+  margin: 0 var(--phone-sheet-gap) var(--phone-sheet-gap);
+  border-radius: var(--phone-sheet-radius);
 }
 
 // always as high, half the screen, or most of it once its grip dragged it
@@ -65,14 +84,16 @@
   touch-action: none;
 }
 
+// what it holds stays clear of its round bottom corners, on a phone with
+// no safe area at its bottom too
 .body {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: var(--sp-s);
   min-block-size: 0;
-  padding: 0 calc(env(safe-area-inset-right) + var(--sp-m)) calc(env(safe-area-inset-bottom) + var(--sp-m))
-    calc(env(safe-area-inset-left) + var(--sp-m));
+  padding: 0 calc(env(safe-area-inset-right) + var(--sp-m))
+    calc(max(env(safe-area-inset-bottom), var(--sp-l)) + var(--sp-m)) calc(env(safe-area-inset-left) + var(--sp-m));
   overflow-y: auto;
   overscroll-behavior: contain;
 }

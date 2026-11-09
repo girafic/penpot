@@ -308,19 +308,21 @@
 }
 
 // a phone shows an open thread and a new one at the bottom of its screen,
-// as wide as it, above its keyboard (see `phone-sheet/use-keyboard-inset!`)
+// as wide as it, above its keyboard (see `phone-sheet/use-keyboard-inset!`):
+// a sheet floating in from its edges, as its others
 .floating-thread-wrapper.docked,
 .floating-thread-draft-inner-wrapper.docked {
   position: fixed;
   inset-inline: 0;
   inset-block: auto var(--keyboard-inset, 0);
+  margin: 0 var(--phone-sheet-gap) var(--phone-sheet-gap);
   z-index: var(--z-index-panels);
   inline-size: auto;
   max-block-size: 60dvh;
   padding: var(--sp-m) calc(env(safe-area-inset-right) + var(--sp-m)) calc(env(safe-area-inset-bottom) + var(--sp-m))
     calc(env(safe-area-inset-left) + var(--sp-m));
   border: none;
-  border-radius: $br-12 $br-12 0 0;
+  border-radius: var(--phone-sheet-radius);
   box-shadow: 0 0 px2rem(16) rgb(0 0 0 / 0.2);
   transform: none;
 }

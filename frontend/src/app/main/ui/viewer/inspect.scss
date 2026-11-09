@@ -52,10 +52,11 @@
   cursor: ew-resize;
 }
 
-// on a phone the sheet covers the bottom half of the screen: the board
-// scrolls as far as to show its bottom above it (see `phone-viewport*`)
+// on a phone the sheet covers the bottom half of the screen, floating
+// above its bottom edge: the board scrolls as far as to show its bottom
+// above it (see `phone-viewport*`)
 .above-sheet {
-  padding-block-end: 50dvh;
+  padding-block-end: calc(50dvh + var(--phone-sheet-gap));
 }
 
 .phone-tabs {

@@ -114,7 +114,7 @@
 }
 
 // a phone shows the list as a sheet from its bottom, most of its screen
-// high (see `phone-sheet/sheet*`)
+// high, so from edge to edge (see `phone-sheet/sheet*`)
 [data-phone="true"] .comments-sidebar {
   position: fixed;
   inset-inline: 0;
@@ -124,7 +124,7 @@
   padding-block-end: env(safe-area-inset-bottom);
   padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
   overflow: hidden;
-  border-radius: $br-12 $br-12 0 0;
+  border-radius: var(--phone-sheet-radius) var(--phone-sheet-radius) 0 0;
   box-shadow: 0 0 px2rem(16) rgb(0 0 0 / 0.2);
 }
 
