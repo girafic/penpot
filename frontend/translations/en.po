@@ -1057,6 +1057,10 @@ msgstr "You are now a viewer on this team."
 msgid "dashboard.personal-projects"
 msgstr "Personal Projects"
 
+#: src/app/main/ui/dashboard.cljs
+msgid "dashboard.phone.menu"
+msgstr "Menu"
+
 #: src/app/main/ui/dashboard/files.cljs:122, src/app/main/ui/dashboard/project_menu.cljs:98, src/app/main/ui/dashboard/projects.cljs:251
 msgid "dashboard.pin-unpin"
 msgstr "Pin/Unpin"

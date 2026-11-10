@@ -27,3 +27,41 @@
   overflow: hidden;
   inline-size: 100%;
 }
+
+// a phone shows the content alone, as wide as its screen, below its
+// notch; the sidebar comes over it from the left as a drawer (see
+// `.dashboard-sidebar` in `dashboard/sidebar.scss`), by the button at its
+// top left, in front of the header of each page
+.dashboard[data-phone="true"] {
+  grid-template-columns: 100%;
+  grid-template-rows: 100%;
+  block-size: 100dvh;
+}
+
+[data-phone="true"] .dashboard-content {
+  grid-template-columns: minmax(0, 1fr);
+  grid-row: 1;
+  grid-column: 1;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+.drawer-button {
+  position: fixed;
+  inset-block-start: calc(env(safe-area-inset-top) + var(--sp-l));
+  inset-inline-start: calc(env(safe-area-inset-left) + var(--sp-s));
+  z-index: var(--z-index-panels);
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-set);
+  background-color: rgb(0 0 0 / 0.3);
+  animation: fade-in 0.2s ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}

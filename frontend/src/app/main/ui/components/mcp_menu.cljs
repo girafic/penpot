@@ -19,6 +19,7 @@
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.timers :as ts]
+   [app.util.touch :as touch]
    [rumext.v2 :as mf]))
 
 (defn- cancel-timer!
@@ -143,7 +144,9 @@
 (mf/defc dashboard-mcp-menu*
   []
   (let [mcp-state (mf/deref refs/mcp)]
+    ;; none on a phone, which edits nothing with an agent
     (when (and (contains? cf/flags :mcp)
+               (not (touch/phone?))
                (:enabled mcp-state)
                (:token-valid mcp-state))
       [:> mcp-menu* {:dashboard true

@@ -28,6 +28,7 @@
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
+   [app.util.touch :as touch]
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
 
@@ -107,16 +108,23 @@
       [:> layout-toggle* {:layout layout
                           :on-change on-change}]
 
+      ;; a plus on a phone, which has no room for the words
       (when ^boolean can-edit
-        [:> button* {:variant "secondary"
-                     :class (stl/css :new-file)
-                     :on-click on-create-click
-                     :on-key-down (fn [event]
-                                    (when (kbd/enter? event)
-                                      (on-create-click event)))
-                     :tab-index "0"
-                     :data-testid "new-file"}
-         (tr "dashboard.new-file")])
+        (if (touch/phone?)
+          [:> icon-button* {:variant "secondary"
+                            :icon i/add
+                            :aria-label (tr "dashboard.new-file")
+                            :on-click on-create-click
+                            :data-testid "new-file"}]
+          [:> button* {:variant "secondary"
+                       :class (stl/css :new-file)
+                       :on-click on-create-click
+                       :on-key-down (fn [event]
+                                      (when (kbd/enter? event)
+                                        (on-create-click event)))
+                       :tab-index "0"
+                       :data-testid "new-file"}
+           (tr "dashboard.new-file")]))
 
       (when-not (:is-default project)
         [:> icon-button* {:icon i/pin

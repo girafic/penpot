@@ -34,6 +34,8 @@
    [app.main.ui.dashboard.sidebar :refer [sidebar*]]
    [app.main.ui.dashboard.team :refer [team-settings-page* team-members-page* team-invitations-page* webhooks-page*]]
    [app.main.ui.dashboard.templates :refer [templates-section*]]
+   [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.modal :refer [modal-container*]]
    [app.main.ui.workspace.plugins]
@@ -44,6 +46,7 @@
    [app.util.object :as obj]
    [app.util.session-state :as ss]
    [app.util.storage :as storage]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
    [goog.events :as events]
@@ -52,7 +55,7 @@
 
 (mf/defc dashboard-content*
   {::mf/private true}
-  [{:keys [team projects project section search-term profile default-project layout on-layout-change]}]
+  [{:keys [team projects project section search-term profile default-project layout on-layout-change phone]}]
   (let [container       (mf/use-ref)
         content-width   (mf/use-state 0)
 
@@ -75,9 +78,11 @@
         (mf/use-fn
          #(st/emit! (dd/clear-selected-files)))
 
+        ;; none on a phone: a row too wide for it
         show-templates?
         (and (contains? cf/flags :dashboard-templates-section)
-             (:can-edit permissions))
+             (:can-edit permissions)
+             (not phone))
 
         show-deleted? (:can-edit permissions)
 
@@ -322,12 +327,26 @@
         layout*         (hooks/use-persisted-state lt/layout-key lt/default-layout)
         layout          (deref layout*)
 
+        ;; a phone shows the content alone: the sidebar comes over it
+        ;; from the left as a drawer, by the button at its top left
+        phone?          (mf/with-memo [] (touch/phone?))
+        drawer*         (mf/use-state false)
+        drawer?         (deref drawer*)
+        open-drawer     (mf/use-fn #(reset! drawer* true))
+        close-drawer    (mf/use-fn #(reset! drawer* false))
+
         on-layout-change
         (mf/use-fn
          (fn [value]
            (reset! layout* (keyword value))))]
 
     (hooks/use-shortcuts ::dashboard sc/shortcuts-dashboard :dashboard)
+
+    ;; a page chosen in the drawer closes it, but the search, whose field
+    ;; is in it
+    (mf/with-effect [section project-id]
+      (when-not (= section :dashboard-search)
+        (reset! drawer* false)))
 
     (mf/with-effect [team-id]
       (st/emit! (dd/initialize team-id))
@@ -358,7 +377,20 @@
      ;; components on team change. Many components assumes that the
      ;; team is already set so don't put the team into mf/deps.
      [:main {:class (stl/css :dashboard)
-             :key (dm/str (:id team))}
+             :key (dm/str (:id team))
+             :data-phone (dm/str phone?)
+             :data-drawer (when drawer? "open")}
+      (when phone?
+        [:*
+         [:> icon-button* {:variant "ghost"
+                           :class (stl/css :drawer-button)
+                           :aria-label (tr "dashboard.phone.menu")
+                           :aria-expanded drawer?
+                           :icon i/hamburger
+                           :on-click open-drawer}]
+         (when drawer?
+           [:div {:class (stl/css :drawer-backdrop)
+                  :on-click close-drawer}])])
       [:> sidebar* {:team team
                     :projects projects
                     :project project
@@ -374,7 +406,8 @@
                               :search-term search-term
                               :team team
                               :layout layout
-                              :on-layout-change on-layout-change}]]]))
+                              :on-layout-change on-layout-change
+                              :phone phone?}]]]))
 
 (mf/defc dashboard-page*
   {::mf/lazy-load true}

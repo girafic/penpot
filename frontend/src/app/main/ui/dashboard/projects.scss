@@ -155,6 +155,23 @@
   }
 }
 
+// a phone: the name of a project before its actions, which it shows with
+// no pointer over them, and an arrow alone to all of its files
+[data-phone="true"] .project {
+  padding-inline-start: var(--sp-s);
+}
+
+[data-phone="true"] .project-actions {
+  --actions-opacity: 1;
+
+  margin-inline-start: 0;
+  gap: var(--sp-xs);
+}
+
+[data-phone="true"] .show-more-label {
+  display: none;
+}
+
 // Team hero
 .team-hero {
   background-color: var(--color-background-tertiary);

@@ -76,6 +76,10 @@
         "the view mode is as wide as the device, under its notch")
   (t/is (nil? (touch/viewport-content :workspace true true))
         "a phone keeps the workspace as wide as a desktop page")
+  (t/is (= "width=device-width, initial-scale=1, viewport-fit=cover"
+           (touch/viewport-content :dashboard-recent true true)
+           (touch/viewport-content :dashboard-files true true))
+        "a phone lays the dashboard out at its own width")
   (t/is (= "width=device-width, initial-scale=1"
            (touch/viewport-content :workspace false true)
            (touch/viewport-content :dashboard-recent false true))

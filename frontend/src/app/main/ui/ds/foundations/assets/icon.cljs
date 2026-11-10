@@ -167,6 +167,7 @@
 (def ^:icon-id group "group")
 (def ^:icon-id gutter-horizontal "gutter-horizontal")
 (def ^:icon-id gutter-vertical "gutter-vertical")
+(def ^:icon-id hamburger "hamburger")
 (def ^:icon-id handlers-equal "handlers-equal")
 (def ^:icon-id handlers-independent "handlers-independent")
 (def ^:icon-id handlers-mirror "handlers-mirror")

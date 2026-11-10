@@ -571,9 +571,11 @@
 
          rowref   (mf/use-ref)
 
+         ;; two side by side on a phone
          itemsize (cond
                     (some? itemsize) itemsize
                     (>= width 1030)  280
+                    (< width 600)    150
                     :else            230)
 
          ratio    (if (some? width) (/ width itemsize) 0)

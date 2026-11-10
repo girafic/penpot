@@ -141,6 +141,30 @@
   }
 }
 
+// a phone: the header after the button of the drawer of the sidebar (see
+// `dashboard*`), its title giving way to its actions
+[data-phone="true"] .dashboard-header {
+  gap: $s-8;
+  padding-inline: $s-48 $s-8;
+
+  .dashboard-title {
+    flex: 1;
+    min-width: 0;
+    margin-left: 0;
+
+    h1 {
+      flex-shrink: 1;
+      min-width: 0;
+      font-size: $fs-18;
+    }
+  }
+
+  .dashboard-header-actions {
+    flex-shrink: 0;
+    column-gap: $s-8;
+  }
+}
+
 .btn-primary {
   @extend %button-primary;
 

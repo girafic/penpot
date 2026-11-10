@@ -36,6 +36,7 @@
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [app.util.storage :as storage]
+   [app.util.touch :as touch]
    [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
@@ -55,11 +56,18 @@
       [:> dashboard-mcp-menu*]
       [:> layout-toggle* {:layout layout
                           :on-change on-change}]
+      ;; a plus on a phone, which has no room for the words
       (when can-edit
-        [:> button* {:variant "secondary"
-                     :on-click on-click
-                     :data-testid "new-project-button"}
-         (tr "dashboard.new-project")])]]))
+        (if (touch/phone?)
+          [:> icon-button* {:variant "secondary"
+                            :icon i/add
+                            :aria-label (tr "dashboard.new-project")
+                            :on-click on-click
+                            :data-testid "new-project-button"}]
+          [:> button* {:variant "secondary"
+                       :on-click on-click
+                       :data-testid "new-project-button"}
+           (tr "dashboard.new-project")]))]]))
 
 (mf/defc team-hero*
   {::mf/wrap [mf/memo]}
@@ -289,7 +297,7 @@
                    :on-key-down (fn [event]
                                   (when (kbd/enter? event)
                                     (on-nav event)))}
-          (tr "dashboard.show-all-files")
+          [:span {:class (stl/css :show-more-label)} (tr "dashboard.show-all-files")]
           [:> icon* {:icon-id i/arrow-right}]])]]
 
      ;; Kept mounted for as long as this row is, shared by both menu

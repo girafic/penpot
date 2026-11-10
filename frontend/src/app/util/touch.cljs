@@ -13,6 +13,7 @@
    [app.util.dom :as dom]
    [app.util.globals :as g]
    [app.util.storage :as storage]
+   [cuerdas.core :as str]
    [okulary.core :as l]))
 
 (def ^:private phone-side
@@ -45,18 +46,25 @@
   (let [screen (unchecked-get g/global "screen")]
     (phone-screen? (some-> screen .-width) (some-> screen .-height) (coarse?))))
 
+(defn- dashboard-screen?
+  "Whether `screen`, the name of a route, is a page of the dashboard."
+  [screen]
+  (and (keyword? screen) (str/starts-with? (name screen) "dashboard")))
+
 (defn viewport-content
   "The content of the viewport tag for the `screen` (the name of the
   route) on a `phone?` or another `coarse?` device; nil for none. The
-  view mode is as wide as the device and may reach under its notch;
+  view mode is as wide as the device and may reach under its notch, and
+  so is the dashboard on a phone, which lays itself out for it;
   elsewhere a tablet lays Penpot out at its own width, and a phone or a
   desktop keeps the width of a desktop page (no tag)."
   [screen phone? coarse?]
   (cond
-    (= screen :viewer)  "width=device-width, initial-scale=1, viewport-fit=cover"
-    phone?              nil
-    coarse?             "width=device-width, initial-scale=1"
-    :else               nil))
+    (= screen :viewer)                    "width=device-width, initial-scale=1, viewport-fit=cover"
+    (and phone? (dashboard-screen? screen)) "width=device-width, initial-scale=1, viewport-fit=cover"
+    phone?                                nil
+    coarse?                               "width=device-width, initial-scale=1"
+    :else                                 nil))
 
 (defn- head-tag!
   "The tag in the head of the document matching `selector`, made with
