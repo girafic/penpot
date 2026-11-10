@@ -223,3 +223,72 @@
                         {:zoom (/ (:width screen) (max 1 width)) :x x :y y})
                       (zoom-about view point (* 2 (:zoom view))))
                     bounds screen)))))
+
+;; --- Gestures on the canvas
+
+(defn pan-view
+  "The `view` fingers moved `dx dy` px over the screen: the page follows
+  them."
+  [{:keys [zoom] :as view} dx dy]
+  (-> view
+      (update :x - (/ dx zoom))
+      (update :y - (/ dy zoom))))
+
+(defn overshoot
+  "How far, px of the screen, the `view` is past where the canvas of
+  `bounds` on a `screen` keeps it (see `clamp-view`): `[x y]`, more than
+  0 past the right or the bottom."
+  [view bounds screen]
+  (let [{:keys [zoom x y]} (clamp-view view bounds screen)]
+    [(* (- (:x view) x) zoom) (* (- (:y view) y) zoom)]))
+
+(def ^:private speed-window-ms
+  "How far back, ms, the speed fingers let go at is measured (as
+  `app.main.ui.viewer.drag-scroll` does)."
+  100)
+
+(defn finger-speed
+  "The speed, px/ms of the screen, of a finger at `samples` (`[t x y]`,
+  the oldest first) let go at `t`: `[vx vy]` over the last
+  `speed-window-ms` it moved, `[0 0]` once it stood still that long."
+  [samples t]
+  (let [[last-t] (peek samples)
+        samples  (filterv (fn [[st]] (> st (- last-t speed-window-ms))) samples)]
+    (if (or (< (count samples) 2) (> (- t last-t) speed-window-ms))
+      [0 0]
+      (let [[t0 x0 y0] (first samples)
+            [t1 x1 y1] (peek samples)]
+        (if (> t1 t0)
+          [(/ (- x1 x0) (- t1 t0)) (/ (- y1 y0) (- t1 t0))]
+          [0 0])))))
+
+(defn tween-view
+  "The view `e` of the way (0 to 1) from `from` to `to`: zooming about the
+  point of the screen that stays where it is between them, or moving
+  straight between two views at one zoom."
+  [from to e]
+  (let [z0 (:zoom from)
+        z1 (:zoom to)]
+    (if (mth/close? z0 z1 1e-9)
+      {:zoom (+ z0 (* e (- z1 z0)))
+       :x    (+ (:x from) (* e (- (:x to) (:x from))))
+       :y    (+ (:y from) (* e (- (:y to) (:y from))))}
+      (let [k     (- (/ 1 z0) (/ 1 z1))
+            point (gpt/point (/ (- (:x to) (:x from)) k) (/ (- (:y to) (:y from)) k))]
+        (zoom-about from point (* z0 (mth/pow (/ z1 z0) e)))))))
+
+(def double-tap-ms
+  "How soon, ms, a second tap makes a double tap."
+  300)
+
+(def ^:private double-tap-px
+  "How near, px of the screen, a second tap makes a double tap."
+  24)
+
+(defn double-tap?
+  "Whether the `tap` (`{:t :x :y}`, ms and px of the screen) is the
+  second of a double tap after the tap `before`: soon and near enough."
+  [before tap]
+  (and (some? before)
+       (< (- (:t tap) (:t before)) double-tap-ms)
+       (< (mth/hypot (- (:x tap) (:x before)) (- (:y tap) (:y before))) double-tap-px)))

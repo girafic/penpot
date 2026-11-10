@@ -380,22 +380,31 @@
                     #(render-page-view* page-key page-objects canvas zoom vbox on-render))
                    (p/resolved nil))))))
 
+;; The move of the page asked last and not shown yet (see
+;; `move-page-view`): a render that runs long skips the moves before it.
+(defonce ^:private pending-move (atom nil))
+
 (defn move-page-view
   "Show the page at `zoom` and `vbox` on `canvas` at once, from what
   `render-page-view` left in the tile cache: while fingers move it, that
   renders it once they stop. Nothing when the shared OffscreenCanvas is
   not at the size of `canvas`, the page not rendered on it yet."
   [canvas zoom vbox]
-  (enqueue-wasm-render!
-   (fn []
-     (let [{:keys [os-canvas canvas-w canvas-h]} @viewer-snapshot]
-       (when (and (some? os-canvas)
-                  (wasm.api/initialized?)
-                  (= canvas-w (.-width canvas))
-                  (= canvas-h (.-height canvas)))
-         (wasm.api/move-view! zoom vbox)
-         (present-bitmap! canvas os-canvas uuid/zero canvas-w canvas-h identity))
-       (p/resolved nil)))))
+  (let [queued? (some? @pending-move)]
+    (reset! pending-move [canvas zoom vbox])
+    (when-not queued?
+      (enqueue-wasm-render!
+       (fn []
+         (let [[canvas zoom vbox] @pending-move
+               {:keys [os-canvas canvas-w canvas-h]} @viewer-snapshot]
+           (reset! pending-move nil)
+           (when (and (some? os-canvas)
+                      (wasm.api/initialized?)
+                      (= canvas-w (.-width canvas))
+                      (= canvas-h (.-height canvas)))
+             (wasm.api/move-view! zoom vbox)
+             (present-bitmap! canvas os-canvas uuid/zero canvas-w canvas-h identity))
+           (p/resolved nil)))))))
 
 (defn- use-viewer-dpr-key
   "Bump a counter when browser zoom changes devicePixelRatio so WASM canvases

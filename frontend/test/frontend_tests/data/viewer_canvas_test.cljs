@@ -15,6 +15,7 @@
    [app.config :as cf]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
+   [app.main.ui.viewer.canvas :as uvc]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [potok.v2.core :as ptk]))
@@ -333,3 +334,59 @@
       (t/is (mth/close? (* 2 (:zoom start)) zoom 1e-9) "no board to zoom to: twice as close")
       (t/is (close-point? (gpt/point 2000 10000)
                           (dvc/page-point view (screen-point start 2000 10000)))))))
+
+;; --- Gestures on the canvas
+
+(t/deftest fingers-move-the-page-with-them
+  (let [view {:zoom 0.5 :x 100 :y 200}]
+    (t/is (= {:zoom 0.5 :x 80 :y 220} (dvc/pan-view view 10 -10)))
+    (t/is (close-point? (dvc/page-point view (gpt/point 50 50))
+                        (dvc/page-point (dvc/pan-view view 10 -10) (gpt/point 60 40))))))
+
+(t/deftest how-far-a-view-is-past-the-edges
+  (let [bounds (grc/make-rect 0 0 4520 21760)]
+    (t/is (= [0 0] (dvc/overshoot {:zoom 1 :x 100 :y 100} bounds phone-screen)))
+    (t/is (= [-50 0] (dvc/overshoot {:zoom 0.5 :x -100 :y 0} bounds phone-screen)) "past the left, in px")
+    (t/is (= [0 30] (dvc/overshoot {:zoom 1 :x 0 :y (+ (- 21760 812) 30)} bounds phone-screen))
+          "past the bottom")))
+
+(t/deftest the-speed-fingers-let-go-at
+  (t/is (= [0.5 -1] (dvc/finger-speed [[0 0 0] [50 25 -50] [100 50 -100]] 100)))
+  (t/is (= [0.5 -1] (dvc/finger-speed [[-500 900 900] [20 10 -20] [100 50 -100]] 100))
+        "only the last 100 ms")
+  (t/is (= [0 0] (dvc/finger-speed [[0 0 0] [100 50 -100]] 300)) "held still before letting go")
+  (t/is (= [0 0] (dvc/finger-speed [[0 0 0]] 0))))
+
+(t/deftest a-double-tap-zooms-smoothly
+  (let [from {:zoom 0.1 :x 0 :y 0}
+        to   {:zoom 0.9 :x 100 :y 100}]
+    (let [{:keys [zoom x y]} (dvc/tween-view from to 0)]
+      (t/is (mth/close? 0.1 zoom 1e-9))
+      (t/is (close-point? (gpt/point 0 0) (gpt/point x y))))
+    (let [{:keys [zoom x y]} (dvc/tween-view from to 1)]
+      (t/is (mth/close? 0.9 zoom 1e-9))
+      (t/is (mth/close? 100 x 1e-6))
+      (t/is (mth/close? 100 y 1e-6)))
+    (t/testing "one point of the screen stays over the same point of the page"
+      (let [k     (- (/ 1 0.1) (/ 1 0.9))
+            point (gpt/point (/ 100 k) (/ 100 k))]
+        (t/is (close-point? (dvc/page-point from point)
+                            (dvc/page-point (dvc/tween-view from to 0.4) point)))))
+    (t/is (= {:zoom 1 :x 50 :y 25} (dvc/tween-view {:zoom 1 :x 0 :y 0} {:zoom 1 :x 100 :y 50} 0.5))
+          "at one zoom, straight")))
+
+(t/deftest two-taps-soon-and-near-are-a-double-tap
+  (let [tap {:t 1000 :x 100 :y 100}]
+    (t/is (dvc/double-tap? tap {:t 1200 :x 110 :y 105}))
+    (t/is (not (dvc/double-tap? tap {:t 1350 :x 100 :y 100})) "too late")
+    (t/is (not (dvc/double-tap? tap {:t 1100 :x 150 :y 100})) "too far")
+    (t/is (not (dvc/double-tap? nil tap)))))
+
+(t/deftest past-an-edge-the-page-gives-as-rubber
+  (let [bounds (grc/make-rect 0 0 4520 21760)
+        inside {:zoom 1 :x 100 :y 100}]
+    (t/is (= inside (uvc/shown-view inside bounds phone-screen)) "within the edges, as it is")
+    (let [{:keys [y]} (uvc/shown-view {:zoom 1 :x 100 :y -200} bounds phone-screen)]
+      (t/is (< -200 y 0) "dragged 200 px past the top, it gives less")
+      (t/is (< y (:y (uvc/shown-view {:zoom 1 :x 100 :y -100} bounds phone-screen)))
+            "and more the further"))))

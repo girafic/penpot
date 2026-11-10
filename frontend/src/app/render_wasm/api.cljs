@@ -2425,9 +2425,12 @@
     (bit-or 2r00000000000000000000000000000100)
     ;; not over the canvas in its small window over the maximized
     ;; timeline, which shows the animation alone (it sets the options
-    ;; again as it resizes, see `resize-canvas!`)
+    ;; again as it resizes, see `resize-canvas!`), nor in the view mode:
+    ;; the canvas of a phone moves through the frame that draws it (see
+    ;; `move-view!`)
     (and (contains? cf/flags :render-wasm-info)
-         (not (dwam/canvas-in-window? @st/state)))
+         (not (dwam/canvas-in-window? @st/state))
+         (not= :viewer (dm/get-in @st/state [:route :data :name])))
     (bit-or 2r00000000000000000000000000001000)))
 
 (defn set-render-options!
