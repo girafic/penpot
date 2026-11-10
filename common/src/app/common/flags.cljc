@@ -201,7 +201,12 @@
     :link-preview
 
     ;; Shows the "link later" option on the files export modal.
-    :export-link-later})
+    :export-link-later
+
+    ;; A phone opens a file in the view mode on its canvas, the page as
+    ;; a whole, unless its link points at a board (Penpot Motion). On by
+    ;; default: `disable-phone-canvas` starts it on the prototype again.
+    :phone-canvas})
 
 (def all-flags
   (set/union email login varia))
@@ -239,7 +244,8 @@
    :enable-stroke-per-side
    :enable-token-combobox
    :enable-custom-shortcuts
-   :enable-token-lib-sync])
+   :enable-token-lib-sync
+   :enable-phone-canvas])
 
 (defn parse
   [& flags]
