@@ -148,7 +148,8 @@
   ;; emit any navigation.
   (let [state (-> (base-state {:frames [{:selrect {:width 100 :height 100}}]
                                :index  0})
-                  (assoc-in [:route :query-params :zoom] "fill"))]
+                  (assoc-in [:route :query-params :zoom] "fill")
+                  (assoc-in [:route :query-params :page-id] (str page-id)))]
     (let [events (watch-events (dv/bundle-fetched
                                 {:file {:id page-id
                                         :data {:pages [page-id]
@@ -166,6 +167,41 @@
           ;; ones that can restart the zoom cycle.
           navigations (filter #(= :app.main.router/navigate (ptk/type %)) events)]
       (t/is (empty? navigations)))))
+
+(t/deftest a-link-without-a-page-shows-the-first-one
+  ;; a tap on a file in the dashboard of a phone opens the view mode with
+  ;; no page in its URL: the first page goes in, and the view mode,
+  ;; starting again on it, takes the bundle it has
+  (let [file-id (uuid/custom 1 2)
+        bundle  {:file {:id file-id
+                        :data {:pages [page-id (uuid/custom 1 3)]
+                               :pages-index {page-id {:objects {}}}}}
+                 :project {}
+                 :team {:features []}
+                 :share-links []
+                 :libraries []
+                 :users []
+                 :permissions {}
+                 :thumbnails {}}
+        query   {:file-id (str file-id) :section "interactions"}
+        fetched (dv/bundle-fetched bundle)
+        state   (ptk/update fetched {:route {:params {:query query} :query-params query}})]
+    (t/testing "the first page goes in the URL, without a step in the history"
+      (let [[nav & more] (watch-events fetched state)
+            {:keys [params options]} (some-> nav deref)]
+        (t/is (= :app.main.router/navigate (ptk/type nav)))
+        (t/is (= (assoc query :page-id page-id) params))
+        (t/is (true? (::rt/replace options)))
+        (t/is (empty? more) "nothing else until it shows that page")))
+    (t/testing "the view mode on that page does not fetch the bundle again"
+      (let [types (map ptk/type (watch-events (dv/initialize {:file-id file-id :page-id page-id}) state))]
+        (t/is (some #{::dv/bundle-fetched} types))
+        (t/is (not-any? #{:app.main.data.viewer/fetch-bundle} types))))
+    (t/testing "the bundle kept goes once the URL has the page"
+      (let [query (assoc query :page-id (str page-id))]
+        (t/is (contains? state ::dv/page-less-bundle))
+        (t/is (not (contains? (ptk/update fetched (assoc state :route {:params {:query query} :query-params query}))
+                              ::dv/page-less-bundle)))))))
 
 
 ;; --- Devices

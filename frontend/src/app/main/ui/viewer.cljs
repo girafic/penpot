@@ -1418,9 +1418,11 @@
 (mf/defc viewer*
   [{:keys [file-id share-id page-id preview follow] :as props}]
   (mf/with-effect [file-id page-id share-id]
-    (let [params {:file-id file-id
-                  :page-id page-id
-                  :share-id share-id}]
+    ;; a link without a page, as a tap on a file in the dashboard of a
+    ;; phone opens, gets the first one (see `dv/bundle-fetched`)
+    (let [params (d/without-nils {:file-id file-id
+                                  :page-id page-id
+                                  :share-id share-id})]
       ;; before it shows a screen, which it then shows in its own history
       (when preview
         (st/emit! (dvp/start-preview)))

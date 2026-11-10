@@ -110,7 +110,12 @@
 
     ptk/WatchEvent
     (watch [_ state _]
-      (rx/of (fetch-bundle (d/without-nils params))
+      (rx/of (let [bundle (get state ::page-less-bundle)]
+               ;; the bundle of a link without a page, which now has its
+               ;; first one (see `bundle-fetched`), is not fetched again
+               (if (= file-id (dm/get-in bundle [:file :id]))
+                 (bundle-fetched bundle)
+                 (fetch-bundle (d/without-nils params))))
              update-device-querystring
              ;; Only fetch threads for logged-in users
              (when (some? (:profile state))
@@ -143,7 +148,7 @@
 (def ^:private
   schema:fetch-bundle
   [:map {:title "fetch-bundle"}
-   [:page-id ::sm/uuid]
+   [:page-id {:optional true} ::sm/uuid]
    [:file-id ::sm/uuid]
    [:share-id {:optional true} ::sm/uuid]])
 
@@ -372,7 +377,14 @@
   (ptk/reify ::bundle-fetched
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-bundle state bundle))
+      ;; a link without a page, as a tap on a file in the dashboard of a
+      ;; phone opens, keeps its bundle for the view mode on the first
+      ;; page (see `initialize`)
+      (if (nil? (dm/get-in state [:route :query-params :page-id]))
+        (-> (assoc-bundle state bundle)
+            (assoc ::page-less-bundle bundle))
+        (-> (assoc-bundle state bundle)
+            (dissoc ::page-less-bundle))))
 
     ptk/WatchEvent
     (watch [_ state _]
@@ -383,22 +395,29 @@
             page-id (some-> (rt/get-query-param qparams :page-id) uuid/parse)
             file-id (some-> (rt/get-query-param qparams :file-id) uuid/parse)]
 
-        (rx/merge
-         (rx/of (case (:zoom qparams)
-                  "fit"   zoom-to-fit
-                  "fill"  zoom-to-fill
-                  "width" zoom-to-width
-                  (when (phone? state) zoom-to-width)))
-         (rx/of (update-page-position-data file-id page-id))
-         (cond
-           (and (some? frame-id)
-                (preview? state)
-                (not (some #(= frame-id (:id %)) (preview-frames state))))
-           (rx/of (preview-go frame-id) (go-to-frame-auto))
+        (if (nil? page-id)
+          ;; the boards, the zoom and the links all go by the page of the
+          ;; URL: the first one goes in, without a step in the history
+          (rx/of (rt/nav :viewer
+                         (assoc (rt/get-params state)
+                                :page-id (-> bundle :file :data :pages first))
+                         {::rt/replace true}))
+          (rx/merge
+           (rx/of (case (:zoom qparams)
+                    "fit"   zoom-to-fit
+                    "fill"  zoom-to-fill
+                    "width" zoom-to-width
+                    (when (phone? state) zoom-to-width)))
+           (rx/of (update-page-position-data file-id page-id))
+           (cond
+             (and (some? frame-id)
+                  (preview? state)
+                  (not (some #(= frame-id (:id %)) (preview-frames state))))
+             (rx/of (preview-go frame-id) (go-to-frame-auto))
 
-           (some? frame-id) (rx/of (go-to-frame frame-id))
-           (some? index)    (rx/of (go-to-frame-by-index index))
-           :else            (rx/of (go-to-frame-auto))))))))
+             (some? frame-id) (rx/of (go-to-frame frame-id))
+             (some? index)    (rx/of (go-to-frame-by-index index))
+             :else            (rx/of (go-to-frame-auto)))))))))
 
 ;; --- The preview of a prototype in the workspace
 
