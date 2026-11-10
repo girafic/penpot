@@ -290,3 +290,63 @@
     color: var(--color-foreground-secondary);
   }
 }
+
+// On a phone the page is as wide as its screen, with a margin; a font is a
+// card, its family and options in a row, its variants and files below
+[data-phone="true"] .dashboard-fonts {
+  padding-inline: var(--sp-l);
+  padding-block-end: calc(env(safe-area-inset-bottom) + var(--sp-xxl));
+}
+
+[data-phone="true"] .dashboard-fonts-hero {
+  margin-block-start: 0;
+  padding-block: var(--sp-xxl);
+
+  .desc {
+    inline-size: 100%;
+  }
+}
+
+[data-phone="true"] .fonts-placeholder {
+  block-size: auto;
+  gap: var(--sp-s);
+  padding: var(--sp-xxl) var(--sp-l);
+  text-align: center;
+}
+
+[data-phone="true"] .installed-fonts-header {
+  padding-inline-start: 0;
+
+  > .family,
+  > .variants {
+    display: none;
+  }
+
+  .search-font-input {
+    inline-size: 100%;
+  }
+}
+
+[data-phone="true"] .font-item {
+  flex-wrap: wrap;
+  gap: var(--sp-s);
+  padding: var(--sp-m);
+
+  > .family {
+    flex: 1 1 0;
+    min-inline-size: 0;
+    inline-size: auto;
+  }
+
+  > .variants,
+  > .filenames {
+    flex-basis: 100%;
+    min-inline-size: 0;
+    order: 1;
+    padding-inline-start: 0;
+  }
+
+  .options {
+    min-inline-size: 0;
+  }
+}

@@ -1018,3 +1018,79 @@
 a {
   color: var(--color-accent-primary);
 }
+
+// On a phone the pages of a team are as wide as its screen, with a margin;
+// a member or an invitation is a card, its name or email above its role
+// and actions (the column titles of the members go, those of the
+// invitations keep their sorting)
+[data-phone="true"] .dashboard-team-members,
+[data-phone="true"] .dashboard-team-invitations,
+[data-phone="true"] .dashboard-team-webhooks,
+[data-phone="true"] .dashboard-team-settings {
+  padding-inline: var(--sp-l);
+  padding-block-end: calc(env(safe-area-inset-bottom) + var(--sp-xxl));
+}
+
+[data-phone="true"] .team-members > .table-header {
+  display: none;
+}
+
+[data-phone="true"] .invitations > .table-header {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--sp-m);
+  padding: 0 var(--sp-m);
+
+  .title-field-name {
+    inline-size: auto;
+    min-inline-size: 0;
+  }
+}
+
+[data-phone="true"] .table-rows {
+  grid-auto-rows: auto;
+  gap: var(--sp-s);
+}
+
+[data-phone="true"] .table-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-xs) var(--sp-s);
+  block-size: auto;
+  padding: var(--sp-m);
+
+  .field-name {
+    grid-column: 1 / -1;
+    gap: var(--sp-m);
+    inline-size: auto;
+    min-inline-size: 0;
+  }
+
+  .field-roles {
+    justify-self: start;
+  }
+}
+
+[data-phone="true"] .table-row-invitations {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+
+  .field-email {
+    grid-column: 1 / -1;
+  }
+}
+
+[data-phone="true"] .webhooks-hero-container {
+  margin: var(--sp-xxl) 0 var(--sp-xl);
+}
+
+[data-phone="true"] .webhooks-hero {
+  inline-size: 100%;
+}
+
+[data-phone="true"] .dashboard-team-settings,
+[data-phone="true"] .settings-container {
+  align-items: flex-start;
+}
+
+[data-phone="true"] .block-text {
+  overflow-wrap: anywhere;
+  text-wrap: wrap;
+}

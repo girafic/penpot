@@ -35,3 +35,14 @@
   width: $sz-200;
   color: var(--color-background-quaternary);
 }
+
+// on a phone (in the dashboard of one) the text alone, as wide as it needs
+[data-phone="true"] .empty-placeholder {
+  grid-template-columns: minmax(0, 1fr);
+  block-size: auto;
+  padding: var(--sp-xxl) var(--sp-l);
+
+  .svg-decor {
+    display: none;
+  }
+}

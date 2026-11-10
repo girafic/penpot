@@ -165,6 +165,38 @@
   }
 }
 
+// the header of the pages of a team on a phone: its title and button in a
+// row beside the button of the drawer, its tabs below, from the start of
+// the screen, scrolling sideways when they are too wide
+[data-phone="true"] .dashboard-header.team {
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: auto;
+  max-height: none;
+  padding-block: $s-8 0;
+
+  .dashboard-title {
+    min-height: $s-48;
+  }
+
+  nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+    margin-inline-start: -$s-40;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  ul {
+    justify-content: flex-start;
+  }
+
+  a {
+    padding: $s-4 $s-12;
+    white-space: nowrap;
+  }
+}
+
 .btn-primary {
   @extend %button-primary;
 

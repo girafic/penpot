@@ -39,6 +39,7 @@
 
 [data-phone="true"] .dashboard-content {
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(px2rem(72), auto) minmax(0, 1fr);
   grid-row: 1;
   grid-column: 1;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
