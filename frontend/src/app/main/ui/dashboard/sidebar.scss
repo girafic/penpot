@@ -322,6 +322,18 @@
   inset-block-end: $sz-24;
 }
 
+// on a phone a submenu takes the place of the profile menu, which has no
+// room beside it in the drawer, and the profile menu hides meanwhile
+[data-phone="true"] .sub-menu {
+  inset-inline: var(--sp-s);
+  inset-block-end: calc(px2rem(72) + env(safe-area-inset-bottom));
+  min-inline-size: 0;
+}
+
+[data-phone="true"] .profile-dropdown.with-sub-menu {
+  visibility: hidden;
+}
+
 .submenu-item {
   @extend %menu-item-base;
   @include use-typography("body-medium");

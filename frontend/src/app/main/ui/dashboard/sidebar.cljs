@@ -626,23 +626,29 @@
                           (keyword))]
              (reset! sub-menu* menu))))
 
+        ;; hovering opens and closes the submenus; a finger does not
+        ;; hover: its tap opens one (`on-menu-click`), and lifting it,
+        ;; which leaves the entry, must not close it
         on-menu-pointer-enter
         (mf/use-fn
          (fn [event]
-           (mf/set-ref-val! hovering?* true)
-           (on-menu-click event)))
+           (when-not (= "touch" (.-pointerType event))
+             (mf/set-ref-val! hovering?* true)
+             (on-menu-click event))))
 
         on-menu-pointer-leave
         (mf/use-fn
-         (fn [_]
-           (mf/set-ref-val! hovering?* false)
-           (ts/schedule 200 #(when-not (mf/ref-val hovering?*)
-                               (reset! sub-menu* nil)))))
+         (fn [event]
+           (when-not (= "touch" (.-pointerType event))
+             (mf/set-ref-val! hovering?* false)
+             (ts/schedule 200 #(when-not (mf/ref-val hovering?*)
+                                 (reset! sub-menu* nil))))))
 
         on-sub-menu-pointer-enter
         (mf/use-fn
-         (fn [_]
-           (mf/set-ref-val! hovering?* true)))]
+         (fn [event]
+           (when-not (= "touch" (.-pointerType event))
+             (mf/set-ref-val! hovering?* true))))]
 
     (mf/with-effect [teams]
       (when (and (contains? cf/flags :admin-console)
@@ -685,7 +691,8 @@
       [:> dropdown-menu* {:on-close on-close
                           :show show-profile-menu?
                           :id "profile-menu"
-                          :class (stl/css :profile-dropdown)}
+                          :class (stl/css-case :profile-dropdown true
+                                               :with-sub-menu (some? sub-menu))}
        [:> dropdown-menu-item* {:class (stl/css :profile-dropdown-item)
                                 :on-click handle-set-profile
                                 :data-testid "profile-profile-opt"}
