@@ -117,26 +117,26 @@
 
 
 (t/deftest a-sheet-rests-at-a-little-of-the-screen-half-of-it-or-most-of-it
-  (t/is (= [[:small 240] [:low 400] [:high 720]] (phone-sheet/sheet-heights :half 800 100))
+  (t/is (= [[:small 80] [:low 400] [:high 720]] (phone-sheet/sheet-heights :half 800 100))
         "as high as `:half`")
-  (t/is (= [[:low 150]] (phone-sheet/sheet-heights nil 800 150)) "what it holds, short")
-  (t/is (= [[:small 240] [:low 300]] (phone-sheet/sheet-heights nil 800 300)))
-  (t/is (= [[:small 240] [:low 400] [:high 600]] (phone-sheet/sheet-heights nil 800 600))
+  (t/is (= [[:low 60]] (phone-sheet/sheet-heights nil 800 60)) "what it holds, short")
+  (t/is (= [[:small 80] [:low 300]] (phone-sheet/sheet-heights nil 800 300)))
+  (t/is (= [[:small 80] [:low 400] [:high 600]] (phone-sheet/sheet-heights nil 800 600))
         "longer than half the screen")
-  (t/is (= [[:small 240] [:low 400] [:high 720]] (phone-sheet/sheet-heights nil 800 2000))))
+  (t/is (= [[:small 80] [:low 400] [:high 720]] (phone-sheet/sheet-heights nil 800 2000))))
 
 (t/deftest a-sheet-let-go-rests-at-the-nearest-height-or-where-flicked
   (let [heights (phone-sheet/sheet-heights :half 800 100)]
     (t/is (= :high (phone-sheet/sheet-rest 600 0 heights)) "nearest most of the screen")
     (t/is (= :low (phone-sheet/sheet-rest 500 0 heights)))
-    (t/is (= :small (phone-sheet/sheet-rest 300 0 heights)) "below half")
+    (t/is (= :small (phone-sheet/sheet-rest 200 0 heights)) "well below half")
     (t/is (= :high (phone-sheet/sheet-rest 450 -1 heights)) "flicked up")
     (t/is (= :low (phone-sheet/sheet-rest 300 -1 heights)) "to the next height up")
     (t/is (= :low (phone-sheet/sheet-rest 700 1 heights)) "flicked down")
     (t/is (= :small (phone-sheet/sheet-rest 380 1 heights)) "to the next height down")
-    (t/is (= :small (phone-sheet/sheet-rest 200 0 heights)) "a little below the lowest: back")
-    (t/is (= :closed (phone-sheet/sheet-rest 150 0 heights)) "dragged far down")
-    (t/is (= :closed (phone-sheet/sheet-rest 230 1 heights)) "flicked down below the lowest")))
+    (t/is (= :small (phone-sheet/sheet-rest 40 0 heights)) "a little below the lowest: back")
+    (t/is (= :closed (phone-sheet/sheet-rest -10 0 heights)) "dragged far down")
+    (t/is (= :closed (phone-sheet/sheet-rest 70 1 heights)) "flicked down below the lowest")))
 
 (t/deftest a-sheet-grows-and-shrinks-by-its-grip
   (thd/with-dom
@@ -160,7 +160,7 @@
           (t/is (= "" (.. (dialog) -style -blockSize)))
           (drag! 100 350)
           (t/is (re-find #"half" (.-className (dialog))) "back to half of it")
-          (drag! 100 180)
+          (drag! 100 380)
           (t/is (re-find #"small" (.-className (dialog))) "down to a little of it")
           (t/is (not @closed?))
           (drag! 100 260)

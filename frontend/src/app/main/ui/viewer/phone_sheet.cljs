@@ -52,8 +52,9 @@
   0.9)
 
 (def ^:private little-of-screen
-  "How low a sheet shrinks, of the screen: as `.small`."
-  0.3)
+  "How low a sheet shrinks, of the screen, about as high as its grip and
+  the top of what it holds: as `.small`."
+  0.1)
 
 (defn sheet-heights
   "The heights, px, a sheet rests at on a screen `vh` px high, lowest
