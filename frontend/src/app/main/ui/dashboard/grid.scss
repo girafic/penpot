@@ -235,7 +235,7 @@ $thumbnail-default-height: px2rem(168);
   border: $b-1 solid var(--color-background-quaternary);
   display: flex;
   gap: var(--sp-m);
-  padding: var(--sp-s) var(--sp-m);
+  padding: var(--sp-s) var(--sp-m) var(--sp-s) var(--sp-s);
   inline-size: 100%;
 
   &:hover,
@@ -247,6 +247,37 @@ $thumbnail-default-height: px2rem(168);
   &.is-selected {
     background-color: var(--color-background-tertiary);
     outline: $b-2 solid var(--color-accent-tertiary);
+  }
+
+  // a small thumbnail of the file at the start of the row, 3:2 like the
+  // cards of the grid
+  .grid-item-thumbnail {
+    --thumbnail-width: #{px2rem(72)};
+    --thumbnail-height: #{$sz-48};
+
+    background-color: var(--color-background-quaternary);
+    border-radius: $br-6;
+    flex: 0 0 auto;
+  }
+}
+
+// The name, the badge and the date: in the row on a computer, the date
+// below the name on a phone, so the name has room
+.list-item-text {
+  display: contents;
+}
+
+[data-phone="true"] .list-item-text {
+  align-items: center;
+  column-gap: var(--sp-s);
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, max-content) 1fr;
+  min-inline-size: 0;
+
+  .list-item-date {
+    grid-column: 1 / -1;
+    margin-inline-start: 0;
   }
 }
 

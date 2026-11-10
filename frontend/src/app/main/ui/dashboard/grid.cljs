@@ -511,19 +511,24 @@
                              :on-drag-start on-drag-start
                              :on-context-menu on-context-menu}
 
-                            (if ^boolean editing?
-                              [:& inline-edition {:content (:name file)
-                                                  :on-end edit
-                                                  :max-length 250}]
-                              [:h3 {:class (stl/css :list-item-name)} (:name file)])
+                            [:> grid-item-thumbnail* {:file file
+                                                      :can-edit can-edit
+                                                      :can-restore can-restore}]
 
-                            (when (and (:is-shared file) (not library-view?))
-                              [:span {:class (stl/css :list-item-badge)
-                                      :aria-label (tr "workspace.assets.shared-library")
-                                      :title (tr "workspace.assets.shared-library")}
-                               [:> icon* {:icon-id i/library}]])
+                            [:div {:class (stl/css :list-item-text)}
+                             (if ^boolean editing?
+                               [:& inline-edition {:content (:name file)
+                                                   :on-end edit
+                                                   :max-length 250}]
+                               [:h3 {:class (stl/css :list-item-name)} (:name file)])
 
-                            [:> grid-item-metadata* {:file file :layout :list}]
+                             (when (and (:is-shared file) (not library-view?))
+                               [:span {:class (stl/css :list-item-badge)
+                                       :aria-label (tr "workspace.assets.shared-library")
+                                       :title (tr "workspace.assets.shared-library")}
+                                [:> icon* {:icon-id i/library}]])
+
+                             [:> grid-item-metadata* {:file file :layout :list}]]
 
                             menu-element])}
         [:> file-menu-items* {:files menu-files
