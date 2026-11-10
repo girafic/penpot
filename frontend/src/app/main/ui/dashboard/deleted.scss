@@ -39,6 +39,19 @@
   block-size: var(--sp-xl);
 }
 
+// on a phone the text wraps, with its own line height, and the buttons
+// go below it
+[data-phone="true"] .deleted-info-content {
+  flex-direction: column;
+  gap: var(--sp-m);
+}
+
+[data-phone="true"] .deleted-info {
+  @include use-typography("body-large");
+
+  block-size: auto;
+}
+
 .info-text-highlight {
   color: var(--color-accent-primary);
 }

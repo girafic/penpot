@@ -76,6 +76,12 @@
   margin-inline: 0;
 }
 
+// on a phone a smaller avatar
+[data-phone="true"] .avatar-form {
+  inline-size: $sz-96;
+  block-size: $sz-96;
+}
+
 .avatar-image {
   border-radius: $br-circle;
   flex-shrink: 0;
@@ -125,6 +131,17 @@
   &:focus-visible {
     opacity: 0.8;
   }
+}
+
+// the line height above fits the 148px circle only: in the smaller one of
+// a phone a flex row centers a smaller label
+[data-phone="true"] .update-overlay {
+  @include use-typography("title-small");
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .delete-overlay {
