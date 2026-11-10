@@ -605,6 +605,13 @@
   }
 }
 
+// on a phone below the header, as wide as its screen, with a margin
+:global(body:has([data-phone="true"])) .modal-team-container {
+  inset-inline: var(--sp-s);
+  inline-size: auto;
+  min-inline-size: 0;
+}
+
 .modal-team-container-workspace {
   inset-block-start: $sz-40;
   z-index: var(--z-index-set);

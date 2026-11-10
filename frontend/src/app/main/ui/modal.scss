@@ -13,3 +13,14 @@
 .modal-wrapper {
   @extend %new-scrollbar;
 }
+
+// On a phone (its dashboard, settings or view mode) no dialog is wider than
+// its screen, 8px from its edges, whatever its width or minimum on a
+// computer: a dialog centers in an overlay, the child of the wrapper. Kept
+// below the rules of a dialog of its own for a phone (`body:has(...) .x`),
+// which win by the specificity of `body`.
+/* stylelint-disable-next-line selector-max-compound-selectors */
+:global(:has([data-phone="true"])) .modal-wrapper > * > * {
+  min-inline-size: 0;
+  max-inline-size: calc(100vw - var(--sp-l));
+}

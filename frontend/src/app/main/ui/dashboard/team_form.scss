@@ -46,6 +46,11 @@
   min-inline-size: px2rem(400);
 }
 
+// on a phone as wide as its dialog, which fits its screen (`modal.scss`)
+:global(body:has([data-phone="true"])) .team-form {
+  min-inline-size: 0;
+}
+
 .group-name-input {
   @extend %input-element-label;
 
