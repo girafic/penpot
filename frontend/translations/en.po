@@ -1009,6 +1009,10 @@ msgstr "View notifications"
 msgid "dashboard.num-of-members"
 msgstr "%s members"
 
+#: src/app/main/ui/dashboard/file_menu.cljs
+msgid "dashboard.open-in-editor"
+msgstr "Open in the editor"
+
 #: src/app/main/ui/dashboard/file_menu.cljs:294
 msgid "dashboard.open-in-new-tab"
 msgstr "Open file in a new tab"

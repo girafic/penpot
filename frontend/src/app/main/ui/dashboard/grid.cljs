@@ -338,13 +338,23 @@
 
         on-select
         (mf/use-fn
-         (mf/deps selected? selected-num on-open-new-tab)
+         (mf/deps selected? selected-num on-open-new-tab file-id can-restore editing?)
          (fn [event]
-           (if (kbd/mod? event)
+           (cond
+             ;; a tap on a phone opens it in the view mode, made for it
+             ;; (`file-menu*` opens the editor)
+             (and (touch/phone?) (not can-restore) (not editing?))
+             (do
+               (dom/stop-propagation event)
+               (st/emit! (dcm/go-to-viewer :file-id file-id ::rt/new-window false)))
+
+             (kbd/mod? event)
              (do
                (dom/stop-propagation event)
                (on-open-new-tab))
-             (when (or (not selected?) (> selected-num 1))
+
+             (or (not selected?) (> selected-num 1))
+             (do
                (dom/stop-propagation event)
                (let [shift? (kbd/shift? event)]
                  (when-not shift?

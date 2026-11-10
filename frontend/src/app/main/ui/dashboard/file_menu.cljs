@@ -19,6 +19,7 @@
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.layout.menu :refer [menu* menu-item* menu-separator* sub-menu*]]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [rumext.v2 :as mf]))
 
@@ -117,6 +118,10 @@
           (st/emit! (dcm/go-to-workspace
                      {:file-id (:id file)
                       ::rt/new-window true})))
+
+        on-open-editor
+        (fn []
+          (st/emit! (dcm/go-to-workspace {:file-id (:id file)})))
 
         on-duplicate
         (fn []
@@ -290,8 +295,12 @@
 
       :else
       [:*
-       [:> menu-item* {:id "file-open-new-tab" :on-action on-new-tab}
-        (tr "dashboard.open-in-new-tab")]
+       ;; a phone has no tabs, and a tap opens the view mode there
+       (if (touch/phone?)
+         [:> menu-item* {:id "file-open-editor" :on-action on-open-editor}
+          (tr "dashboard.open-in-editor")]
+         [:> menu-item* {:id "file-open-new-tab" :on-action on-new-tab}
+          (tr "dashboard.open-in-new-tab")])
 
        (when (and (not is-search-page?) can-edit)
          [:> menu-item* {:id "file-rename" :on-action on-edit}
