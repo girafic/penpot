@@ -41,6 +41,52 @@
   gap: var(--sp-xxl);
 }
 
+// on a phone as wide as the screen, the picture a band above the text,
+// scrolling when it is taller than the screen
+:global(body:has([data-phone="true"])) {
+  // the dialogs' own limit (modal.scss) would narrow it to the left
+  .modal-overlay {
+    flex-direction: column;
+    align-items: stretch;
+    max-inline-size: none;
+    padding: calc(env(safe-area-inset-top) + var(--sp-s)) var(--sp-s) calc(env(safe-area-inset-bottom) + var(--sp-s));
+  }
+
+  .modal-container {
+    grid-template-columns: 100%;
+    grid-template-rows: auto auto;
+    block-size: auto;
+    inline-size: 100%;
+    max-block-size: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2 * var(--sp-s));
+    overflow-y: auto;
+  }
+
+  .start-image {
+    inline-size: 100%;
+    block-size: px2rem(180);
+    object-fit: cover;
+    border-radius: $br-8 $br-8 0 0;
+  }
+
+  .modal-content {
+    grid-template-rows: auto auto auto;
+    gap: var(--sp-xl);
+    padding: var(--sp-xl) var(--sp-l) 0;
+  }
+
+  .features-block {
+    inline-size: auto;
+  }
+
+  // the buttons stay in view while the text scrolls under them
+  .navigation {
+    position: sticky;
+    inset-block-end: 0;
+    padding-block: var(--sp-m) var(--sp-l);
+    background-color: var(--color-background-primary);
+  }
+}
+
 .modal-header {
   display: grid;
   gap: var(--sp-s);
