@@ -19,6 +19,7 @@
   @extend %modal-container-base;
 
   inline-size: px2rem(408);
+
   // taller than the shared modal allows: the QR code, the hints, the link
   max-block-size: calc(100vh - var(--sp-xxxl));
   overflow-y: auto;
