@@ -1098,9 +1098,9 @@
       (let [route   (:route state)
             qparams (:query-params route)
             page-id (some-> (:page-id qparams) uuid/parse)
-            flows   (get-in state [:viewer :pages page-id :options :flows])]
+            flows   (get-in state [:viewer :pages page-id :flows])]
         (if (seq flows)
-          (let [frame-id (:starting-frame (first flows))]
+          (let [frame-id (:starting-frame (first (vals flows)))]
             (rx/of (go-to-frame frame-id)))
           (rx/of (go-to-frame-by-index 0)))))))
 

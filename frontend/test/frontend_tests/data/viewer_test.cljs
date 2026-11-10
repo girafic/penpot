@@ -203,6 +203,24 @@
         (t/is (not (contains? (ptk/update fetched (assoc state :route {:params {:query query} :query-params query}))
                               ::dv/page-less-bundle)))))))
 
+(defn- navigation
+  "The navigation `event` ends in, through the events its watch emits."
+  [event state]
+  (if (= :app.main.router/navigate (ptk/type event))
+    event
+    (some #(navigation % state) (watch-events event state))))
+
+(t/deftest a-link-to-no-board-starts-at-its-first-flow
+  (let [[a b c] (map #(uuid/custom 2 %) [1 2 3])
+        flow-id (uuid/custom 3 1)
+        query   {:page-id (str page-id)}
+        state   {:route {:params {:query query} :query-params query}
+                 :viewer {:pages {page-id {:frames [{:id a} {:id b} {:id c}]}}}}
+        index   #(-> (navigation (dv/go-to-frame-auto) %) deref :params :index)]
+    (t/is (= 2 (index (assoc-in state [:viewer :pages page-id :flows]
+                                {flow-id {:id flow-id :name "Flow 1" :starting-frame c}}))))
+    (t/is (= 0 (index state)) "no flow: the first board")))
+
 
 ;; --- Devices
 
