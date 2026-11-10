@@ -280,7 +280,8 @@
         (zoom-about from point (* z0 (mth/pow (/ z1 z0) e)))))))
 
 (def double-tap-ms
-  "How soon, ms, a second tap makes a double tap."
+  "How soon, ms, a second tap coming down after the first ended makes a
+  double tap."
   300)
 
 (def ^:private double-tap-px
@@ -288,12 +289,24 @@
   24)
 
 (defn double-tap?
-  "Whether the `tap` (`{:t :x :y}`, ms and px of the screen) is the
-  second of a double tap after the tap `before`: soon and near enough."
+  "Whether the `tap` coming down (`{:t :x :y}`, ms and px of the screen)
+  is the second of a double tap after the tap `before` ended: soon and
+  near enough."
   [before tap]
   (and (some? before)
        (< (- (:t tap) (:t before)) double-tap-ms)
        (< (mth/hypot (- (:x tap) (:x before)) (- (:y tap) (:y before))) double-tap-px)))
+
+;; --- What a tap opens
+
+(defn board-to-open
+  "The board of the `page` a tap at the point of the page `point` opens as
+  the prototype: the top-level board under it that the view mode lists
+  (`:frames`), or nil. `objects`, what the canvas draws."
+  [page objects point]
+  (when-let [{:keys [id]} (board-at objects point)]
+    (when (some #(= id (:id %)) (:frames page))
+      id)))
 
 ;; --- The animations of the canvas: each board that comes into view
 ;; plays from its start, as the prototype plays it

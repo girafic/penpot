@@ -11,9 +11,10 @@
   `app.main.data.viewer.canvas`). A finger moves it, coasting on and
   giving as rubber past its edges as the screen of a board does (see
   `app.main.ui.viewer.drag-scroll`), two fingers zoom it about their
-  middle, a double tap zooms to a board and back; a wheel moves it and
-  zooms it with ctrl, as a trackpad does. Its boards play their
-  animations as they come into view, without sound."
+  middle, a double tap zooms to a board and back, a tap opens the board
+  under it as the prototype; a wheel moves it and zooms it with ctrl, as
+  a trackpad does. Its boards play their animations as they come into
+  view, without sound."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
@@ -26,6 +27,7 @@
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.render-viewer-wasm :as rwv]
+   [app.main.store :as st]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.render-wasm.api :as wasm.api]
    [app.util.dom :as dom]
@@ -71,7 +73,9 @@
   view of `view-ref` (`{:page-id :screen :view}`) about what `live-ref`
   holds (`{:page :bounds :objects :render!}`): shown from the tiles in
   the cache while it moves (see `rwv/move-page-view`), which `moving-ref`
-  tells, rendered in full by `render!` once it rests."
+  tells, rendered in full by `render!` once it rests. A tap opens the
+  board under it as the prototype, once no second tap made it a double
+  tap."
   [canvas-ref view-ref live-ref moving-ref]
   (mf/with-effect []
     (let [^js canvas (mf/ref-val canvas-ref)
@@ -80,6 +84,20 @@
           state      (volatile! {:pointers {}})
           raf        (volatile! nil)
           rest-timer (volatile! nil)
+          ;; the tap that opens a board unless a second one comes
+          tap*       (volatile! nil)
+
+          cancel-tap!
+          #(vreset! tap* nil)
+
+          ;; the board under a tap, as the prototype: a step in the
+          ;; history, the back gesture returns to the canvas
+          open-board!
+          (fn [point]
+            (let [{:keys [page objects]} (mf/ref-val live-ref)
+                  view (:view (mf/ref-val view-ref))]
+              (when-let [id (dvc/board-to-open page objects (dvc/page-point view point))]
+                (st/emit! (dv/go-to-frame id)))))
 
           get-view   #(:view (mf/ref-val view-ref))
           get-screen #(:screen (mf/ref-val view-ref))
@@ -159,13 +177,15 @@
                               ;; fingers moving it
                               (show! (shown-view (get-view) bounds screen)))))))))
 
-          ;; a finger down stops what moves by itself, where it is
+          ;; a finger down stops what moves by itself, where it is: true
+          ;; when something moved
           stop-anim!
           (fn []
             (when-let [{:keys [kind base]} (:anim @state)]
               (when (= :spring kind)
                 (set-view! base))
-              (vswap! state dissoc :anim)))
+              (vswap! state dissoc :anim)
+              true))
 
           point
           (fn [^js event]
@@ -181,13 +201,15 @@
           (fn [^js event]
             (when (some? (get-view))
               (.setPointerCapture canvas (.-pointerId event))
-              (stop-anim!)
+              (cancel-tap!)
               (some-> @rest-timer js/clearTimeout)
-              (let [pt  (point event)
-                    now (.-timeStamp event)]
+              (let [stopped (stop-anim!)
+                    pt      (point event)
+                    now     (.-timeStamp event)]
                 (vswap! state assoc-in [:pointers (.-pointerId event)] pt)
                 (case (count (:pointers @state))
-                  1 (vswap! state assoc :mode :pan :start pt :moved false
+                  ;; a finger that stops a coast taps nothing
+                  1 (vswap! state assoc :mode :pan :start pt :moved (true? stopped) :down-t now
                             :samples [[now (:x pt) (:y pt)]])
                   2 (vswap! state assoc :mode :pinch :moved true :before (fingers))
                   nil))))
@@ -228,7 +250,7 @@
             (let [id (.-pointerId event)]
               (when (some? (get-in @state [:pointers id]))
                 (let [now      (.-timeStamp event)
-                      {:keys [mode moved samples start]} @state
+                      {:keys [mode moved samples start down-t]} @state
                       pointers (dissoc (:pointers @state) id)]
                   (vswap! state assoc :pointers pointers)
                   (cond
@@ -245,13 +267,23 @@
                     (and (= mode :pan) (not moved))
                     (let [tap {:t now :x (:x start) :y (:y start)}]
                       (vswap! state assoc :mode nil)
-                      (if (dvc/double-tap? (:last-tap @state) tap)
+                      ;; how soon it came down after the one before ended
+                      (if (dvc/double-tap? (:last-tap @state) (assoc tap :t down-t))
                         (let [from (get-view)
                               to   (dvc/double-tap-view from (:objects (mf/ref-val live-ref)) (get-bounds)
                                                         (get-screen) (gpt/point (:x tap) (:y tap)))]
                           (vswap! state assoc :last-tap nil :anim {:kind :tween :from from :to to :t0 now})
                           (draw!))
-                        (vswap! state assoc :last-tap tap)))
+                        ;; on the frame after: a second tap the page was too
+                        ;; busy to take in time comes before it
+                        (let [token #js {}]
+                          (vswap! state assoc :last-tap tap)
+                          (vreset! tap* token)
+                          (js/setTimeout #(ts/raf (fn []
+                                                    (when (identical? token @tap*)
+                                                      (vreset! tap* nil)
+                                                      (open-board! start))))
+                                         dvc/double-tap-ms))))
 
                     :else
                     (let [view    (get-view)
@@ -312,7 +344,8 @@
         (.removeEventListener canvas "pointercancel" on-cancel)
         (.removeEventListener canvas "wheel" on-wheel #js {:passive false})
         (some-> @raf ts/cancel-af!)
-        (some-> @rest-timer js/clearTimeout)))))
+        (some-> @rest-timer js/clearTimeout)
+        (cancel-tap!)))))
 
 (defn- board-plays
   "What the top-level boards of the canvas of `page` (`objects`, what it

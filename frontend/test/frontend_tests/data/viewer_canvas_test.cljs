@@ -395,7 +395,15 @@
       (t/is (< y (:y (uvc/shown-view {:zoom 1 :x 100 :y -100} bounds phone-screen)))
             "and more the further"))))
 
-;; --- The animations of the canvas
+;; --- What a tap opens, and the animations of the canvas
+
+(t/deftest a-tap-opens-a-board-the-view-mode-lists
+  (let [objects (dvc/canvas-objects page-objects)
+        page    {:frames [{:id (:strip ids)}]}]
+    (t/is (= (:strip ids) (dvc/board-to-open page objects (gpt/point 300 250)))
+          "the strip, for a tap on the card in it")
+    (t/is (nil? (dvc/board-to-open page objects (gpt/point 200 1330))) "a board the view mode does not list")
+    (t/is (nil? (dvc/board-to-open page objects (gpt/point 4600 2500))) "nothing there")))
 
 (defn- animated-page
   "A page with board A at 0,0 moving right over 1000 ms, played
