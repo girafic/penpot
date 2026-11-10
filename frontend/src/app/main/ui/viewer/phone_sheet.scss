@@ -126,6 +126,16 @@
   min-inline-size: 0;
 }
 
+.file-name {
+  @include use-typography("body-small");
+  @include text-ellipsis;
+
+  flex: 1;
+  min-inline-size: 0;
+  color: var(--color-foreground-secondary);
+  text-align: end;
+}
+
 .counter {
   @include use-typography("body-small");
 

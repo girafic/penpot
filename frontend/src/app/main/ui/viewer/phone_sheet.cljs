@@ -335,6 +335,16 @@
           (modal/disallow-click-outside!))]
 
     [:> sheet* {:label (tr "viewer.phone.options") :on-close on-close}
+     ;; back to the dashboard, as the logo of the header goes for the
+     ;; team, and the file, which a phone shows no header for
+     (when (:in-team permissions)
+       [:div {:class (stl/css :row)}
+        [:> button* {:variant "ghost"
+                     :icon i/arrow-left
+                     :on-click #(act! (dv/go-to-dashboard))}
+         (tr "labels.dashboard")]
+        [:span {:class (stl/css :file-name)} (:name file)]])
+
      ;; the sections, edit and share
      [:div {:class (stl/css :row)}
       [:> icon-button* {:variant "ghost"
