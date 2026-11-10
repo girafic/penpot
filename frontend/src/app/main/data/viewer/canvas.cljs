@@ -17,7 +17,9 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
+   [app.common.types.animation :as cta]
    [app.common.uuid :as uuid]
    [app.main.router :as rt]))
 
@@ -292,3 +294,48 @@
   (and (some? before)
        (< (- (:t tap) (:t before)) double-tap-ms)
        (< (mth/hypot (- (:x tap) (:x before)) (- (:y tap) (:y before))) double-tap-px)))
+
+;; --- The animations of the canvas: each board that comes into view
+;; plays from its start, as the prototype plays it
+
+(defn boards-in-view
+  "The ids among `ids` of the boards of `objects` that show in `vbox` or
+  `margin` (units of the page) round it."
+  [objects ids {:keys [x y width height]} margin]
+  (let [x0 (- x margin) x1 (+ x width margin)
+        y0 (- y margin) y1 (+ y height margin)]
+    (into #{}
+          (filter (fn [id]
+                    (when-let [{bx :x by :y bw :width bh :height} (dm/get-in objects [id :selrect])]
+                      (and (< bx x1) (> (+ bx bw) x0) (< by y1) (> (+ by bh) y0)))))
+          ids)))
+
+(defn entered
+  "When each board `in-view` came into view, `{id ms}`, at `now`: kept for
+  those still in view since `stamps`, `now` for those that came in, none
+  for those out of it, which play from their start again once back."
+  [stamps in-view now]
+  (into {} (map (fn [id] [id (get stamps id now)])) in-view))
+
+(defn animation-frame
+  "What the canvas shows at `now` of the boards in view since `stamps`
+  (`{id ms}`), as the prototype plays them by `plays` (`{id {:clock
+  :copies}}`, see `dv/board-clock`) of `page`, `files` the files of the
+  components: `{:tree :ended}`, their modif-trees merged (their layers
+  are apart), and the trees of those played to their end, `{id tree}`,
+  which `ended` keeps from the frame before so as not to work them out
+  again."
+  [page files plays stamps ended now]
+  (reduce-kv (fn [acc id entry]
+               (if-let [done (get ended id)]
+                 (-> acc
+                     (update :tree merge done)
+                     (assoc-in [:ended id] done))
+                 (let [{:keys [clock copies]} (get plays id)
+                       elapsed (- now entry)
+                       tree    (cltl/view-animation-tree page files id (cta/playback-time clock elapsed) elapsed)]
+                   (cond-> (update acc :tree merge tree)
+                     (cltl/view-playback-ended? clock copies elapsed)
+                     (assoc-in [:ended id] tree)))))
+             {:tree {} :ended {}}
+             stamps))
