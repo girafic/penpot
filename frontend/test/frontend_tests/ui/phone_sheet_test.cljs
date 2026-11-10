@@ -64,7 +64,13 @@
                  (t/is (false? moved) "a finger moved: it scrolls or pinches")
                  (held #(touch! % "touchend" [[100 100]]))))
         (.then (fn [lifted]
-                 (t/is (false? lifted) "one lifted before")))
+                 (t/is (false? lifted) "one lifted before")
+                 ;; a page too busy to take the moves of a pinch in time
+                 (held (fn [window]
+                         (js/setTimeout #(touch! window "touchmove" [[100 140] [200 300]])
+                                        (+ phone-sheet/hold-ms 2))))))
+        (.then (fn [late]
+                 (t/is (false? late) "a move that came late, after the hold was due")))
         (.catch (fn [cause] (t/is false (ex-message cause))))
         (.finally (fn [] (done) nil)))))
 

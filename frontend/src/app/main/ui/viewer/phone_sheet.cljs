@@ -28,6 +28,7 @@
    [app.util.globals :as g]
    [app.util.i18n :refer [tr]]
    [app.util.storage :as storage]
+   [app.util.timers :as ts]
    [rumext.v2 :as mf]))
 
 (def hold-ms
@@ -144,12 +145,19 @@
               (fn [^js event]
                 (cancel!)
                 (when (= 2 (.. event -touches -length))
-                  (vreset! hold* {:start (touch-points (.-touches event))
-                                  :timer (js/setTimeout
-                                          (fn []
-                                            (vreset! hold* nil)
-                                            ((mf/ref-val on-hold-ref)))
-                                          hold-ms)})))
+                  (let [start (touch-points (.-touches event))]
+                    (vreset! hold* {:start start
+                                    :timer (js/setTimeout
+                                            ;; on the next frame: the moves the
+                                            ;; page was too busy to take come
+                                            ;; before it, and a pinch cancels
+                                            (fn []
+                                              (ts/raf
+                                               (fn []
+                                                 (when (= start (:start @hold*))
+                                                   (vreset! hold* nil)
+                                                   ((mf/ref-val on-hold-ref))))))
+                                            hold-ms)}))))
 
               on-move
               (fn [^js event]
