@@ -12,6 +12,7 @@
    [app.common.render-wasm.api.select :as wselect]
    [app.common.render-wasm.wasm :as wasm]
    [app.common.types.shape.layout :as ctl]
+   [app.common.uuid :as uuid]
    [app.main.data.viewer.scroll :as dvs]
    [app.main.ui.viewer.viewport-common :as vpc]
    [app.render-wasm.api :as wasm.api]
@@ -235,6 +236,56 @@
   (let [dpr (js/parseFloat (.. canvas -dataset -dpr))]
     (if (and (number? dpr) (pos? dpr)) dpr (wasm.api/get-dpr))))
 
+(defn- on-snapshot!
+  "Run `draw!` once the shared OffscreenCanvas holds the shapes of
+  `page-objects`, the page `page-key`, at the size of `canvas`: the same
+  one resized, its shapes loaded again when they are others, or a new
+  one, its WASM context set up at `zoom` and `vbox`. `draw!` gets it and
+  what the last frame of an animation set (see `show-animation!`), none
+  when the shapes loaded again. `finish` when it cannot."
+  [page-key page-objects canvas zoom vbox draw! finish]
+  (let [vis-w      (.-width canvas)
+        vis-h      (.-height canvas)
+        dpr        (pixel-ratio canvas)
+        snap       @viewer-snapshot
+        same-page? (and (some? page-key) (identical? page-key (:page-key snap)))
+        same-size? (and (= vis-w (:canvas-w snap))
+                        (= vis-h (:canvas-h snap))
+                        (= dpr (:dpr snap)))
+        os         (:os-canvas snap)]
+    (if (and same-page? (wasm.api/initialized?) os)
+      (do
+        (when-not same-size?
+          (wasm.api/resize-offscreen-canvas! os vis-w vis-h dpr)
+          (swap! viewer-snapshot assoc :canvas-w vis-w :canvas-h vis-h :dpr dpr))
+        ;; While an animation plays the shapes stay loaded: only its
+        ;; modifiers change (see `show-animation!`).
+        (if (identical? page-objects (:objects snap))
+          (draw! os (:props snap))
+          (do
+            (swap! viewer-snapshot assoc :objects page-objects :props [] :render-key nil)
+            (wasm.api/set-objects page-objects #(draw! os []) nil true))))
+      (let [os-canvas (js/OffscreenCanvas. vis-w vis-h)]
+        (when (wasm.api/initialized?)
+          (wasm.api/clear-canvas {:lose-browser-context? false}))
+        (if (wasm.api/init-canvas-context os-canvas dpr)
+          (do
+            (reset! viewer-snapshot
+                    {:os-canvas os-canvas
+                     :page-key  page-key
+                     :objects   page-objects
+                     :props     []
+                     :render-key nil
+                     :canvas-w  vis-w
+                     :canvas-h  vis-h
+                     :dpr       dpr})
+            (wasm.api/initialize-viewport
+             page-objects zoom vbox
+             :background-opacity 0
+             :force-sync true
+             :on-render #(draw! os-canvas [])))
+          (finish))))))
+
 (defn- render-viewer-frame*
   "Render the board `object-id` of `page-objects` into `canvas`. The
   shapes load into WASM once per page; `modifiers`, an animation at a
@@ -253,12 +304,6 @@
            vis-w        (.-width canvas)
            vis-h        (.-height canvas)
            dpr          (pixel-ratio canvas)
-           snap         @viewer-snapshot
-           same-page?   (and (some? page-key) (identical? page-key (:page-key snap)))
-           same-size?   (and (= vis-w (:canvas-w snap))
-                             (= vis-h (:canvas-h snap))
-                             (= dpr (:dpr snap)))
-           os           (:os-canvas snap)
            ;; What the tile cache holds after a render: the next one with
            ;; the same can draw only what changed (see `viewer-do-render!`).
            ;; The passes of a board with fixed layers render other shapes
@@ -284,41 +329,73 @@
        (reset! wasm/disable-request-render? true)
 
        (try
-         (if (and same-page? (wasm.api/initialized?) os)
-           (do
-             (when-not same-size?
-               (wasm.api/resize-offscreen-canvas! os vis-w vis-h dpr)
-               (swap! viewer-snapshot assoc :canvas-w vis-w :canvas-h vis-h :dpr dpr))
-             ;; While an animation plays the shapes stay loaded: only its
-             ;; modifiers change (see `show-animation!`).
-             (if (identical? page-objects (:objects snap))
-               (do-render! os (:props snap))
-               (do
-                 (swap! viewer-snapshot assoc :objects page-objects :props [] :render-key nil)
-                 (wasm.api/set-objects page-objects #(do-render! os []) nil true))))
-           (let [os-canvas (js/OffscreenCanvas. vis-w vis-h)]
-             (when (wasm.api/initialized?)
-               (wasm.api/clear-canvas {:lose-browser-context? false}))
-             (if (wasm.api/init-canvas-context os-canvas dpr)
-               (do
-                 (reset! viewer-snapshot
-                         {:os-canvas os-canvas
-                          :page-key  page-key
-                          :objects   page-objects
-                          :props     []
-                          :render-key nil
-                          :canvas-w  vis-w
-                          :canvas-h  vis-h
-                          :dpr       dpr})
-                 (wasm.api/initialize-viewport
-                  page-objects scale size
-                  :background-opacity 0
-                  :force-sync true
-                  :on-render #(do-render! os-canvas [])))
-               (finish))))
+         (on-snapshot! page-key page-objects canvas scale size do-render! finish)
          (catch :default e
            (js/console.error "viewer-snapshot: render error" e)
            (finish)))))))
+
+;; --- The canvas of a phone: the page as a whole (see
+;; `app.main.ui.viewer.canvas`), on the same OffscreenCanvas as the
+;; boards, so that going from it to a board and back loads nothing again
+
+(defn- render-page-view*
+  [page-key page-objects canvas zoom vbox on-render]
+  (p/create
+   (fn [resolve _reject]
+     (let [prev-disable @wasm/disable-request-render?
+           finish       (fn []
+                          (reset! wasm/disable-request-render? prev-disable)
+                          (when (fn? on-render) (on-render))
+                          (resolve nil))
+           draw!        (fn [os-canvas prev-props]
+                          ;; the shapes as designed: none in the pose a
+                          ;; board shown before left them in
+                          (let [shown? (= (:props-uses @viewer-snapshot) wasm/shape-uses)]
+                            (show-animation! page-objects prev-props shown? nil nil))
+                          (swap! viewer-snapshot assoc :props [] :props-uses wasm/shape-uses
+                                 :render-key nil)
+                          (viewer-disable-wasm-ui-overlay!)
+                          (wasm.api/clear-render-include-filter!)
+                          (wasm.api/set-viewer-viewport! zoom vbox)
+                          (wasm.api/render-sync)
+                          (present-bitmap! canvas os-canvas uuid/zero
+                                           (.-width canvas) (.-height canvas) finish))]
+       (reset! wasm/disable-request-render? true)
+       (try
+         (on-snapshot! page-key page-objects canvas zoom vbox draw! finish)
+         (catch :default e
+           (js/console.error "viewer-snapshot: page view render error" e)
+           (finish)))))))
+
+(defn render-page-view
+  "Render the page `page-objects`, the page `page-key`, at `zoom` and
+  `vbox` onto `canvas` (its `data-dpr`, see `canvas-dpr`), the shapes as
+  designed: as the canvas shows, and once a move of it settles.
+  `on-render` once it shows. Serialized with the other renders."
+  [page-key page-objects canvas zoom vbox on-render]
+  (->> @wasm.api/module
+       (p/mcat (fn [ready?]
+                 (if ready?
+                   (enqueue-wasm-render!
+                    #(render-page-view* page-key page-objects canvas zoom vbox on-render))
+                   (p/resolved nil))))))
+
+(defn move-page-view
+  "Show the page at `zoom` and `vbox` on `canvas` at once, from what
+  `render-page-view` left in the tile cache: while fingers move it, that
+  renders it once they stop. Nothing when the shared OffscreenCanvas is
+  not at the size of `canvas`, the page not rendered on it yet."
+  [canvas zoom vbox]
+  (enqueue-wasm-render!
+   (fn []
+     (let [{:keys [os-canvas canvas-w canvas-h]} @viewer-snapshot]
+       (when (and (some? os-canvas)
+                  (wasm.api/initialized?)
+                  (= canvas-w (.-width canvas))
+                  (= canvas-h (.-height canvas)))
+         (wasm.api/move-view! zoom vbox)
+         (present-bitmap! canvas os-canvas uuid/zero canvas-w canvas-h identity))
+       (p/resolved nil)))))
 
 (defn- use-viewer-dpr-key
   "Bump a counter when browser zoom changes devicePixelRatio so WASM canvases

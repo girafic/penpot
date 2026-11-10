@@ -1562,6 +1562,18 @@
       (render-finish)
       (perf/end-measure "render-from-cache"))))
 
+(defn move-view!
+  "Show the view at `zoom` and `vbox` at once from the tiles in the
+  cache, as a pan or a zoom of the workspace does (see `set-view-box`),
+  without the render that follows there: the canvas of a phone in the
+  view mode renders itself once a move settles (`set-viewer-viewport!`
+  and `render-sync`)."
+  [zoom vbox]
+  (when (initialized?)
+    (view-interaction-start!)
+    (h/call wasm/internal-module "_set_view" zoom (- (:x vbox)) (- (:y vbox)))
+    (h/call wasm/internal-module "_render_from_cache" 0)))
+
 (defn sync-workspace-local-viewport!
   "Pushes `[:workspace-local :zoom]` and `:vbox` into WASM."
   [state]

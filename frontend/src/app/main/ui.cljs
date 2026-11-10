@@ -233,7 +233,10 @@
              ;; `app.main.ui.workspace.prototype-preview`)
              preview  (= "true" (rt/get-query-param params :preview))
              ;; live, on a phone (see `app.main.data.viewer.follow`)
-             follow   (= "true" (rt/get-query-param params :follow))]
+             follow   (= "true" (rt/get-query-param params :follow))
+             ;; the page as a whole on a phone, or a board chosen there
+             ;; (see `app.main.data.viewer.canvas`)
+             canvas   (rt/get-query-param params :canvas)]
 
          [:? {}
           [:> viewer-page*
@@ -246,7 +249,8 @@
             :interactions-mode imode
             :share share
             :preview preview
-            :follow follow}]])
+            :follow follow
+            :canvas canvas}]])
 
 
        :frame-preview

@@ -23,6 +23,7 @@
    [app.config :as cf]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
+   [app.main.data.viewer.canvas :as dvc]
    [app.main.data.viewer.devices :as dvd]
    [app.main.data.viewer.follow :as dvf]
    [app.main.data.viewer.preview :as dvp]
@@ -41,6 +42,7 @@
    [app.main.ui.hooks :as hooks]
    [app.main.ui.modal :refer [modal-container*]]
    [app.main.ui.viewer.background :as vbg]
+   [app.main.ui.viewer.canvas :refer [canvas-viewport*]]
    [app.main.ui.viewer.comments :refer [comments-layer comments-sidebar*]]
    [app.main.ui.viewer.container-scroll :as cscroll]
    [app.main.ui.viewer.device-frame :as dfr :refer [device-drawing*]]
@@ -559,7 +561,7 @@
                           :zoom zoom}])]])
 
 (mf/defc viewer-content*
-  [{:keys [data page-id share-id section index interactions-mode share preview]}]
+  [{:keys [data page-id share-id section index interactions-mode share preview canvas]}]
   (let [{:keys [file users project permissions]} data
         allowed (or
                  (= section :interactions)
@@ -616,6 +618,10 @@
         ;; a board stands, the phone shows it turned or its counterpart, as
         ;; a device does (see `dv/phone-hold`)
         phone?      (and (not preview) (true? (:phone? local)))
+        ;; on a phone the page as a whole instead of a board (see
+        ;; `app.main.data.viewer.canvas`): no board meanwhile
+        canvas?     (dvc/canvas-shown? (and phone? wasm? (contains? cf/flags :phone-canvas))
+                                       {:canvas canvas :index index :section section})
         turn-choice (if phone? "auto" device-choice)
         turn-hold   (if phone? (dv/phone-hold (:viewport-size local)) device-hold)
         held?     (and (= section :interactions) (some? turn-hold))
@@ -1064,18 +1070,19 @@
 
     ;; a phone scrolls the board itself, and it gives past an end as that
     ;; screen does, its fixed layers staying
+    ;; (the canvas of a phone moves by its own gestures)
     (dds/use-touch-rubber! viewer-section-ref
-                           (and phone? (= section :interactions))
+                           (and phone? (= section :interactions) (not canvas?))
                            (some-> frame :fills first :fill-color))
 
     ;; a finger that scrolled the screen taps nothing as it lifts
-    (dds/use-touch-taps! viewer-section-ref (= section :interactions))
+    (dds/use-touch-taps! viewer-section-ref (and (= section :interactions) (not canvas?)))
 
     ;; the wheel over a board that scrolls its content scrolls it
     (cscroll/use-container-scroll! viewer-section-ref current-viewport-ref page frame size
                                    (when drops? (fixed-drop frame screen))
                                    overlay-origins
-                                   (and wasm? (= section :interactions)))
+                                   (and wasm? (= section :interactions) (not canvas?)))
 
     (mf/with-effect []
       (let [events
@@ -1311,6 +1318,12 @@
          (empty? frames)
          [:section {:class (stl/css :empty-state)}
           [:span (tr "viewer.empty-state")]]
+
+         ;; the page as designed, its boards that scroll at their size
+         canvas?
+         [:> canvas-viewport* {:page (get-in data [:pages page-id])
+                               :size (:viewport-size local)
+                               :on-drawn #(reset! drawn* true)}]
 
          (nil? frame)
          [:section {:class (stl/css :empty-state)}
