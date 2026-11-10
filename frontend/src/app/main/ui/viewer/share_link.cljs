@@ -72,7 +72,10 @@
                                slinks)]
             (when slink
               (let [page-id (d/seek #(contains? (:pages slink) %) page-ids)
+                    ;; what a phone chose, the canvas or a board, stays
+                    ;; out: the link starts as any other
                     params  (-> (:query-params route)
+                                (dissoc :canvas)
                                 (assoc :share-id (:id slink))
                                 (assoc :page-id page-id)
                                 (assoc :index "0"))

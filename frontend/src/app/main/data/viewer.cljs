@@ -26,6 +26,7 @@
    [app.main.data.event :as ev]
    [app.main.data.fonts :as df]
    [app.main.data.helpers :as dsh]
+   [app.main.data.viewer.canvas :as dvc]
    [app.main.data.viewer.devices :as dvd]
    [app.main.data.viewer.turn :as dvt]
    [app.main.features :as features]
@@ -294,13 +295,18 @@
    []
    shapes))
 
+(defn- wasm-viewer?
+  "Whether the view mode in `state` draws with WASM."
+  [state]
+  (and (features/active-feature? state "render-wasm/v1")
+       (contains? cf/flags :available-viewer-wasm)))
+
 (defn update-page-position-data
   [file-id page-id]
   (ptk/reify ::update-page-position-data
     ptk/WatchEvent
     (watch [_ state _]
-      (if (and (features/active-feature? state "render-wasm/v1")
-               (contains? cf/flags :available-viewer-wasm))
+      (if (wasm-viewer? state)
         ;; Fallback matches the viewer UI when the URL omits page-id.
         (let [page-id (or page-id
                           (-> (dsh/lookup-file-data state file-id)
@@ -366,6 +372,29 @@
 
 (declare preview?)
 (declare preview-frames)
+
+;; --- The canvas of a phone (see `app.main.data.viewer.canvas`)
+
+(defn- canvas-able?
+  "Whether the view mode in `state` can show the canvas: on a phone,
+  drawing with WASM, the canvas not turned off (`disable-phone-canvas`)."
+  [state]
+  (and (phone? state)
+       (wasm-viewer? state)
+       (contains? cf/flags :phone-canvas)))
+
+(defn- canvas-start?
+  "Whether the view mode in `state` starts on the canvas at the route
+  `params`: from a link to no board (see `dvc/starts-on-canvas?`)."
+  [state params]
+  (and (canvas-able? state)
+       (dvc/starts-on-canvas? params)))
+
+(defn canvas-shown?
+  "Whether the view mode in `state` shows the canvas of a phone, the page
+  as a whole, instead of a board."
+  [state]
+  (dvc/canvas-shown? (canvas-able? state) (rt/get-params state)))
 (declare preview-go)
 
 (defn bundle-fetched
@@ -397,11 +426,15 @@
 
         (if (nil? page-id)
           ;; the boards, the zoom and the links all go by the page of the
-          ;; URL: the first one goes in, without a step in the history
-          (rx/of (rt/nav :viewer
-                         (assoc (rt/get-params state)
-                                :page-id (-> bundle :file :data :pages first))
-                         {::rt/replace true}))
+          ;; URL: the first one goes in, without a step in the history,
+          ;; and on a phone the canvas of it
+          (let [params (assoc (rt/get-params state)
+                              :page-id (-> bundle :file :data :pages first))]
+            (rx/of (rt/nav :viewer
+                           (cond-> params
+                             (canvas-start? state params)
+                             (dvc/canvas-params))
+                           {::rt/replace true})))
           (rx/merge
            (rx/of (case (:zoom qparams)
                     "fit"   zoom-to-fit
@@ -410,6 +443,15 @@
                     (when (phone? state) zoom-to-width)))
            (rx/of (update-page-position-data file-id page-id))
            (cond
+             ;; a phone shows the page as a whole from a link to no
+             ;; board, a share link too: in the URL, without a step in the
+             ;; history; and no board while it shows
+             (canvas-start? state (rt/get-params state))
+             (rx/of (rt/nav :viewer (dvc/canvas-params (rt/get-params state)) {::rt/replace true}))
+
+             (canvas-shown? state)
+             (rx/empty)
+
              (and (some? frame-id)
                   (preview? state)
                   (not (some #(= frame-id (:id %)) (preview-frames state))))
@@ -873,7 +915,7 @@
         (when (pos? index)
           (rx/of
            (dcmt/close-thread)
-           (rt/nav :viewer (assoc params :index (dec index)))))))))
+           (rt/nav :viewer (dvc/board-params params (dec index)))))))))
 
 (def select-next-frame
   (ptk/reify ::select-next-frame
@@ -893,7 +935,7 @@
         (when (< index (dec total))
           (rx/of
            (dcmt/close-thread)
-           (rt/nav :viewer (assoc params :index (inc index)))))))))
+           (rt/nav :viewer (dvc/board-params params (inc index)))))))))
 
 (def select-first-frame
   (ptk/reify ::select-first-frame
@@ -902,7 +944,7 @@
       (let [params (rt/get-params state)]
         (rx/of
          (dcmt/close-thread)
-         (rt/nav :viewer (assoc params :index 0)))))))
+         (rt/nav :viewer (dvc/board-params params 0)))))))
 
 (def valid-interaction-modes
   #{:hide :show :show-on-click})
@@ -1048,8 +1090,10 @@
 
     ptk/WatchEvent
     (watch [_ state _]
+      ;; every way to a board goes here: it leaves the canvas of a phone
+      ;; in the same step
       (let [params  (rt/get-params state)]
-        (rx/of (rt/nav :viewer (assoc params :index index)))))))
+        (rx/of (rt/nav :viewer (dvc/board-params params index)))))))
 
 (defn go-to-frame
   ([frame-id]
@@ -1090,19 +1134,24 @@
              index   (d/index-of-pred frames #(= (:id %) frame-id))]
          (rx/of (go-to-frame-by-index (or index 0))))))))
 
+(defn- start-index
+  "The index of the board the view mode in `state` starts its page at
+  from a link to no board: the start of its first flow, else the first
+  board."
+  [state]
+  (let [page-id  (some-> (dm/get-in state [:route :query-params :page-id]) uuid/parse)
+        page     (dm/get-in state [:viewer :pages page-id])
+        start-id (some-> (:flows page) vals first :starting-frame)]
+    (or (when (some? start-id)
+          (d/index-of-pred (:frames page) #(= start-id (:id %))))
+        0)))
+
 (defn go-to-frame-auto
   []
   (ptk/reify ::go-to-frame-auto
     ptk/WatchEvent
     (watch [_ state _]
-      (let [route   (:route state)
-            qparams (:query-params route)
-            page-id (some-> (:page-id qparams) uuid/parse)
-            flows   (get-in state [:viewer :pages page-id :flows])]
-        (if (seq flows)
-          (let [frame-id (:starting-frame (first (vals flows)))]
-            (rx/of (go-to-frame frame-id)))
-          (rx/of (go-to-frame-by-index 0)))))))
+      (rx/of (go-to-frame-by-index (start-index state))))))
 
 (defn go-to-section
   [section]
@@ -1119,7 +1168,24 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [params (rt/get-params state)]
-        (rx/of (rt/nav :viewer (assoc params :section section)))))))
+        (rx/of (rt/nav :viewer
+                       (if (and (canvas-shown? state) (not= :interactions (keyword section)))
+                         ;; Comments and Inspect go by board, off the canvas
+                         ;; of a phone: the one its page starts at
+                         (assoc (dvc/board-params params (start-index state)) :section section)
+                         (assoc params :section section))))))))
+
+(def show-canvas
+  "The canvas of a phone, the page as a whole, instead of the board shown:
+  a step in the history."
+  (ptk/reify ::show-canvas
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc state :viewer-overlays []))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (rx/of (rt/nav :viewer (dvc/canvas-params (rt/get-params state)))))))
 
 (declare pause-timeline)
 
@@ -1337,9 +1403,10 @@
 
     ptk/WatchEvent
     (watch [_ state _]
-      (let [params (-> (rt/get-params state)
-                       (assoc :index 0)
-                       (assoc :page-id page-id))]
+      ;; the canvas of a phone shows the other page as a whole
+      (let [params (cond-> (assoc (rt/get-params state) :page-id page-id)
+                     (not (canvas-shown? state))
+                     (assoc :index 0))]
         (rx/of (rt/nav :viewer params))))))
 
 (defn go-to-workspace
