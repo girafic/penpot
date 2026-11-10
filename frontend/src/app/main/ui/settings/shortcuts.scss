@@ -330,3 +330,8 @@
   padding: var(--sp-s) 0;
   margin-block-end: var(--sp-l);
 }
+
+// keeps its size when the hint wraps, on a narrow screen
+.shortcuts-description-icon {
+  flex-shrink: 0;
+}
