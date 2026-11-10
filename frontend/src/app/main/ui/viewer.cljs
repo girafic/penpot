@@ -1403,6 +1403,8 @@
          :file file
          :frame frame
          :index index
+         :is-canvas canvas?
+         :has-canvas (and wasm? (contains? cf/flags :phone-canvas))
          :permissions permissions
          :section section
          :interactions-mode interactions-mode

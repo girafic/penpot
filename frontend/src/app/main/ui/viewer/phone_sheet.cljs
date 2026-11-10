@@ -7,8 +7,9 @@
 (ns app.main.ui.viewer.phone-sheet
   "On a phone the view mode shows its board alone, no bars over it: two
   fingers held on it open a sheet from the bottom with what the bars hold
-  elsewhere, the boards, the animation, the flows, how the interactions
-  show, the sections, edit and share."
+  elsewhere, the boards, the animation, the pages, the flows, how the
+  interactions show, the sections, edit and share; and the page as a
+  whole instead of a board, its canvas (see `app.main.ui.viewer.canvas`)."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
@@ -22,6 +23,7 @@
    [app.main.store :as st]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.viewer.header :as header]
@@ -309,16 +311,21 @@
 
 (mf/defc phone-sheet*
   "The options of the view mode of a phone over the board `frame`, the
-  `index`th of `page` of `file`: the sections `permissions` allow, edit
-  and share, its boards, its animation (`timeline`, the controls of the
-  view mode), then what the header holds in the `section` shown: its
-  flows and how its interactions show (`interactions-mode`), or which
-  comments show and their list. What changes the view closes it, but
-  going to another section."
-  [{:keys [page file frame index permissions section interactions-mode timeline on-close]}]
+  `index`th of `page` of `file`, or over the canvas of the page
+  (`is-canvas`): the sections `permissions` allow, edit and share, the
+  canvas or the prototype where it `has-canvas`, its boards and its
+  animation (`timeline`, the controls of the view mode) in the
+  prototype, the pages of the file, then what the header holds in the
+  `section` shown: its flows and how its interactions show
+  (`interactions-mode`, in the prototype), or which comments show and
+  their list. What changes the view closes it, but going to another
+  section."
+  [{:keys [page file frame index permissions section interactions-mode timeline on-close
+           is-canvas has-canvas]}]
   (let [frames     (:frames page)
         total      (count frames)
         flows      (not-empty (:flows page))
+        page-ids   (dm/get-in file [:data :pages])
         flow       (ctp/get-frame-flow flows (:id frame))
         comments   (mf/deref refs/comments-local)
         cmode      (or (:mode comments) :all)
@@ -388,29 +395,57 @@
                      :on-click #(do (on-close) (header/open-login-dialog))}
          (tr "labels.log-or-sign")])]
 
+     ;; the page as a whole, or its boards one by one
+     (when (true? has-canvas)
+       [:> radio-buttons* {:name "phone-view"
+                           :extended true
+                           :selected (if (true? is-canvas) "canvas" "prototype")
+                           :on-change #(act! (if (= "canvas" %) dv/show-canvas (dv/go-to-frame-auto)))
+                           :options [{:id "phone-view-canvas"
+                                      :value "canvas"
+                                      :label (tr "viewer.phone.canvas")}
+                                     {:id "phone-view-prototype"
+                                      :value "prototype"
+                                      :label (tr "viewer.phone.prototype")}]}])
+
      ;; the boards
-     [:div {:class (stl/css :row)}
-      [:span {:class (stl/css :board-name)} (:name frame)]
-      [:span {:class (stl/css :counter)} (dm/str (inc index) " / " total)]
-      [:> icon-button* {:variant "ghost"
-                        :aria-label (tr "viewer.go-to-first-board")
-                        :icon i/reload
-                        :disabled (zero? index)
-                        :on-click #(act! dv/select-first-frame)}]
-      [:> icon-button* {:variant "ghost"
-                        :aria-label (tr "labels.previous")
-                        :icon i/arrow-left
-                        :disabled (zero? index)
-                        :on-click #(act! dv/select-prev-frame)}]
-      [:> icon-button* {:variant "ghost"
-                        :aria-label (tr "labels.next")
-                        :icon i/arrow-right
-                        :disabled (>= (inc index) total)
-                        :on-click #(act! dv/select-next-frame)}]]
+     (when-not (true? is-canvas)
+       [:div {:class (stl/css :row)}
+        [:span {:class (stl/css :board-name)} (:name frame)]
+        [:span {:class (stl/css :counter)} (dm/str (inc index) " / " total)]
+        [:> icon-button* {:variant "ghost"
+                          :aria-label (tr "viewer.go-to-first-board")
+                          :icon i/reload
+                          :disabled (zero? index)
+                          :on-click #(act! dv/select-first-frame)}]
+        [:> icon-button* {:variant "ghost"
+                          :aria-label (tr "labels.previous")
+                          :icon i/arrow-left
+                          :disabled (zero? index)
+                          :on-click #(act! dv/select-prev-frame)}]
+        [:> icon-button* {:variant "ghost"
+                          :aria-label (tr "labels.next")
+                          :icon i/arrow-right
+                          :disabled (>= (inc index) total)
+                          :on-click #(act! dv/select-next-frame)}]])
 
      ;; its animation
-     (when (some? timeline)
+     (when (and (some? timeline) (not (true? is-canvas)))
        [:div {:class (stl/css :row)} timeline])
+
+     ;; the pages, the one shown in the mode it shows (see `dv/go-to-page`)
+     (when (> (count page-ids) 1)
+       [:ul {:class (stl/css :list)}
+        (for [id page-ids]
+          [:li {:key (dm/str id)}
+           [:button {:type "button"
+                     :class (stl/css :item)
+                     :aria-pressed (= id (:id page))
+                     :on-click #(act! (dv/go-to-page id))}
+            [:> icon* {:icon-id i/document :size "s"}]
+            [:span {:class (stl/css :label)} (dm/get-in file [:data :pages-index id :name])]
+            (when (= id (:id page))
+              [:> icon* {:icon-id i/tick :size "s"}])]])])
 
      ;; the flows
      (when (and flows (= section :interactions))
@@ -426,8 +461,8 @@
             (when (= flow-id (:id flow))
               [:> icon* {:icon-id i/tick :size "s"}])]])])
 
-     ;; how the interactions show
-     (when (= section :interactions)
+     ;; how the interactions show, on its boards
+     (when (and (= section :interactions) (not (true? is-canvas)))
        [:ul {:class (stl/css :list)}
         (for [[mode label] [[:hide (tr "viewer.header.dont-show-interactions")]
                             [:show (tr "viewer.header.show-interactions")]
