@@ -19,6 +19,10 @@
   width: deprecated.$s-400;
 }
 
+[data-phone="true"] .notifications-form {
+  inline-size: 100%;
+}
+
 .notifications-page {
   display: flex;
   justify-content: center;

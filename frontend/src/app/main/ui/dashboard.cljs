@@ -29,13 +29,12 @@
    [app.main.ui.dashboard.import]
    [app.main.ui.dashboard.layout-toggle :as lt]
    [app.main.ui.dashboard.libraries :refer [libraries-page*]]
+   [app.main.ui.dashboard.phone-drawer :refer [drawer-toggle*]]
    [app.main.ui.dashboard.projects :refer [projects-section*]]
    [app.main.ui.dashboard.search :refer [search-page*]]
    [app.main.ui.dashboard.sidebar :refer [sidebar*]]
    [app.main.ui.dashboard.team :refer [team-settings-page* team-members-page* team-invitations-page* webhooks-page*]]
    [app.main.ui.dashboard.templates :refer [templates-section*]]
-   [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
-   [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.modal :refer [modal-container*]]
    [app.main.ui.workspace.plugins]
@@ -381,16 +380,9 @@
              :data-phone (dm/str phone?)
              :data-drawer (when drawer? "open")}
       (when phone?
-        [:*
-         [:> icon-button* {:variant "ghost"
-                           :class (stl/css :drawer-button)
-                           :aria-label (tr "dashboard.phone.menu")
-                           :aria-expanded drawer?
-                           :icon i/hamburger
-                           :on-click open-drawer}]
-         (when drawer?
-           [:div {:class (stl/css :drawer-backdrop)
-                  :on-click close-drawer}])])
+        [:> drawer-toggle* {:is-open drawer?
+                            :on-open open-drawer
+                            :on-close close-drawer}])
       [:> sidebar* {:team team
                     :projects projects
                     :project project

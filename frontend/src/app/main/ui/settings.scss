@@ -35,3 +35,24 @@
   inline-size: 100%;
   border-block-start: $b-1 solid var(--color-background-quaternary);
 }
+
+// a phone shows the page alone, as wide as its screen, below its notch;
+// the sidebar comes over it from the left as a drawer (see
+// `app.main.ui.dashboard.phone-drawer`)
+.dashboard[data-phone="true"] {
+  grid-template-columns: 100%;
+  grid-template-rows: 100%;
+  block-size: 100dvh;
+}
+
+[data-phone="true"] .dashboard-content {
+  grid-row: 1;
+  grid-column: 1;
+  min-inline-size: 0;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+[data-phone="true"] .dashboard-container {
+  margin-inline-end: 0;
+  padding-block-end: env(safe-area-inset-bottom);
+}

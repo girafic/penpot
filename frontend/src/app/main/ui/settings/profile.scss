@@ -35,6 +35,13 @@
   justify-content: center;
 }
 
+// on a phone as wide as its screen, with a margin
+[data-phone="true"] .form-container {
+  inline-size: 100%;
+  margin-block: var(--sp-xxl) var(--sp-xxxl);
+  padding-inline: var(--sp-l);
+}
+
 .page-title {
   color: var(--color-foreground-primary);
   display: flex;

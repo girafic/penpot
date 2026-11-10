@@ -34,6 +34,12 @@
   color: var(--color-foreground-primary);
 }
 
+// on a phone as wide as its screen, with a margin
+[data-phone="true"] .webgl-container {
+  inline-size: auto;
+  margin: var(--sp-xxl) var(--sp-l);
+}
+
 .webgl-header {
   display: flex;
   flex-direction: row;

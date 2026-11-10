@@ -7,10 +7,12 @@
 (ns app.main.ui.settings
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.common.data.macros :as dm]
    [app.main.data.dashboard.shortcuts :as sc]
    [app.main.refs :as refs]
    [app.main.router :as rt]
    [app.main.store :as st]
+   [app.main.ui.dashboard.phone-drawer :refer [drawer-toggle*]]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.modal :refer [modal-container*]]
    [app.main.ui.settings.change-email]
@@ -25,6 +27,7 @@
    [app.main.ui.settings.sidebar :refer [sidebar*]]
    [app.main.ui.settings.subscription :refer [subscription-page*]]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.touch :as touch]
    [rumext.v2 :as mf]))
 
 (mf/defc header*
@@ -37,10 +40,22 @@
 
 (mf/defc settings*
   [{:keys [route type error-report-id error-href]}]
-  (let [section (get-in route [:data :name])
-        profile (mf/deref refs/profile)]
+  (let [section      (get-in route [:data :name])
+        profile      (mf/deref refs/profile)
+
+        ;; a phone shows the page alone: the sidebar comes over it as a
+        ;; drawer, as in the dashboard
+        phone?       (mf/with-memo [] (touch/phone?))
+        drawer*      (mf/use-state false)
+        drawer?      (deref drawer*)
+        open-drawer  (mf/use-fn #(reset! drawer* true))
+        close-drawer (mf/use-fn #(reset! drawer* false))]
 
     (hooks/use-shortcuts ::dashboard sc/shortcuts :dashboard)
+
+    ;; a page chosen in the drawer closes it
+    (mf/with-effect [section]
+      (reset! drawer* false))
 
     (mf/with-effect [profile]
       (when (nil? profile)
@@ -48,8 +63,13 @@
 
     [:*
      [:> modal-container*]
-     [:section {:class (stl/css :dashboard)}
-
+     [:section {:class (stl/css :dashboard)
+                :data-phone (dm/str phone?)
+                :data-drawer (when drawer? "open")}
+      (when phone?
+        [:> drawer-toggle* {:is-open drawer?
+                            :on-open open-drawer
+                            :on-close close-drawer}])
 
       [:> sidebar* {:profile profile
                     :section section}]

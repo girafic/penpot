@@ -45,6 +45,16 @@
   margin-block-start: px2rem(80);
 }
 
+// on a phone as wide as its screen, with a margin, the footer too (a
+// second `.shortcuts-content` holds the list)
+[data-phone="true"] .shortcuts-page > .shortcuts-content {
+  padding-inline: var(--sp-l);
+
+  .page-title {
+    margin-block-start: var(--sp-xxl);
+  }
+}
+
 .shortcuts-section {
   margin-block-end: var(--sp-lg);
 }
@@ -203,6 +213,12 @@
   bottom: 0;
   background-color: var(--app-background);
   min-inline-size: px2rem(590);
+}
+
+[data-phone="true"] .shortcuts-page-footer {
+  min-inline-size: 0;
+  inset-inline: var(--sp-l);
+  padding-block-end: calc(env(safe-area-inset-bottom) + var(--sp-s));
 }
 
 .shortcuts-info {

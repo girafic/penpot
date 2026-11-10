@@ -102,6 +102,12 @@
   inline-size: $sz-500;
 }
 
+// on a phone as wide as its screen, with a margin
+[data-phone="true"] .integrations {
+  inline-size: auto;
+  margin: var(--sp-xxl) var(--sp-l) var(--sp-xxxl);
+}
+
 .access-tokens-section {
   display: grid;
   grid-template-rows: auto auto 1fr;

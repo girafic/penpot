@@ -9,6 +9,7 @@
 @use "ds/mixins.scss" as *;
 @use "ds/typography.scss" as *;
 @use "ds/z-index.scss" as *;
+@use "dashboard/_phone-drawer.scss" as phone;
 
 .dashboard-sidebar {
   @include custom-scrollbar;
@@ -22,6 +23,18 @@
   border-inline-end: $b-1 solid var(--color-background-quaternary);
   z-index: var(--z-index-panels);
   background-color: var(--color-background-primary);
+}
+
+// on a phone a drawer from the left, over the page, out of view until the
+// button at its top left opens it (see `settings*`)
+[data-phone="true"] .dashboard-sidebar {
+  @include phone.drawer;
+
+  padding-block-start: calc(env(safe-area-inset-top) + var(--sp-l));
+}
+
+[data-drawer="open"] .dashboard-sidebar {
+  @include phone.drawer-open;
 }
 
 .sidebar-content {

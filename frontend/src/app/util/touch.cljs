@@ -47,15 +47,19 @@
     (phone-screen? (some-> screen .-width) (some-> screen .-height) (coarse?))))
 
 (defn- dashboard-screen?
-  "Whether `screen`, the name of a route, is a page of the dashboard."
+  "Whether `screen`, the name of a route, is a page of the dashboard or
+  of the settings of the account."
   [screen]
-  (and (keyword? screen) (str/starts-with? (name screen) "dashboard")))
+  (and (keyword? screen)
+       (or (str/starts-with? (name screen) "dashboard")
+           (str/starts-with? (name screen) "settings"))))
 
 (defn viewport-content
   "The content of the viewport tag for the `screen` (the name of the
   route) on a `phone?` or another `coarse?` device; nil for none. The
   view mode is as wide as the device and may reach under its notch, and
-  so is the dashboard on a phone, which lays itself out for it;
+  so are the dashboard and the settings on a phone, which lay themselves
+  out for it;
   elsewhere a tablet lays Penpot out at its own width, and a phone or a
   desktop keeps the width of a desktop page (no tag)."
   [screen phone? coarse?]

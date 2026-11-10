@@ -1,0 +1,26 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+.drawer-button {
+  position: fixed;
+  inset-block-start: calc(env(safe-area-inset-top) + var(--sp-l));
+  inset-inline-start: calc(env(safe-area-inset-left) + var(--sp-s));
+  z-index: var(--z-index-panels);
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-set);
+  background-color: rgb(0 0 0 / 0.3);
+  animation: fade-in 0.2s ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}

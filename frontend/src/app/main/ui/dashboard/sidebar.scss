@@ -12,6 +12,7 @@
 @use "ds/_utils.scss" as *;
 @use "ds/z-index.scss" as *;
 @use "ds/mixins.scss" as *;
+@use "dashboard/_phone-drawer.scss" as phone;
 
 // The shared dashboard header styles move in their own change: they are
 // used by ten dashboard modules.
@@ -37,25 +38,11 @@
 // on a phone a drawer from the left, over the content, out of view until
 // the button at its top left opens it (see `dashboard*`)
 [data-phone="true"] .dashboard-sidebar {
-  position: fixed;
-  inset-block: 0;
-  inset-inline-start: 0;
-  z-index: var(--z-index-set);
-  inline-size: min(85vw, px2rem(320));
-  margin: 0;
-  padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom);
-  padding-inline-start: env(safe-area-inset-left);
-  transform: translateX(-100%);
-  transition:
-    transform 0.25s ease,
-    visibility 0.25s;
-  visibility: hidden;
+  @include phone.drawer;
 }
 
 [data-drawer="open"] .dashboard-sidebar {
-  transform: none;
-  visibility: visible;
-  box-shadow: 0 0 px2rem(24) rgb(0 0 0 / 0.2);
+  @include phone.drawer-open;
 }
 
 // SIDEBAR CONTENT COMPONENT
