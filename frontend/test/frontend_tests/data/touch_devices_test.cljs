@@ -20,7 +20,6 @@
    [app.main.ui.dashboard.grid :as grid]
    [app.main.ui.workspace.phone-link :as phone-link]
    [app.main.ui.workspace.touch-bar :as touch-bar]
-   [app.main.ui.workspace.viewport.touch :as vtouch]
    [app.util.keyboard :as kbd]
    [app.util.touch :as touch]
    [cljs.test :as t :include-macros true]
@@ -163,16 +162,16 @@
           "nothing told while no view mode follows")))
 
 (t/deftest finger-gestures
-  (t/is (= (gpt/point 5 10) (vtouch/middle [(gpt/point 0 0) (gpt/point 10 20)])))
-  (let [{:keys [dx dy scale middle]} (vtouch/pinch-step [(gpt/point 0 0) (gpt/point 100 0)]
-                                                        [(gpt/point 10 5) (gpt/point 210 5)])]
+  (t/is (= (gpt/point 5 10) (touch/middle [(gpt/point 0 0) (gpt/point 10 20)])))
+  (let [{:keys [dx dy scale middle]} (touch/pinch-step [(gpt/point 0 0) (gpt/point 100 0)]
+                                                       [(gpt/point 10 5) (gpt/point 210 5)])]
     (t/is (= [60 5] [dx dy]) "their middle moved")
     (t/is (= 2 scale) "twice as far apart")
     (t/is (= (gpt/point 110 5) middle)))
-  (t/is (= 1 (:scale (vtouch/pinch-step [(gpt/point 0 0) (gpt/point 0 0)]
-                                        [(gpt/point 0 0) (gpt/point 10 0)])))
+  (t/is (= 1 (:scale (touch/pinch-step [(gpt/point 0 0) (gpt/point 0 0)]
+                                       [(gpt/point 0 0) (gpt/point 10 0)])))
         "no spread from fingers at one point")
-  (let [{:keys [x y center]} (vtouch/view-step {:x 100 :y 50} 2 20 10 (gpt/point 40 30))]
+  (let [{:keys [x y center]} (touch/view-step {:x 100 :y 50} 2 20 10 (gpt/point 40 30))]
     (t/is (= [90 45] [x y]) "the canvas follows the fingers")
     (t/is (= (gpt/point 110 60) center) "it zooms about the point under them")))
 

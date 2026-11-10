@@ -48,40 +48,6 @@
   the index of the shapes may still be built."
   500)
 
-(defn middle
-  "The middle of the `points` (`{:x :y}`)."
-  [points]
-  (let [n (count points)]
-    (gpt/point (/ (reduce + (map :x points)) n)
-               (/ (reduce + (map :y points)) n))))
-
-(defn pinch-step
-  "From two fingers at `before` to `after` (two points each): how far
-  their middle moved, `:dx :dy` (px), how much more they spread,
-  `:scale`, and where their middle is now, `:middle`."
-  [before after]
-  (let [m0     (middle before)
-        m1     (middle after)
-        d0     (apply gpt/distance before)
-        d1     (apply gpt/distance after)]
-    {:dx (- (:x m1) (:x m0))
-     :dy (- (:y m1) (:y m0))
-     :scale (if (and (pos? d0) (pos? d1)) (/ d1 d0) 1)
-     :middle m1}))
-
-(defn view-step
-  "The view box at `vbox`, `zoom`, after fingers moved it `dx dy` (px)
-  and spread it `scale` about `middle` (px from the corner of the
-  viewport): `{:x :y}` of its corner, then the point of the canvas to
-  zoom about, which stays under the fingers."
-  [{:keys [x y]} zoom dx dy middle]
-  (let [x' (- x (/ dx zoom))
-        y' (- y (/ dy zoom))]
-    {:x x'
-     :y y'
-     :center (gpt/point (+ x' (/ (:x middle) zoom))
-                        (+ y' (/ (:y middle) zoom)))}))
-
 (defn- client-point
   [^js event]
   (gpt/point (.-clientX event) (.-clientY event)))
@@ -94,7 +60,7 @@
         vbox   (dm/get-in state [:workspace-local :vbox])
         zoom   (dm/get-in state [:workspace-local :zoom] 1)
         corner (or (uwvv/point->viewport-relative middle) middle)
-        {:keys [x y center]} (view-step vbox zoom dx dy corner)]
+        {:keys [x y center]} (touch/view-step vbox zoom dx dy corner)]
     (when (some? vbox)
       (st/emit! (dw/update-viewport-position {:x (constantly x) :y (constantly y)}))
       (when (not (mth/close? scale 1))
@@ -340,7 +306,7 @@
                                   after  (fingers g)]
                               (set! (.-last g) after)
                               (when (and (= 2 (count before)) (= 2 (count after)))
-                                (let [{:keys [dx dy scale middle]} (pinch-step before after)]
+                                (let [{:keys [dx dy scale middle]} (touch/pinch-step before after)]
                                   (when (or (> (mth/abs dx) 0) (> (mth/abs dy) 0) (not (mth/close? scale 1)))
                                     (when (or (> (mth/abs (- scale 1)) 0.03)
                                               (> (+ (mth/abs dx) (mth/abs dy)) slop-px))

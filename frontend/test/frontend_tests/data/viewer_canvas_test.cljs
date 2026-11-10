@@ -8,6 +8,9 @@
   "The canvas of a phone: when the view mode starts on it, when it shows,
   and the routes in and out of it."
   (:require
+   [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
+   [app.common.math :as mth]
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.viewer :as dv]
@@ -189,3 +192,144 @@
   (t/is (= (assoc page-query :index "1" :section :inspect)
            (:params (navigation (dv/go-to-section :inspect) (viewer-state (assoc page-query :index "1")))))
         "from a board, that board"))
+
+;; --- What the canvas draws, and its view
+
+(defn- shape
+  [id type x y w h & {:as attrs}]
+  (let [rect (grc/make-rect x y w h)]
+    (merge {:id id :type type :x x :y y :width w :height h
+            :selrect rect :points (grc/rect->points rect)
+            :parent-id uuid/zero :frame-id uuid/zero}
+           attrs)))
+
+(def ^:private ids
+  (zipmap [:strip :card :inner-hidden :screen :row :tall :hidden :dot]
+          (map #(uuid/custom 5 %) (range))))
+
+(def ^:private page-objects
+  "A page as the Playground and an app prototype: a wide lesson strip
+  with a card in it, a screen with a row in it, a tall board below, and
+  a top-level board hidden in view mode."
+  (let [{:keys [strip card inner-hidden screen row tall hidden dot]} ids]
+    {uuid/zero    {:id uuid/zero :type :frame :shapes [strip screen tall hidden]}
+     strip        (shape strip :frame 0 0 4520 1000 :shapes [card inner-hidden])
+     card         (shape card :frame 100 100 400 300 :parent-id strip :frame-id strip)
+     inner-hidden (shape inner-hidden :frame 1000 100 400 300 :parent-id strip :frame-id strip
+                         :hide-in-viewer true)
+     screen       (shape screen :frame 0 1200 400 800 :shapes [row])
+     row          (shape row :frame 20 1300 360 60 :parent-id screen :frame-id screen)
+     tall         (shape tall :frame 0 3000 4520 18760)
+     hidden       (shape hidden :frame 5000 0 400 400 :hide-in-viewer true :shapes [dot])
+     dot          (shape dot :rect 5010 10 10 10 :parent-id hidden :frame-id hidden)}))
+
+(def ^:private phone-screen {:width 375 :height 812})
+
+(defn- close-point?
+  [a b]
+  (and (mth/close? (:x a) (:x b) 1e-6) (mth/close? (:y a) (:y b) 1e-6)))
+
+(defn- screen-point
+  "The point of the screen over the point of the page `x y` at `view`."
+  [{:keys [zoom] :as view} x y]
+  (gpt/point (* (- x (:x view)) zoom) (* (- y (:y view)) zoom)))
+
+(t/deftest the-canvas-leaves-out-only-top-level-boards-hidden-in-view-mode
+  (let [objects (dvc/canvas-objects page-objects)]
+    (t/is (not-any? #(contains? objects (get ids %)) [:hidden :dot]) "with what they hold")
+    (t/is (= (mapv ids [:strip :screen :tall]) (get-in objects [uuid/zero :shapes])))
+    (t/is (contains? objects (:inner-hidden ids)) "a hidden board inside another is part of it")
+    (t/is (identical? objects (dvc/canvas-objects objects)) "nothing to leave out: as it is")))
+
+(t/deftest the-content-of-a-page
+  (t/is (= (grc/make-rect 0 0 4520 21760) (dvc/content-bounds (dvc/canvas-objects page-objects))))
+  (t/is (nil? (dvc/content-bounds {uuid/zero {:id uuid/zero :type :frame :shapes []}}))
+        "an empty page")
+  (let [id (uuid/custom 6 1)]
+    (t/is (= (grc/make-rect 10 20 30 40)
+             (dvc/content-bounds {uuid/zero {:id uuid/zero :type :frame :shapes [id]}
+                                  id (shape id :rect 10 20 30 40)}))
+          "shapes and no board")))
+
+(t/deftest the-canvas-starts-as-wide-as-the-screen
+  (let [bounds (dvc/content-bounds (dvc/canvas-objects page-objects))
+        {:keys [zoom x y]} (dvc/initial-view bounds phone-screen)]
+    (t/is (mth/close? (/ 375 4520) zoom 1e-9))
+    (t/is (mth/close? 0.083 zoom 1e-3))
+    (t/is (= [0 0] [x y]) "from its top left corner")))
+
+(t/deftest a-small-content-starts-in-the-middle
+  (let [bounds (grc/make-rect 0 0 50 50)
+        [lo hi] (dvc/zoom-range bounds phone-screen)
+        {:keys [zoom x y]} (dvc/initial-view bounds phone-screen)]
+    (t/is (< lo hi) "the zooms are never empty")
+    (t/is (= [3.75 7.5] [lo hi]))
+    (t/is (= 7.5 zoom))
+    (t/is (= 0 x) "as wide as the screen")
+    (t/is (mth/close? (- (/ (- (/ 812 7.5) 50) 2)) y 1e-9) "in the middle from top to bottom")
+    (t/is (= 3.75 (:zoom (dvc/clamp-view {:zoom 1 :x 0 :y 0} bounds phone-screen))))))
+
+(t/deftest the-view-stays-over-the-content
+  (let [bounds (grc/make-rect 0 0 4520 21760)
+        start  (/ 375 4520)]
+    (t/is (= dvc/max-zoom (:zoom (dvc/clamp-view {:zoom 1000 :x 0 :y 0} bounds phone-screen))))
+    (t/is (mth/close? (/ start 2) (:zoom (dvc/clamp-view {:zoom 1e-6 :x 0 :y 0} bounds phone-screen)) 1e-9))
+    (let [{:keys [x y]} (dvc/clamp-view {:zoom 1 :x 1e9 :y -1e9} bounds phone-screen)]
+      (t/is (= (- 4520 375) x) "its right edge at the right of the screen")
+      (t/is (= 0 y) "its top at the top"))
+    (t/testing "zoomed out, in the middle"
+      (let [{:keys [x]} (dvc/clamp-view {:zoom (/ start 2) :x 1e9 :y 0} bounds phone-screen)]
+        (t/is (mth/close? (- (/ 4520 2)) x 1e-6))))))
+
+(t/deftest a-zoom-keeps-the-point-under-the-fingers
+  (let [view  {:zoom 0.1 :x 300 :y 2000}
+        point (gpt/point 100 200)]
+    (t/is (close-point? (dvc/page-point view point)
+                        (dvc/page-point (dvc/zoom-about view point 0.35) point)))))
+
+(t/deftest a-turn-keeps-the-middle-of-the-screen
+  (let [bounds (grc/make-rect 0 0 4520 21760)
+        wide   {:width 812 :height 375}
+        view   {:zoom 1 :x 2000 :y 10000}
+        turned (dvc/resize-view view phone-screen wide bounds)]
+    (t/is (= 1 (:zoom turned)))
+    (t/is (close-point? (dvc/page-point view (gpt/point 187.5 406))
+                        (dvc/page-point turned (gpt/point 406 187.5))))))
+
+(t/deftest a-tap-finds-the-top-level-board
+  (let [objects (dvc/canvas-objects page-objects)]
+    (t/is (= (:strip ids) (:id (dvc/board-at objects (gpt/point 300 250))))
+          "the strip, not the card in it")
+    (t/is (= (:screen ids) (:id (dvc/board-at objects (gpt/point 200 1330)))))
+    (t/is (nil? (dvc/board-at objects (gpt/point 4600 2500))) "nothing there")
+    (t/is (nil? (dvc/board-at objects (gpt/point 5100 100))) "a hidden board is not drawn"))
+  (t/testing "the upper of two boards"
+    (let [[a b] [(uuid/custom 6 2) (uuid/custom 6 3)]
+          objects {uuid/zero {:id uuid/zero :type :frame :shapes [a b]}
+                   a (shape a :frame 0 0 100 100)
+                   b (shape b :frame 50 50 100 100)}]
+      (t/is (= b (:id (dvc/board-at objects (gpt/point 75 75)))))))
+  (t/testing "a turned board by its shape"
+    (let [id      (uuid/custom 6 4)
+          objects {uuid/zero {:id uuid/zero :type :frame :shapes [id]}
+                   id (assoc (shape id :frame 0 0 100 10)
+                             :rotation 90
+                             :points [(gpt/point 55 -45) (gpt/point 55 55)
+                                      (gpt/point 45 55) (gpt/point 45 -45)])}]
+      (t/is (= id (:id (dvc/board-at objects (gpt/point 50 40)))))
+      (t/is (nil? (dvc/board-at objects (gpt/point 90 5)))))))
+
+(t/deftest a-double-tap-zooms-to-a-board-and-back
+  (let [objects (dvc/canvas-objects page-objects)
+        bounds  (dvc/content-bounds objects)
+        start   (dvc/initial-view bounds phone-screen)
+        tap     #(dvc/double-tap-view %1 objects bounds phone-screen (screen-point %1 %2 %3))]
+    (t/is (= {:zoom (/ 375 400) :x 100 :y 100} (tap start 300 250))
+          "the card in the strip, as wide as the screen")
+    (t/is (= {:zoom (/ 375 400) :x 0 :y 1200} (tap start 200 1330))
+          "the screen, not the row in it")
+    (t/is (= start (tap (tap start 300 250) 300 250)) "and back to the start")
+    (let [{:keys [zoom] :as view} (tap start 2000 10000)]
+      (t/is (mth/close? (* 2 (:zoom start)) zoom 1e-9) "no board to zoom to: twice as close")
+      (t/is (close-point? (gpt/point 2000 10000)
+                          (dvc/page-point view (screen-point start 2000 10000)))))))

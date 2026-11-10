@@ -6,10 +6,12 @@
 
 (ns app.util.touch
   "Phones, tablets and pens: what kind of screen Penpot runs on, its
-  viewport tag and its web app tags, and whether a finger or a pen was
-  used yet (the `touch-ui` class on the document then, and `touch-ui?`).
-  Never the user agent: Safari on an iPad says it is a Mac."
+  viewport tag and its web app tags, whether a finger or a pen was used
+  yet (the `touch-ui` class on the document then, and `touch-ui?`), and
+  how two fingers pan and zoom a view. Never the user agent: Safari on an
+  iPad says it is a Mac."
   (:require
+   [app.common.geom.point :as gpt]
    [app.util.dom :as dom]
    [app.util.globals :as g]
    [app.util.storage :as storage]
@@ -279,6 +281,40 @@
       (:opened @press)   (do (.preventDefault event)
                              (.stopPropagation event))
       (some? @press)     (cancel-press!))))
+
+(defn middle
+  "The middle of the `points` (`{:x :y}`)."
+  [points]
+  (let [n (count points)]
+    (gpt/point (/ (reduce + (map :x points)) n)
+               (/ (reduce + (map :y points)) n))))
+
+(defn pinch-step
+  "From two fingers at `before` to `after` (two points each): how far
+  their middle moved, `:dx :dy` (px), how much more they spread,
+  `:scale`, and where their middle is now, `:middle`."
+  [before after]
+  (let [m0     (middle before)
+        m1     (middle after)
+        d0     (apply gpt/distance before)
+        d1     (apply gpt/distance after)]
+    {:dx (- (:x m1) (:x m0))
+     :dy (- (:y m1) (:y m0))
+     :scale (if (and (pos? d0) (pos? d1)) (/ d1 d0) 1)
+     :middle m1}))
+
+(defn view-step
+  "The view box at `vbox`, `zoom`, after fingers moved it `dx dy` (px)
+  and spread it `scale` about `middle` (px from the corner of the
+  viewport): `{:x :y}` of its corner, then the point of the canvas to
+  zoom about, which stays under the fingers."
+  [{:keys [x y]} zoom dx dy middle]
+  (let [x' (- x (/ dx zoom))
+        y' (- y (/ dy zoom))]
+    {:x x'
+     :y y'
+     :center (gpt/point (+ x' (/ (:x middle) zoom))
+                        (+ y' (/ (:y middle) zoom)))}))
 
 (defn init!
   "Notes the first finger or pen, links the web app tags, and opens the
