@@ -116,35 +116,52 @@
         (t/is (= "" (.. document (querySelector "[role=dialog]") -style -transform)) "back")))))
 
 
-(t/deftest a-sheet-rests-at-half-the-screen-or-most-of-it
-  (t/is (= [400 720] (phone-sheet/sheet-heights :half 800 100)) "as high as `:half`")
-  (t/is (= [150 150] (phone-sheet/sheet-heights nil 800 150)) "what it holds, short")
-  (t/is (= [400 600] (phone-sheet/sheet-heights nil 800 600)) "longer than half the screen")
-  (t/is (= [400 720] (phone-sheet/sheet-heights nil 800 2000))))
+(t/deftest a-sheet-rests-at-a-little-of-the-screen-half-of-it-or-most-of-it
+  (t/is (= [[:small 240] [:low 400] [:high 720]] (phone-sheet/sheet-heights :half 800 100))
+        "as high as `:half`")
+  (t/is (= [[:low 150]] (phone-sheet/sheet-heights nil 800 150)) "what it holds, short")
+  (t/is (= [[:small 240] [:low 300]] (phone-sheet/sheet-heights nil 800 300)))
+  (t/is (= [[:small 240] [:low 400] [:high 600]] (phone-sheet/sheet-heights nil 800 600))
+        "longer than half the screen")
+  (t/is (= [[:small 240] [:low 400] [:high 720]] (phone-sheet/sheet-heights nil 800 2000))))
 
-(t/deftest a-sheet-let-go-rests-at-the-nearer-height-or-where-flicked
-  (t/is (= :high (phone-sheet/sheet-rest 600 0 400 720)) "nearer most of the screen")
-  (t/is (= :low (phone-sheet/sheet-rest 500 0 400 720)))
-  (t/is (= :high (phone-sheet/sheet-rest 450 -1 400 720)) "flicked up")
-  (t/is (= :low (phone-sheet/sheet-rest 700 1 400 720)) "flicked down")
-  (t/is (= :low (phone-sheet/sheet-rest 350 0 400 720)) "a little below half: back")
-  (t/is (= :closed (phone-sheet/sheet-rest 300 0 400 720)) "dragged far down")
-  (t/is (= :closed (phone-sheet/sheet-rest 390 1 400 720)) "flicked down below half"))
+(t/deftest a-sheet-let-go-rests-at-the-nearest-height-or-where-flicked
+  (let [heights (phone-sheet/sheet-heights :half 800 100)]
+    (t/is (= :high (phone-sheet/sheet-rest 600 0 heights)) "nearest most of the screen")
+    (t/is (= :low (phone-sheet/sheet-rest 500 0 heights)))
+    (t/is (= :small (phone-sheet/sheet-rest 300 0 heights)) "below half")
+    (t/is (= :high (phone-sheet/sheet-rest 450 -1 heights)) "flicked up")
+    (t/is (= :low (phone-sheet/sheet-rest 300 -1 heights)) "to the next height up")
+    (t/is (= :low (phone-sheet/sheet-rest 700 1 heights)) "flicked down")
+    (t/is (= :small (phone-sheet/sheet-rest 380 1 heights)) "to the next height down")
+    (t/is (= :small (phone-sheet/sheet-rest 200 0 heights)) "a little below the lowest: back")
+    (t/is (= :closed (phone-sheet/sheet-rest 150 0 heights)) "dragged far down")
+    (t/is (= :closed (phone-sheet/sheet-rest 230 1 heights)) "flicked down below the lowest")))
 
 (t/deftest a-sheet-grows-and-shrinks-by-its-grip
   (thd/with-dom
     (fn [{:keys [root document window]}]
-      (thd/render! root (mf/element phone-sheet/sheet* #js {:label "Inspect" :height :half :onClose (fn [])}))
-      (let [grip   (.querySelector document "[class*=grip-zone]")
-            dialog #(.querySelector document "[role=dialog]")
-            half   (* 0.5 (.-innerHeight window))]
-        (thd/act #(do (touch! grip "touchstart" [[100 400]])
-                      (touch! grip "touchmove" [[100 150]])))
-        (t/is (= (str (+ half 250) "px") (.. (dialog) -style -blockSize)) "it follows the finger up")
-        (thd/act #(touch! grip "touchend" []))
-        (t/is (re-find #"full" (.-className (dialog))) "most of the screen")
-        (t/is (= "" (.. (dialog) -style -blockSize)))
-        (thd/act #(do (touch! grip "touchstart" [[100 100]])
-                      (touch! grip "touchmove" [[100 350]])))
-        (thd/act #(touch! grip "touchend" []))
-        (t/is (re-find #"half" (.-className (dialog))) "and back to half of it")))))
+      (let [closed? (atom false)]
+        (thd/render! root (mf/element phone-sheet/sheet* #js {:label "Inspect"
+                                                              :height :half
+                                                              :onClose #(reset! closed? true)}))
+        (let [grip   (.querySelector document "[class*=grip-zone]")
+              dialog #(.querySelector document "[role=dialog]")
+              half   (* 0.5 (.-innerHeight window))
+              drag!  (fn [y0 y1]
+                       (thd/act #(do (touch! grip "touchstart" [[100 y0]])
+                                     (touch! grip "touchmove" [[100 y1]])))
+                       (thd/act #(touch! grip "touchend" [])))]
+          (thd/act #(do (touch! grip "touchstart" [[100 400]])
+                        (touch! grip "touchmove" [[100 150]])))
+          (t/is (= (str (+ half 250) "px") (.. (dialog) -style -blockSize)) "it follows the finger up")
+          (thd/act #(touch! grip "touchend" []))
+          (t/is (re-find #"full" (.-className (dialog))) "most of the screen")
+          (t/is (= "" (.. (dialog) -style -blockSize)))
+          (drag! 100 350)
+          (t/is (re-find #"half" (.-className (dialog))) "back to half of it")
+          (drag! 100 180)
+          (t/is (re-find #"small" (.-className (dialog))) "down to a little of it")
+          (t/is (not @closed?))
+          (drag! 100 260)
+          (t/is (true? @closed?) "and down to close"))))))

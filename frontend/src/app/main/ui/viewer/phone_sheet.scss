@@ -75,6 +75,12 @@
   max-block-size: 90dvh;
 }
 
+// dragged down to a little of the screen (see `sheet-heights`)
+.small {
+  block-size: 30dvh;
+  max-block-size: 30dvh;
+}
+
 // what drags the sheet up and down
 .grip-zone {
   display: grid;
