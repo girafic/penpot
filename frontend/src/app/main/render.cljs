@@ -381,13 +381,16 @@
           height      (* (:height root-shape') zoom)
           vbox        (format-viewbox {:width (:width root-shape' 0)
                                        :height (:height root-shape' 0)})
+          ;; a component of another shape draws as it is: none crashes the
+          ;; card of its library in the dashboard
           root-shape-wrapper
           (mf/use-memo
            (mf/deps objects root-shape')
            (fn []
              (case (:type root-shape')
                :group (group-wrapper-factory objects)
-               :frame (frame-wrapper-factory objects))))]
+               :frame (frame-wrapper-factory objects)
+               (shape-wrapper-factory objects))))]
 
       [:svg {:view-box vbox
              :width (ust/format-precision width viewbox-decimal-precision)
@@ -399,7 +402,8 @@
              :xmlns:penpot (when include-metadata "https://penpot.app/xmlns")
              :fill "none"}
 
-       (when-not is-hidden
+       ;; nothing of a root its objects lost (its id another than its key)
+       (when (and (not is-hidden) (some? root-shape'))
          [:*
           [:> shape-container {:shape root-shape'}
            [:& (mf/provider muc/is-component?) {:value true}
