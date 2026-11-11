@@ -153,6 +153,7 @@
   max-height: calc(#{$s-48} + env(safe-area-inset-top));
   padding-block-start: calc(env(safe-area-inset-top) + #{$s-4});
   padding-inline: $s-48 $s-8;
+  border-bottom: $s-1 solid var(--color-background-quaternary);
   background-color: var(--color-background-primary);
 
   .dashboard-title {

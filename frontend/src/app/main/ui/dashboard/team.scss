@@ -1034,6 +1034,7 @@ a {
 [data-phone="true"] .dashboard-team-invitations,
 [data-phone="true"] .dashboard-team-webhooks,
 [data-phone="true"] .dashboard-team-settings {
+  border-block-start: none;
   padding-inline: var(--sp-l);
   padding-block-end: calc(env(safe-area-inset-bottom) + var(--sp-xxl));
 }

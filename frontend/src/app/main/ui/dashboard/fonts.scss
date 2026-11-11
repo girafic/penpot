@@ -294,6 +294,7 @@
 // On a phone the page is as wide as its screen, with a margin; a font is a
 // card, its family and options in a row, its variants and files below
 [data-phone="true"] .dashboard-fonts {
+  border-block-start: none;
   padding-inline: var(--sp-l);
   padding-block-end: calc(env(safe-area-inset-bottom) + var(--sp-xxl));
 }

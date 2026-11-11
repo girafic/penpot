@@ -25,5 +25,6 @@
 [data-phone="true"] .dashboard-container {
   flex: 0 0 auto;
   min-inline-size: 0;
+  border-block-start: none;
   overflow: clip visible;
 }

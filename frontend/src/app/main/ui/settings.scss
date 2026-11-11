@@ -64,5 +64,6 @@
 [data-phone="true"] .dashboard-container {
   flex: 0 0 auto;
   margin-inline-end: 0;
+  border-block-start: none;
   overflow: visible;
 }
