@@ -58,7 +58,8 @@
 
 (def ^:private little-of-screen
   "How low a sheet shrinks, of the screen, about as high as its grip and
-  the top of what it holds: as `.small`."
+  the top of what it holds, unless it marks that top (see `head-height`):
+  as `.small`."
   0.1)
 
 (def ^:private docked-of-screen
@@ -71,9 +72,10 @@
   screen, half of it and most of it for a sheet as high as `:half`; else
   as high as what it holds, `natural` px, up to them, which leaves out
   those it is not as high as. A `docked` sheet rests where it starts
-  too, `:start`, between the little and the half."
-  [height vh natural & {:keys [docked]}]
-  (let [small (* little-of-screen vh)
+  too, `:start`, between the little and the half. `small`, px, the
+  little one: as high as its head (see `head-height`)."
+  [height vh natural & {:keys [docked small]}]
+  (let [small (or small (* little-of-screen vh))
         start (* docked-of-screen vh)
         half  (* 0.5 vh)
         most  (* most-of-screen vh)
@@ -105,6 +107,22 @@
        (< v (- flick-speed)) (or (first above) (last heights))
        (> v flick-speed)     (or (last below) (first heights))
        :else                 nearest))))
+
+(defn- head-height
+  "How high the sheet `node` is down to the end of its head, the last of
+  what it holds marked `data-sheet-head`, and the room below what it
+  holds; nil for none marked. Its position in the sheet, whether the sheet
+  is dragged or what it holds scrolled."
+  [^js node]
+  (when-let [^js body (some-> node .-lastChild)]
+    (let [heads (.querySelectorAll body "[data-sheet-head]")
+          n     (.-length heads)]
+      (when (pos? n)
+        (let [^js head (.item heads (dec n))]
+          (mth/ceil (+ (.-offsetTop head)
+                       (.-offsetHeight head)
+                       (js/parseFloat (.-paddingBottom (.. body -ownerDocument -defaultView
+                                                           (getComputedStyle body)))))))))))
 
 (defn- drag-style
   "How a sheet dragged to `h` px high shows among its `heights`: as high,
@@ -251,13 +269,16 @@
   it takes taps. `docked`, it starts at a third of the screen or so and
   rests at a little of it instead of closing. `kept-height`, px, it
   keeps that height, whatever it holds, until its grip drags it, which
-  calls `on-drag`."
+  calls `on-drag`. Down to a little of it, it shows its head, what it
+  marks `data-sheet-head` (see `head-height`)."
   [{:keys [label height open-beside docked on-close children kept-height on-drag]}]
   (let [resting*   (mf/use-state (if (true? docked) :start :low))
         resting    (deref resting*)
         drag*      (mf/use-state nil)
         drag       (deref drag*)
         sheet-ref  (mf/use-ref nil)
+        ;; how high it is down to its head, px (see `head-height`)
+        small-ref  (mf/use-ref nil)
         ;; the drag going on: where it started, its heights, its speed
         gesture-ref (mf/use-ref nil)
 
@@ -270,7 +291,8 @@
                  sheet   (mf/ref-val sheet-ref)
                  natural (+ (some-> sheet .-firstChild .-offsetHeight)
                             (some-> sheet .-lastChild .-scrollHeight))
-                 heights (sheet-heights height (.-innerHeight g/window) natural :docked docked)
+                 heights (sheet-heights height (.-innerHeight g/window) natural
+                                        :docked docked :small (mf/ref-val small-ref))
                  shown   (some-> sheet .-offsetHeight)]
              (mf/set-ref-val! gesture-ref {:y0 y
                                            :h0 (if (pos? shown)
@@ -307,12 +329,24 @@
         (when (some? drag)
           (drag-style drag (:heights (mf/ref-val gesture-ref))))]
 
+    ;; what it holds changes its head: `.small` as high as it, on the
+    ;; node, which React leaves be
+    (mf/with-layout-effect [children]
+      (when-let [^js node (mf/ref-val sheet-ref)]
+        (let [px (head-height node)]
+          (when (not= px (mf/ref-val small-ref))
+            (mf/set-ref-val! small-ref px)
+            (if (some? px)
+              (.setProperty (.-style node) "--sheet-small" (dm/str px "px"))
+              (.removeProperty (.-style node) "--sheet-small"))))))
+
     [:*
      (when-not open-beside
        [:div {:class (stl/css :backdrop) :on-click on-close}])
      [:div {:class (stl/css-case :sheet true
                                  :floating (not= resting :high)
-                                 :small (= resting :small)
+                                 ;; not while dragged: what follows its head shows
+                                 :small (and (= resting :small) (nil? drag))
                                  :start (= resting :start)
                                  :half (and (= height :half) (= resting :low))
                                  :full (and (= height :half) (= resting :high))
@@ -432,7 +466,7 @@
      ;; the logo, back to the dashboard for the team, the project and the
      ;; file, as the header of the workspace shows them, which a phone
      ;; shows no header for
-     [:div {:class (stl/css :row :file-row)}
+     [:div {:class (stl/css :row :file-row) :data-sheet-head true}
       (if (:in-team permissions)
         [:button {:type "button"
                   :class (stl/css :logo)
@@ -446,8 +480,9 @@
        [:span {:class (stl/css :file-name)} (:name file)]]]
 
      ;; then the switch, in the prototype as on the canvas, where the
-     ;; docked sheet shows both at its little height
-     view-switch
+     ;; docked sheet shows both at its little height: its head
+     (when (some? view-switch)
+       [:div {:data-sheet-head true} view-switch])
 
      ;; the sections and share, of the prototype only: the canvas shows the
      ;; page as it is. A phone edits not: no button for the workspace

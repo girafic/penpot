@@ -75,10 +75,20 @@
   max-block-size: 90dvh;
 }
 
-// dragged down to a little of the screen (see `sheet-heights`)
+// dragged down to a little of the screen, as high as its head once
+// measured (`--sheet-small`, see `head-height`)
 .small {
-  block-size: 10dvh;
-  max-block-size: 10dvh;
+  block-size: var(--sheet-small, 10dvh);
+  max-block-size: var(--sheet-small, 10dvh);
+}
+
+// there it shows its head alone, nothing of what follows peeking out
+.small .body:has([data-sheet-head]) {
+  overflow: hidden;
+
+  > :not([data-sheet-head]) {
+    visibility: hidden;
+  }
 }
 
 // where a sheet docked on the canvas starts (see `sheet-heights`)

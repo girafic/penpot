@@ -136,7 +136,10 @@
   (t/is (= [[:small 80] [:low 300]] (phone-sheet/sheet-heights nil 800 300)))
   (t/is (= [[:small 80] [:low 400] [:high 600]] (phone-sheet/sheet-heights nil 800 600))
         "longer than half the screen")
-  (t/is (= [[:small 80] [:low 400] [:high 720]] (phone-sheet/sheet-heights nil 800 2000))))
+  (t/is (= [[:small 80] [:low 400] [:high 720]] (phone-sheet/sheet-heights nil 800 2000)))
+  (t/is (= [[:small 150] [:start 240] [:low 400] [:high 600]]
+           (phone-sheet/sheet-heights nil 800 600 :docked true :small 150))
+        "as high as its head, a little of it"))
 
 (t/deftest a-sheet-let-go-rests-at-the-nearest-height-or-where-flicked
   (let [heights (phone-sheet/sheet-heights :half 800 100)]
