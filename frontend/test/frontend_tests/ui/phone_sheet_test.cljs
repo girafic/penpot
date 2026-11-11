@@ -8,7 +8,10 @@
   "The view mode on a phone, its board alone: two fingers held on it open
   the sheet with what its bars hold elsewhere (Penpot Motion)."
   (:require
+   [app.common.uuid :as uuid]
+   [app.main.data.viewer.shortcuts :as sc]
    [app.main.ui.viewer.phone-sheet :as phone-sheet]
+   [app.util.i18n :refer [tr]]
    [app.util.storage :as storage]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
@@ -175,3 +178,34 @@
           (t/is (not @closed?))
           (drag! 100 260)
           (t/is (true? @closed?) "and down to close"))))))
+
+(defn- phone-sheet
+  "What the options of a phone over the canvas (`canvas?`) or over a
+  board of the prototype show to a member of the team: how many sections,
+  whether share and whether edit."
+  [canvas?]
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (let [page-id (uuid/next)
+            frame   {:id (uuid/next) :name "Board"}
+            page    {:id page-id :frames [frame]}
+            file    {:name "File" :data {:pages [page-id] :pages-index {page-id {:name "Page"}}}}
+            labels  (fn [] (map #(.-textContent %) (.querySelectorAll document "button")))]
+        (thd/render! root (mf/element phone-sheet/phone-sheet*
+                                      #js {:page page :file file :frame frame :index 0
+                                           :permissions {:in-team true :is-logged true}
+                                           :section :interactions
+                                           :onClose identity
+                                           :isCanvas canvas? :hasCanvas true :isDocked canvas?}))
+        {:sections (count (filter #(.querySelector document (str "[aria-label=\"" % "\"]"))
+                                  [(tr "viewer.header.interactions-section" (sc/get-tooltip :open-interactions))
+                                   (tr "viewer.header.comments-section" (sc/get-tooltip :open-comments))
+                                   (tr "viewer.header.inspect-section" (sc/get-tooltip :open-inspect))]))
+         :share?   (boolean (some #{(tr "labels.share")} (labels)))
+         :edit?    (some? (.querySelector document (str "[aria-label=\"" (tr "labels.edit") "\"]")))}))))
+
+(t/deftest the-canvas-shows-no-sections-and-no-phone-edits
+  (t/is (= {:sections 0 :share? false :edit? false} (phone-sheet true))
+        "the canvas shows the page as it is")
+  (t/is (= {:sections 3 :share? true :edit? false} (phone-sheet false))
+        "the prototype its sections and share, but no edit"))

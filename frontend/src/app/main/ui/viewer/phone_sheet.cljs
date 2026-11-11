@@ -8,8 +8,8 @@
   "On a phone the view mode shows its board alone, no bars over it: two
   fingers held on it open a sheet from the bottom with what the bars hold
   elsewhere, the boards, the animation, the pages, the flows, how the
-  interactions show, the sections, edit and share; and the page as a
-  whole instead of a board, its canvas (see `app.main.ui.viewer.canvas`)."
+  interactions show, the sections and share; and the page as a whole
+  instead of a board, its canvas (see `app.main.ui.viewer.canvas`)."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
@@ -322,11 +322,11 @@
 (mf/defc phone-sheet*
   "The options of the view mode of a phone over the board `frame`, the
   `index`th of `page` of `file`, or over the canvas of the page
-  (`is-canvas`): the sections `permissions` allow, edit and share, the
-  canvas or the prototype where it `has-canvas`, its boards and its
-  animation (`timeline`, the controls of the view mode) in the
-  prototype, the pages of the file, then what the header holds in the
-  `section` shown: its flows and how its interactions show
+  (`is-canvas`): the sections `permissions` allow and share (in the
+  prototype only), the canvas or the prototype where it `has-canvas`,
+  its boards and its animation (`timeline`, the controls of the view
+  mode) in the prototype, the pages of the file, then what the header
+  holds in the `section` shown: its flows and how its interactions show
   (`interactions-mode`, in the prototype), or which comments show and
   their list. What changes the view closes it, but going to another
   section. `is-docked`, it stays at the bottom of the canvas, the switch
@@ -393,40 +393,37 @@
          (tr "labels.dashboard")]
         [:span {:class (stl/css :file-name)} (:name file)]])
 
-     ;; the sections, edit and share
-     [:div {:class (stl/css :row)}
-      [:> icon-button* {:variant "ghost"
-                        :aria-pressed (= section :interactions)
-                        :aria-label (tr "viewer.header.interactions-section" (sc/get-tooltip :open-interactions))
-                        :icon i/play
-                        :on-click #(go-to-section :interactions)}]
-      (when (or (:in-team permissions) (= (:who-comment permissions) "all"))
+     ;; the sections and share, of the prototype only: the canvas shows the
+     ;; page as it is. A phone edits not: no button for the workspace
+     (when-not (true? is-canvas)
+       [:div {:class (stl/css :row)}
         [:> icon-button* {:variant "ghost"
-                          :aria-pressed (= section :comments)
-                          :aria-label (tr "viewer.header.comments-section" (sc/get-tooltip :open-comments))
-                          :icon i/comments
-                          :on-click #(go-to-section :comments)}])
-      (when (or (:in-team permissions)
-                (and (= (:type permissions) :share-link)
-                     (= (:who-inspect permissions) "all")))
-        [:> icon-button* {:variant "ghost"
-                          :aria-pressed (= section :inspect)
-                          :aria-label (tr "viewer.header.inspect-section" (sc/get-tooltip :open-inspect))
-                          :icon i/code
-                          :on-click #(go-to-section :inspect)}])
-      [:span {:class (stl/css :gap)}]
-      (when (:in-team permissions)
-        [:> icon-button* {:variant "ghost"
-                          :aria-label (tr "labels.edit")
-                          :icon i/curve
-                          :on-click #(act! (dv/go-to-workspace (:id page)))}])
-      (when (:in-team permissions)
-        [:> button* {:variant "primary" :on-click open-share}
-         (tr "labels.share")])
-      (when-not (:is-logged permissions)
-        [:> button* {:variant "ghost"
-                     :on-click #(do (on-close) (header/open-login-dialog))}
-         (tr "labels.log-or-sign")])]
+                          :aria-pressed (= section :interactions)
+                          :aria-label (tr "viewer.header.interactions-section" (sc/get-tooltip :open-interactions))
+                          :icon i/play
+                          :on-click #(go-to-section :interactions)}]
+        (when (or (:in-team permissions) (= (:who-comment permissions) "all"))
+          [:> icon-button* {:variant "ghost"
+                            :aria-pressed (= section :comments)
+                            :aria-label (tr "viewer.header.comments-section" (sc/get-tooltip :open-comments))
+                            :icon i/comments
+                            :on-click #(go-to-section :comments)}])
+        (when (or (:in-team permissions)
+                  (and (= (:type permissions) :share-link)
+                       (= (:who-inspect permissions) "all")))
+          [:> icon-button* {:variant "ghost"
+                            :aria-pressed (= section :inspect)
+                            :aria-label (tr "viewer.header.inspect-section" (sc/get-tooltip :open-inspect))
+                            :icon i/code
+                            :on-click #(go-to-section :inspect)}])
+        [:span {:class (stl/css :gap)}]
+        (when (:in-team permissions)
+          [:> button* {:variant "primary" :on-click open-share}
+           (tr "labels.share")])
+        (when-not (:is-logged permissions)
+          [:> button* {:variant "ghost"
+                       :on-click #(do (on-close) (header/open-login-dialog))}
+           (tr "labels.log-or-sign")])])
 
      (when-not (true? is-docked)
        view-switch)
