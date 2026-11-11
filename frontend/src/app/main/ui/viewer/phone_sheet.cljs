@@ -28,6 +28,7 @@
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.viewer.header :as header]
+   [app.util.dom :as dom]
    [app.util.globals :as g]
    [app.util.i18n :refer [tr]]
    [app.util.storage :as storage]
@@ -248,8 +249,10 @@
   calls `on-close` (see `sheet-rest`). A tap beside it closes it too,
   which dims what it covers, unless `open-beside`: then what shows above
   it takes taps. `docked`, it starts at a third of the screen or so and
-  rests at a little of it instead of closing."
-  [{:keys [label height open-beside docked on-close children]}]
+  rests at a little of it instead of closing. `kept-height`, px, it
+  keeps that height, whatever it holds, until its grip drags it, which
+  calls `on-drag`."
+  [{:keys [label height open-beside docked on-close children kept-height on-drag]}]
   (let [resting*   (mf/use-state (if (true? docked) :start :low))
         resting    (deref resting*)
         drag*      (mf/use-state nil)
@@ -260,8 +263,9 @@
 
         on-drag-start
         (mf/use-fn
-         (mf/deps height resting docked)
+         (mf/deps height resting docked on-drag)
          (fn [^js event]
+           (when (fn? on-drag) (on-drag))
            (let [y       (.. event -touches (item 0) -clientY)
                  sheet   (mf/ref-val sheet-ref)
                  natural (+ (some-> sheet .-firstChild .-offsetHeight)
@@ -317,8 +321,9 @@
             :role "dialog"
             :aria-label label
             ;; a map literal: rumext passes only these to React as styles
-            :style {:block-size block-size
-                    :max-block-size (when (some? drag) "none")
+            :style {:block-size (or block-size
+                                    (when (some? kept-height) (dm/str kept-height "px")))
+                    :max-block-size (when (or (some? drag) (some? kept-height)) "none")
                     :transform transform
                     :transition (when (some? drag) "none")}}
       [:div {:class (stl/css :grip-zone)
@@ -362,9 +367,11 @@
   their list, the logo back to the dashboard with the project and the
   file, and the switch between the canvas and the prototype first.
   What changes the view closes it, but going to another section.
-  `is-docked`, it stays at the bottom of the canvas (see `sheet*`)."
+  `is-docked`, it stays at the bottom of the canvas (see `sheet*`). The
+  switch keeps it open, as high as it is: it calls `on-switch` first,
+  which keeps it shown in the other mode."
   [{:keys [page file project frame index permissions section interactions-mode timeline on-close
-           is-canvas has-canvas is-docked]}]
+           is-canvas has-canvas is-docked on-switch]}]
   (let [frames     (:frames page)
         total      (count frames)
         flows      (not-empty (:flows page))
@@ -392,6 +399,15 @@
           (modal/show! :share-link {:page page :file file})
           (modal/disallow-click-outside!))
 
+        ;; the height the sheet keeps going to the other mode, px
+        kept*      (mf/use-state nil)
+
+        switch-mode
+        (fn [value event]
+          (reset! kept* (some-> (dom/get-target event) (.closest "[role=dialog]") (.-offsetHeight)))
+          (when (fn? on-switch) (on-switch))
+          (st/emit! (if (= "canvas" value) dv/show-canvas (dv/go-to-frame-auto))))
+
         ;; the page as a whole, or its boards one by one
         view-switch
         (when (true? has-canvas)
@@ -399,7 +415,7 @@
            [:> radio-buttons* {:name "phone-view"
                                :extended true
                                :selected (if (true? is-canvas) "canvas" "prototype")
-                               :on-change #(act! (if (= "canvas" %) dv/show-canvas (dv/go-to-frame-auto)))
+                               :on-change switch-mode
                                :options [{:id "phone-view-canvas"
                                           :value "canvas"
                                           :label (tr "viewer.phone.canvas")}
@@ -410,6 +426,8 @@
     [:> sheet* {:label (tr "viewer.phone.options")
                 :docked (true? is-docked)
                 :open-beside (true? is-docked)
+                :kept-height (deref kept*)
+                :on-drag #(reset! kept* nil)
                 :on-close on-close}
      ;; the logo, back to the dashboard for the team, the project and the
      ;; file, as the header of the workspace shows them, which a phone

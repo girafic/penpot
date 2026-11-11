@@ -247,3 +247,16 @@
           (thd/act #(.dispatchEvent window (new (.-KeyboardEvent window) "keydown"
                                                 #js {:code "KeyO" :altKey true :bubbles true})))
           (t/is (= (if enabled? 1 0) @keys) (if enabled? "while enabled" "not while disabled")))))))
+
+(t/deftest a-sheet-keeps-a-height-until-its-grip-drags-it
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (let [dragged? (atom false)]
+        (thd/render! root (mf/element phone-sheet/sheet* #js {:label "Options"
+                                                              :keptHeight 200
+                                                              :onDrag #(reset! dragged? true)
+                                                              :onClose identity}))
+        (t/is (= "200px" (.. (.querySelector document "[role=dialog]") -style -blockSize))
+              "as high as it was, whatever it holds")
+        (thd/act #(touch! (.querySelector document "[class*=grip-zone]") "touchstart" [[100 400]]))
+        (t/is (true? @dragged?) "until its grip drags it")))))

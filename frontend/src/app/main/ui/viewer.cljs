@@ -712,6 +712,8 @@
         ;; the sheet of a phone, open (see `phone-sheet/phone-sheet*`)
         sheet*      (mf/use-state false)
         sheet?      (deref sheet*)
+        ;; the switch of the sheet went to the other mode, which keeps it
+        switched-ref (mf/use-ref false)
         overlays    (mf/deref current-overlays-ref)
         ;; where the view box of each overlay starts on the page (see
         ;; `vpc/prepare-objects`), for the wheel over its containers
@@ -1071,9 +1073,11 @@
     (phone-sheet/use-keyboard-inset! phone?)
 
     ;; the canvas has its sheet docked: going to a board or back, none
-    ;; opens by itself
+    ;; opens by itself, but by the switch of the sheet, which keeps it
     (mf/with-effect [canvas?]
-      (reset! sheet* false))
+      (if (mf/ref-val switched-ref)
+        (mf/set-ref-val! switched-ref false)
+        (reset! sheet* false)))
 
     ;; a phone scrolls the board itself, and it gives past an end as that
     ;; screen does, its fixed layers staying
@@ -1410,6 +1414,8 @@
         {:page page
          :file file
          :project project
+         :on-switch #(do (mf/set-ref-val! switched-ref true)
+                         (reset! sheet* true))
          :frame frame
          :index index
          :is-canvas canvas?
