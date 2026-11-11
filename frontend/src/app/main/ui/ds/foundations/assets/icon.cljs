@@ -353,10 +353,14 @@
         offset  (if (or (= size "s") (= size "m"))
                   (/ (- icon-size-m size-px) 2)
                   0)
+        box     (max icon-size-m size-px)
+        ;; the view box lets the styles draw it larger (on a phone, see
+        ;; icon.scss)
         props   (mf/spread-props props
                                  {:class [class (stl/css :icon)]
-                                  :width (max icon-size-m size-px)
-                                  :height (max icon-size-m size-px)})]
+                                  :viewBox (dm/str "0 0 " box " " box)
+                                  :width box
+                                  :height box})]
     [:> :svg props
      [:use {:href (dm/str "#icon-" icon-id)
             :x offset
