@@ -481,8 +481,9 @@
      (when (and (some? timeline) (not (true? is-canvas)))
        [:div {:class (stl/css :row)} timeline])
 
-     ;; the pages, the one shown in the mode it shows (see `dv/go-to-page`)
-     (when (> (count page-ids) 1)
+     ;; the pages, the one shown in the mode it shows (see `dv/go-to-page`),
+     ;; a lone one too: which page shows
+     (when (seq page-ids)
        [:ul {:class (stl/css :list)}
         (for [id page-ids]
           [:li {:key (dm/str id)}

@@ -182,8 +182,9 @@
 (defn- phone-sheet
   "What the options of a phone over the canvas (`canvas?`) or over a
   board of the prototype show to a member of the team: how many sections,
-  whether share and whether edit, and whether the switch between the
-  canvas and the prototype comes before the way back to the dashboard."
+  whether share and whether edit, whether the switch between the canvas
+  and the prototype comes before the way back to the dashboard, and
+  whether it lists the lone page of the file."
   [canvas?]
   (thd/with-dom
     (fn [{:keys [root document]}]
@@ -204,6 +205,7 @@
                                    (tr "viewer.header.inspect-section" (sc/get-tooltip :open-inspect))]))
          :share?   (boolean (some #{(tr "labels.share")} (labels)))
          :edit?    (some? (.querySelector document (str "[aria-label=\"" (tr "labels.edit") "\"]")))
+         :page?    (boolean (some #{"Page"} (labels)))
          :switch-first?
          (let [switch    (.querySelector document "input[name=phone-view]")
                dashboard (->> (.querySelectorAll document "button")
@@ -214,9 +216,9 @@
                 (pos? (bit-and (.compareDocumentPosition switch dashboard) 4))))}))))
 
 (t/deftest the-canvas-shows-no-sections-and-no-phone-edits
-  (t/is (= {:sections 0 :share? false :edit? false :switch-first? true} (phone-sheet true))
+  (t/is (= {:sections 0 :share? false :edit? false :switch-first? true :page? true} (phone-sheet true))
         "the canvas shows the page as it is")
-  (t/is (= {:sections 3 :share? true :edit? false :switch-first? true} (phone-sheet false))
+  (t/is (= {:sections 3 :share? true :edit? false :switch-first? true :page? true} (phone-sheet false))
         "the prototype its sections and share, but no edit, the switch first too"))
 
 (mf/defc keyer*
