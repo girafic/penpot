@@ -397,8 +397,48 @@
   (dvc/canvas-shown? (canvas-able? state) (rt/get-params state)))
 (declare preview-go)
 
+(defn- page-start
+  "What starts the page of the route in `state` the view mode shows, its
+  file fetched: the zoom of the route, the position data of its texts and
+  where it starts, the canvas of a phone or a board. In the preview of
+  the prototype, a board its page does not list (hidden in view mode, not
+  saved yet) is kept for a refresh to bring it (see `preview-go`) and it
+  starts where the view mode starts."
+  [state]
+  (let [qparams  (dm/get-in state [:route :query-params])
+        index    (some-> (rt/get-query-param qparams :index) parse-long)
+        frame-id (some-> (:frame-id qparams) uuid/parse)
+        page-id  (some-> (rt/get-query-param qparams :page-id) uuid/parse)
+        file-id  (some-> (rt/get-query-param qparams :file-id) uuid/parse)]
+    (rx/merge
+     (rx/of (case (:zoom qparams)
+              "fit"   zoom-to-fit
+              "fill"  zoom-to-fill
+              "width" zoom-to-width
+              (when (phone? state) zoom-to-width)))
+     (rx/of (update-page-position-data file-id page-id))
+     (cond
+       ;; a phone shows the page as a whole from a link to no
+       ;; board, a share link too: in the URL, without a step in the
+       ;; history; and no board while it shows
+       (canvas-start? state (rt/get-params state))
+       (rx/of (rt/nav :viewer (dvc/canvas-params (rt/get-params state)) {::rt/replace true}))
+
+       (canvas-shown? state)
+       (rx/empty)
+
+       (and (some? frame-id)
+            (preview? state)
+            (not (some #(= frame-id (:id %)) (preview-frames state))))
+       (rx/of (preview-go frame-id) (go-to-frame-auto))
+
+       (some? frame-id) (rx/of (go-to-frame frame-id))
+       (some? index)    (rx/of (go-to-frame-by-index index))
+       :else            (rx/of (go-to-frame-auto))))))
+
 (defn bundle-fetched
-  "The view mode showing `bundle`, at the board of the route. In the
+  "The view mode showing `bundle`, at the board of the route (see
+  `page-start`). In the
   preview of the prototype, a board its page does not list (hidden in
   view mode, not saved yet) is kept for a refresh to bring it (see
   `preview-go`) and it starts where the view mode starts."
@@ -417,49 +457,37 @@
 
     ptk/WatchEvent
     (watch [_ state _]
-      (let [route    (:route state)
-            qparams  (:query-params route)
-            index    (some-> (rt/get-query-param qparams :index) parse-long)
-            frame-id (some-> (:frame-id qparams) uuid/parse)
-            page-id (some-> (rt/get-query-param qparams :page-id) uuid/parse)
-            file-id (some-> (rt/get-query-param qparams :file-id) uuid/parse)]
+      (if (nil? (some-> (rt/get-query-param (dm/get-in state [:route :query-params]) :page-id) uuid/parse))
+        ;; the boards, the zoom and the links all go by the page of the
+        ;; URL: the first one goes in, without a step in the history,
+        ;; and on a phone the canvas of it
+        (let [params (assoc (rt/get-params state)
+                            :page-id (-> bundle :file :data :pages first))]
+          (rx/of (rt/nav :viewer
+                         (cond-> params
+                           (canvas-start? state params)
+                           (dvc/canvas-params))
+                         {::rt/replace true})))
+        (page-start state)))))
 
-        (if (nil? page-id)
-          ;; the boards, the zoom and the links all go by the page of the
-          ;; URL: the first one goes in, without a step in the history,
-          ;; and on a phone the canvas of it
-          (let [params (assoc (rt/get-params state)
-                              :page-id (-> bundle :file :data :pages first))]
-            (rx/of (rt/nav :viewer
-                           (cond-> params
-                             (canvas-start? state params)
-                             (dvc/canvas-params))
-                           {::rt/replace true})))
-          (rx/merge
-           (rx/of (case (:zoom qparams)
-                    "fit"   zoom-to-fit
-                    "fill"  zoom-to-fill
-                    "width" zoom-to-width
-                    (when (phone? state) zoom-to-width)))
-           (rx/of (update-page-position-data file-id page-id))
-           (cond
-             ;; a phone shows the page as a whole from a link to no
-             ;; board, a share link too: in the URL, without a step in the
-             ;; history; and no board while it shows
-             (canvas-start? state (rt/get-params state))
-             (rx/of (rt/nav :viewer (dvc/canvas-params (rt/get-params state)) {::rt/replace true}))
+(defn show-page
+  "The view mode at the page of the route, another one of the file it
+  shows (see `go-to-page`), or the first one of a link without a page:
+  started as `bundle-fetched` starts it, without fetching the file
+  again, which holds all its pages. The bundle of a link without a page
+  is done with then (see `initialize`). Nothing while another file
+  loads, which `bundle-fetched` starts."
+  []
+  (ptk/reify ::show-page
+    ptk/UpdateEvent
+    (update [_ state]
+      (dissoc state ::page-less-bundle))
 
-             (canvas-shown? state)
-             (rx/empty)
-
-             (and (some? frame-id)
-                  (preview? state)
-                  (not (some #(= frame-id (:id %)) (preview-frames state))))
-             (rx/of (preview-go frame-id) (go-to-frame-auto))
-
-             (some? frame-id) (rx/of (go-to-frame frame-id))
-             (some? index)    (rx/of (go-to-frame-by-index index))
-             :else            (rx/of (go-to-frame-auto)))))))))
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when (= (some-> (dm/get-in state [:route :query-params :file-id]) uuid/parse)
+               (dm/get-in state [:viewer :file :id]))
+        (page-start state)))))
 
 ;; --- The preview of a prototype in the workspace
 

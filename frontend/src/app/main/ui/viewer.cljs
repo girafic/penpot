@@ -1448,18 +1448,26 @@
 
 (mf/defc viewer*
   [{:keys [file-id share-id page-id preview follow] :as props}]
-  (mf/with-effect [file-id page-id share-id]
-    ;; a link without a page, as a tap on a file in the dashboard of a
-    ;; phone opens, gets the first one (see `dv/bundle-fetched`)
-    (let [params (d/without-nils {:file-id file-id
-                                  :page-id page-id
-                                  :share-id share-id})]
-      ;; before it shows a screen, which it then shows in its own history
-      (when preview
-        (st/emit! (dvp/start-preview)))
-      (st/emit! (dv/initialize params))
-      (fn []
-        (st/emit! (dv/finalize params)))))
+  (let [page-ref (mf/use-ref page-id)]
+    (mf/with-effect [file-id share-id]
+      ;; a link without a page, as a tap on a file in the dashboard of a
+      ;; phone opens, gets the first one (see `dv/bundle-fetched`)
+      (let [params (d/without-nils {:file-id file-id
+                                    :page-id (mf/ref-val page-ref)
+                                    :share-id share-id})]
+        ;; before it shows a screen, which it then shows in its own history
+        (when preview
+          (st/emit! (dvp/start-preview)))
+        (st/emit! (dv/initialize params))
+        (fn []
+          (st/emit! (dv/finalize params)))))
+
+    ;; another page of the file it shows, or the first one of a link
+    ;; without a page: the file holds them all, nothing fetched again
+    (mf/with-effect [page-id]
+      (when (not= page-id (mf/ref-val page-ref))
+        (mf/set-ref-val! page-ref page-id)
+        (st/emit! (dv/show-page)))))
 
   ;; live, on a phone: what is saved and the board selected in the
   ;; workspace (see `dvf/start`)

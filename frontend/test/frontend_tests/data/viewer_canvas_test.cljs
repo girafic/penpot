@@ -130,6 +130,19 @@
       (t/is (= (assoc query :page-id page-id)
                (:params (navigation (dv/bundle-fetched bundle) (viewer-state query :phone false))))))))
 
+(t/deftest another-page-shows-without-fetching-the-file-again
+  (let [loaded (fn [query] (assoc-in (viewer-state query) [:viewer :file :id] file-id))
+        types  (fn [state] (map ptk/type (watch-events (dv/show-page) state)))]
+    (t/testing "on the canvas"
+      (let [shown (types (loaded (assoc page-query :canvas "true")))]
+        (t/is (some #{::dv/update-page-position-data} shown) "its texts placed")
+        (t/is (not-any? #{::dv/fetch-bundle ::dv/bundle-fetched :app.main.router/navigate} shown)
+              "nothing fetched, nowhere else")))
+    (t/is (some #{::dv/go-to-frame-by-index} (types (loaded (assoc page-query :index "0"))))
+          "in the prototype, its first board")
+    (t/is (empty? (types (viewer-state page-query)))
+          "nothing while another file loads, which its bundle starts")))
+
 (t/deftest a-share-link-opens-the-canvas-of-a-phone
   (let [query  (assoc page-query :share-id "s" :index "0")
         events (watch-events (dv/bundle-fetched bundle) (viewer-state query))
