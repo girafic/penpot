@@ -6,7 +6,7 @@
 
 (ns app.main.data.viewer.canvas
   "The canvas of a phone: the page of a file in the view mode as a whole,
-  to move about and zoom, where a tap opens a board as the prototype.
+  to move about and zoom; the switch of its sheet goes to the prototype.
   The route says whether it shows (`canvas`): absent, the view mode
   decides as it starts (`starts-on-canvas?`); \"true\", the canvas;
   \"false\", the prototype, chosen on this phone, so that a reload stays
@@ -184,15 +184,6 @@
                  :y    (- (:y middle) (/ (:height screen) zoom 2))}
                 bounds screen)))
 
-(defn board-at
-  "The top-level board of `objects` under the `point` of the page, the
-  upper one where they overlap, or nil."
-  [objects point]
-  (->> (rseq (dm/get-in objects [uuid/zero :shapes] []))
-       (keep #(get objects %))
-       (filter cfh/frame-shape?)
-       (some #(when (gsh/has-point? % point) %))))
-
 (defn zoom-target
   "The board of `objects`, at any depth, a double tap at the `point` of
   the page zooms to at `view` on a `screen`: the largest one under it at
@@ -307,14 +298,3 @@
   canvas has in the workspace, else the default one there."
   [page]
   (get page :background clr/canvas))
-
-;; --- What a tap opens
-
-(defn board-to-open
-  "The board of the `page` a tap at the point of the page `point` opens as
-  the prototype: the top-level board under it that the view mode lists
-  (`:frames`), or nil. `objects`, what the canvas draws."
-  [page objects point]
-  (when-let [{:keys [id]} (board-at objects point)]
-    (when (some #(= id (:id %)) (:frames page))
-      id)))

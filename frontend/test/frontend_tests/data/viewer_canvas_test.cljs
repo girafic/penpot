@@ -312,29 +312,6 @@
     (t/is (close-point? (dvc/page-point view (gpt/point 187.5 406))
                         (dvc/page-point turned (gpt/point 406 187.5))))))
 
-(t/deftest a-tap-finds-the-top-level-board
-  (let [objects (dvc/canvas-objects page-objects)]
-    (t/is (= (:strip ids) (:id (dvc/board-at objects (gpt/point 300 250))))
-          "the strip, not the card in it")
-    (t/is (= (:screen ids) (:id (dvc/board-at objects (gpt/point 200 1330)))))
-    (t/is (nil? (dvc/board-at objects (gpt/point 4600 2500))) "nothing there")
-    (t/is (nil? (dvc/board-at objects (gpt/point 5100 100))) "a hidden board is not drawn"))
-  (t/testing "the upper of two boards"
-    (let [[a b] [(uuid/custom 6 2) (uuid/custom 6 3)]
-          objects {uuid/zero {:id uuid/zero :type :frame :shapes [a b]}
-                   a (shape a :frame 0 0 100 100)
-                   b (shape b :frame 50 50 100 100)}]
-      (t/is (= b (:id (dvc/board-at objects (gpt/point 75 75)))))))
-  (t/testing "a turned board by its shape"
-    (let [id      (uuid/custom 6 4)
-          objects {uuid/zero {:id uuid/zero :type :frame :shapes [id]}
-                   id (assoc (shape id :frame 0 0 100 10)
-                             :rotation 90
-                             :points [(gpt/point 55 -45) (gpt/point 55 55)
-                                      (gpt/point 45 55) (gpt/point 45 -45)])}]
-      (t/is (= id (:id (dvc/board-at objects (gpt/point 50 40)))))
-      (t/is (nil? (dvc/board-at objects (gpt/point 90 5)))))))
-
 (t/deftest a-double-tap-zooms-to-a-board-and-back
   (let [objects (dvc/canvas-objects page-objects)
         bounds  (dvc/content-bounds objects)
@@ -413,12 +390,3 @@
   (t/is (= "#1A1C24" (dvc/background {:background "#1A1C24"})) "the one its canvas is given")
   (t/is (= "#E8E9EA" (dvc/background {})) "else the default one there"))
 
-;; --- What a tap opens
-
-(t/deftest a-tap-opens-a-board-the-view-mode-lists
-  (let [objects (dvc/canvas-objects page-objects)
-        page    {:frames [{:id (:strip ids)}]}]
-    (t/is (= (:strip ids) (dvc/board-to-open page objects (gpt/point 300 250)))
-          "the strip, for a tap on the card in it")
-    (t/is (nil? (dvc/board-to-open page objects (gpt/point 200 1330))) "a board the view mode does not list")
-    (t/is (nil? (dvc/board-to-open page objects (gpt/point 4600 2500))) "nothing there")))

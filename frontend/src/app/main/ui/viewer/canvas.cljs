@@ -11,9 +11,9 @@
   `app.main.data.viewer.canvas`). A finger moves it, coasting on and
   giving as rubber past its edges as the screen of a board does (see
   `app.main.ui.viewer.drag-scroll`), two fingers zoom it about their
-  middle, a double tap zooms to a board and back, a tap opens the board
-  under it as the prototype; a wheel moves it and zooms it with ctrl, as
-  a trackpad does. Its boards show as designed, their names over them:
+  middle, a double tap zooms to a board and back, a tap alone does
+  nothing (the switch of the sheet goes to the prototype); a wheel moves
+  it and zooms it with ctrl, as a trackpad does. Its boards show as designed, their names over them:
   their animations play in the prototype."
   (:require-macros [app.main.style :as stl])
   (:require
@@ -22,10 +22,8 @@
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
    [app.common.uuid :as uuid]
-   [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.render-viewer-wasm :as rwv]
-   [app.main.store :as st]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.render-wasm.api :as wasm.api]
    [app.util.dom :as dom]
@@ -80,9 +78,9 @@
   view of `view-ref` (`{:page-id :screen :view}`) about what `live-ref`
   holds (`{:page :bounds :objects :render!}`): shown from the tiles in
   the cache while it moves (see `rwv/move-page-view`), rendered in full
-  by `render!` once it rests. A tap opens the board under it as the
-  prototype, once no second tap made it a double tap. The names of the
-  boards in `names-ref` move with it."
+  by `render!` once it rests. Two taps soon and near zoom to a board and
+  back (see `dvc/double-tap-view`). The names of the boards in
+  `names-ref` move with it."
   [canvas-ref names-ref view-ref live-ref]
   (mf/with-effect []
     (let [^js canvas (mf/ref-val canvas-ref)
@@ -91,20 +89,6 @@
           state      (volatile! {:pointers {}})
           raf        (volatile! nil)
           rest-timer (volatile! nil)
-          ;; the tap that opens a board unless a second one comes
-          tap*       (volatile! nil)
-
-          cancel-tap!
-          #(vreset! tap* nil)
-
-          ;; the board under a tap, as the prototype: a step in the
-          ;; history, the back gesture returns to the canvas
-          open-board!
-          (fn [point]
-            (let [{:keys [page objects]} (mf/ref-val live-ref)
-                  view (:view (mf/ref-val view-ref))]
-              (when-let [id (dvc/board-to-open page objects (dvc/page-point view point))]
-                (st/emit! (dv/go-to-frame id)))))
 
           get-view   #(:view (mf/ref-val view-ref))
           get-screen #(:screen (mf/ref-val view-ref))
@@ -208,7 +192,6 @@
           (fn [^js event]
             (when (some? (get-view))
               (.setPointerCapture canvas (.-pointerId event))
-              (cancel-tap!)
               (some-> @rest-timer js/clearTimeout)
               (let [stopped (stop-anim!)
                     pt      (point event)
@@ -281,16 +264,8 @@
                                                         (get-screen) (gpt/point (:x tap) (:y tap)))]
                           (vswap! state assoc :last-tap nil :anim {:kind :tween :from from :to to :t0 now})
                           (draw!))
-                        ;; on the frame after: a second tap the page was too
-                        ;; busy to take in time comes before it
-                        (let [token #js {}]
-                          (vswap! state assoc :last-tap tap)
-                          (vreset! tap* token)
-                          (js/setTimeout #(ts/raf (fn []
-                                                    (when (identical? token @tap*)
-                                                      (vreset! tap* nil)
-                                                      (open-board! start))))
-                                         dvc/double-tap-ms))))
+                        ;; the first of a double tap, maybe: alone it does nothing
+                        (vswap! state assoc :last-tap tap)))
 
                     :else
                     (let [view    (get-view)
@@ -351,8 +326,7 @@
         (.removeEventListener canvas "pointercancel" on-cancel)
         (.removeEventListener canvas "wheel" on-wheel #js {:passive false})
         (some-> @raf ts/cancel-af!)
-        (some-> @rest-timer js/clearTimeout)
-        (cancel-tap!)))))
+        (some-> @rest-timer js/clearTimeout)))))
 
 (mf/defc canvas-viewport*
   "The `page` as a whole on a screen of `size` (`{:width :height}`, CSS
