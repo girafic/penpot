@@ -1098,6 +1098,12 @@ a {
   align-items: flex-start;
 }
 
+// the upload button over the team image stacks only above that image, not
+// above the drawer, which shares its z-index and comes before it
+[data-phone="true"] .team-icon {
+  isolation: isolate;
+}
+
 [data-phone="true"] .block-text {
   overflow-wrap: anywhere;
   text-wrap: wrap;
