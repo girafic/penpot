@@ -155,8 +155,6 @@
   }
 }
 
-// a phone: the name of a project before its actions, which it shows with
-// no pointer over them, and an arrow alone to all of its files
 // on a phone as high as what it holds: the page scrolls it (see
 // `.dashboard-content`); as wide as the screen, whose width sets how many
 // files a row holds
@@ -171,6 +169,8 @@
   margin-block-end: var(--sp-s);
 }
 
+// a phone: the name of a project before its actions, which it shows with
+// no pointer over them, and an arrow alone to all of its files
 [data-phone="true"] .project {
   padding-inline-start: var(--sp-s);
 }
@@ -254,5 +254,35 @@
   @media (width <= 1200px) {
     display: none;
     inline-size: 0;
+  }
+}
+
+// the team hero on a phone: its title, its text (which the rule of
+// `.info` for narrow screens would hide) and its button evenly apart, its
+// close button in the corner, clear of the text
+[data-phone="true"] .team-hero {
+  margin: var(--sp-l) var(--sp-l) 0;
+  padding: 0;
+
+  .text {
+    gap: var(--sp-m);
+    padding: var(--sp-l) calc(var(--sp-l) + #{$sz-32}) var(--sp-l) var(--sp-l);
+  }
+
+  .title {
+    font-size: px2rem(20);
+    line-height: 1.2;
+  }
+
+  .info {
+    @include t.use-typography("body-medium");
+
+    display: block;
+    padding: 0;
+  }
+
+  .close {
+    top: var(--sp-s);
+    right: var(--sp-s);
   }
 }
