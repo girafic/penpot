@@ -125,8 +125,14 @@
      [:div {:class (stl/css :image-change-field)}
       [:button {:type "button"
                 :class (stl/css :update-overlay)
+                :aria-label (tr "labels.update")
                 :on-click on-image-click}
-       (tr "labels.update")]
+       [:span {:class (stl/css :update-label)}
+        (tr "labels.update")]
+       ;; a phone shows this icon as a badge instead of the label
+       [:> icon* {:icon-id i/img
+                  :size "m"
+                  :class (stl/css :update-icon)}]]
       [:img {:class (stl/css :avatar-image)
              :src photo}]
       (when has-photo?

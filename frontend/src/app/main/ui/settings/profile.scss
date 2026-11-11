@@ -78,8 +78,8 @@
 
 // on a phone a smaller avatar
 [data-phone="true"] .avatar-form {
-  inline-size: $sz-96;
-  block-size: $sz-96;
+  inline-size: $sz-64;
+  block-size: $sz-64;
 }
 
 .avatar-image {
@@ -133,15 +133,9 @@
   }
 }
 
-// the line height above fits the 148px circle only: in the smaller one of
-// a phone a flex row centers a smaller label
-[data-phone="true"] .update-overlay {
-  @include use-typography("title-small");
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
+// shown on a phone only
+.update-icon {
+  display: none;
 }
 
 .delete-overlay {
@@ -169,6 +163,56 @@
   &:hover {
     --delete-overlay-background-color: var(--color-background-quaternary);
     --delete-overlay-foreground-color: var(--color-accent-primary);
+  }
+}
+
+// a finger hovers not: on a phone the update button keeps the image to be
+// seen and shows an icon as a badge at its bottom right corner instead of
+// its label (a tap anywhere on the image still opens the files), the
+// delete button a badge at the top right corner; their layers stack only
+// above the image, not above the drawer, which shares their z-index and
+// comes before them
+[data-phone="true"] .avatar-form .image-change-field {
+  isolation: isolate;
+
+  .update-overlay {
+    opacity: 1;
+    background: none;
+  }
+
+  .update-label {
+    display: none;
+  }
+
+  .update-overlay .update-icon {
+    display: block;
+    position: absolute;
+    inset-block-end: calc(-1 * var(--sp-xxs));
+    inset-inline-end: calc(-1 * var(--sp-xxs));
+    box-sizing: border-box;
+    inline-size: $sz-24;
+    block-size: $sz-24;
+    padding: var(--sp-xs);
+    border-radius: $br-circle;
+    background-color: var(--color-accent-primary);
+    box-shadow: 0 0 0 $b-2 var(--color-background-primary);
+    color: var(--color-background-secondary);
+  }
+
+  .delete-overlay {
+    --delete-overlay-background-color: var(--color-background-tertiary);
+
+    opacity: 1;
+    inset-block-start: calc(-1 * var(--sp-xxs));
+    inset-inline-end: calc(-1 * var(--sp-xxs));
+    inline-size: $sz-24;
+    block-size: $sz-24;
+    box-shadow: 0 0 0 $b-2 var(--color-background-primary);
+  }
+
+  .delete-overlay svg {
+    inline-size: $sz-16;
+    block-size: $sz-16;
   }
 }
 
