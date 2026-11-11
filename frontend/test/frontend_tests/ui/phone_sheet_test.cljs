@@ -182,9 +182,10 @@
 (defn- phone-sheet
   "What the options of a phone over the canvas (`canvas?`) or over a
   board of the prototype show to a member of the team: how many sections,
-  whether share and whether edit, whether the switch between the canvas
-  and the prototype comes before the way back to the dashboard, and
-  whether it lists the lone page of the file."
+  whether share and whether edit, whether the logo back to the dashboard
+  and the names of the project and the file come before the switch
+  between the canvas and the prototype, and whether it lists the lone
+  page of the file."
   [canvas?]
   (thd/with-dom
     (fn [{:keys [root document]}]
@@ -194,7 +195,8 @@
             file    {:name "File" :data {:pages [page-id] :pages-index {page-id {:name "Page"}}}}
             labels  (fn [] (map #(.-textContent %) (.querySelectorAll document "button")))]
         (thd/render! root (mf/element phone-sheet/phone-sheet*
-                                      #js {:page page :file file :frame frame :index 0
+                                      #js {:page page :file file :project {:name "Project"}
+                                           :frame frame :index 0
                                            :permissions {:in-team true :is-logged true}
                                            :section :interactions
                                            :onClose identity
@@ -206,20 +208,19 @@
          :share?   (boolean (some #{(tr "labels.share")} (labels)))
          :edit?    (some? (.querySelector document (str "[aria-label=\"" (tr "labels.edit") "\"]")))
          :page?    (boolean (some #{"Page"} (labels)))
-         :switch-first?
+         :names-first?
          (let [switch    (.querySelector document "input[name=phone-view]")
-               dashboard (->> (.querySelectorAll document "button")
-                              (filter #(= (tr "labels.dashboard") (.-textContent %)))
-                              (first))]
-           (and (some? switch) (some? dashboard)
-                ;; 4, DOCUMENT_POSITION_FOLLOWING: the dashboard after it
-                (pos? (bit-and (.compareDocumentPosition switch dashboard) 4))))}))))
+               dashboard (.querySelector document (str "button[aria-label=\"" (tr "labels.dashboard") "\"]"))
+               names     (some-> dashboard .-nextSibling .-textContent)]
+           (and (some? switch) (= "ProjectFile" names)
+                ;; 2, DOCUMENT_POSITION_PRECEDING: the dashboard before it
+                (pos? (bit-and (.compareDocumentPosition switch dashboard) 2))))}))))
 
 (t/deftest the-canvas-shows-no-sections-and-no-phone-edits
-  (t/is (= {:sections 0 :share? false :edit? false :switch-first? true :page? true} (phone-sheet true))
+  (t/is (= {:sections 0 :share? false :edit? false :names-first? true :page? true} (phone-sheet true))
         "the canvas shows the page as it is")
-  (t/is (= {:sections 3 :share? true :edit? false :switch-first? true :page? true} (phone-sheet false))
-        "the prototype its sections and share, but no edit, the switch first too"))
+  (t/is (= {:sections 3 :share? true :edit? false :names-first? true :page? true} (phone-sheet false))
+        "the prototype its sections and share, but no edit, the logo and the names first too"))
 
 (mf/defc keyer*
   {::mf/private true}

@@ -1409,6 +1409,7 @@
        [:> phone-sheet/phone-sheet*
         {:page page
          :file file
+         :project project
          :frame frame
          :index index
          :is-canvas canvas?

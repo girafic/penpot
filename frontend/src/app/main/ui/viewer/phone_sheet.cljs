@@ -25,6 +25,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
+   [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.viewer.header :as header]
    [app.util.globals :as g]
@@ -351,17 +352,18 @@
 
 (mf/defc phone-sheet*
   "The options of the view mode of a phone over the board `frame`, the
-  `index`th of `page` of `file`, or over the canvas of the page
+  `index`th of `page` of `file` of `project`, or over the canvas of the page
   (`is-canvas`): the sections `permissions` allow and share (in the
   prototype only), the canvas or the prototype where it `has-canvas`,
   its boards and its animation (`timeline`, the controls of the view
   mode) in the prototype, the pages of the file, then what the header
   holds in the `section` shown: its flows and how its interactions show
   (`interactions-mode`, in the prototype), or which comments show and
-  their list, the switch between the canvas and the prototype first.
+  their list, the logo back to the dashboard with the project and the
+  file, and the switch between the canvas and the prototype first.
   What changes the view closes it, but going to another section.
   `is-docked`, it stays at the bottom of the canvas (see `sheet*`)."
-  [{:keys [page file frame index permissions section interactions-mode timeline on-close
+  [{:keys [page file project frame index permissions section interactions-mode timeline on-close
            is-canvas has-canvas is-docked]}]
   (let [frames     (:frames page)
         total      (count frames)
@@ -409,20 +411,25 @@
                 :docked (true? is-docked)
                 :open-beside (true? is-docked)
                 :on-close on-close}
-     ;; the switch first, in the prototype as on the canvas, where the
-     ;; docked sheet shows it at its little height
-     view-switch
+     ;; the logo, back to the dashboard for the team, the project and the
+     ;; file, as the header of the workspace shows them, which a phone
+     ;; shows no header for
+     [:div {:class (stl/css :row :file-row)}
+      (if (:in-team permissions)
+        [:button {:type "button"
+                  :class (stl/css :logo)
+                  :aria-label (tr "labels.dashboard")
+                  :on-click #(act! (dv/go-to-dashboard))}
+         deprecated-icon/logo-icon]
+        [:span {:class (stl/css :logo)} deprecated-icon/logo-icon])
+      [:div {:class (stl/css :names)}
+       (when (some? project)
+         [:span {:class (stl/css :project-name)} (:name project)])
+       [:span {:class (stl/css :file-name)} (:name file)]]]
 
-     ;; back to the dashboard, as the logo of the header goes for the
-     ;; team, and the file, which a phone shows no header for
-     (when (:in-team permissions)
-       [:div {:class (stl/css :row)}
-        [:> button* {:variant "ghost"
-                     :class (stl/css :back)
-                     :icon i/arrow-left
-                     :on-click #(act! (dv/go-to-dashboard))}
-         (tr "labels.dashboard")]
-        [:span {:class (stl/css :file-name)} (:name file)]])
+     ;; then the switch, in the prototype as on the canvas, where the
+     ;; docked sheet shows both at its little height
+     view-switch
 
      ;; the sections and share, of the prototype only: the canvas shows the
      ;; page as it is. A phone edits not: no button for the workspace

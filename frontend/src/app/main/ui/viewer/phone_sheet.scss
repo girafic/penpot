@@ -125,10 +125,44 @@
   min-block-size: $sz-32;
 }
 
-// the way back to the dashboard, its arrow at the start of the sheet as
-// the switch, the sections and the pages: its padding out to the left
-.back {
-  margin-inline-start: calc(-1 * var(--sp-m));
+// the logo, back to the dashboard, the project above the file, as the
+// header of the workspace shows them
+.file-row {
+  gap: var(--sp-s);
+}
+
+.logo {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  align-items: center;
+  inline-size: $sz-32;
+  block-size: $sz-32;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+
+  // brand art from the legacy icon set, without a class
+  svg {
+    inline-size: $sz-32;
+    block-size: $sz-32;
+    fill: var(--color-foreground-primary);
+  }
+}
+
+.names {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  min-inline-size: 0;
+}
+
+.project-name {
+  @include use-typography("headline-small");
+  @include text-ellipsis;
+
+  color: var(--color-foreground-secondary);
 }
 
 .board-name {
@@ -140,13 +174,10 @@
 }
 
 .file-name {
-  @include use-typography("body-small");
+  @include use-typography("title-small");
   @include text-ellipsis;
 
-  flex: 1;
-  min-inline-size: 0;
-  color: var(--color-foreground-secondary);
-  text-align: end;
+  color: var(--color-foreground-primary);
 }
 
 .counter {
