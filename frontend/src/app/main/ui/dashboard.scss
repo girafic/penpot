@@ -48,6 +48,13 @@
   overflow: visible;
 }
 
+// and gives as rubber at its ends, as a website does (the view mode
+// does not, see viewer.scss)
+:global(html):has(.dashboard[data-phone="true"]),
+:global(body):has(.dashboard[data-phone="true"]) {
+  overscroll-behavior: auto;
+}
+
 [data-phone="true"] .dashboard-content {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr;
