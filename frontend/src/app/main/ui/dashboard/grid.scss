@@ -273,12 +273,6 @@ $thumbnail-default-height: px2rem(168);
   display: contents;
 }
 
-// on a phone the last files scroll clear of the bar of the browser,
-// which floats over the bottom of the page on iOS 26
-[data-phone="true"] .dashboard-grid {
-  padding-block-end: calc(env(safe-area-inset-bottom) + #{px2rem(96)});
-}
-
 [data-phone="true"] .list-item-text {
   align-items: center;
   column-gap: var(--sp-s);

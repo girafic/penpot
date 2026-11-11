@@ -45,3 +45,12 @@
     height: deprecated.$s-32;
   }
 }
+
+// on a phone as high as what it holds: the page scrolls it (see
+// `.dashboard-content`); as wide as the screen, whose width sets how many
+// files a row holds
+[data-phone="true"] .dashboard-container {
+  flex: 0 0 auto;
+  min-inline-size: 0;
+  overflow: clip visible;
+}

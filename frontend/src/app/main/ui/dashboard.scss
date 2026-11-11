@@ -54,5 +54,5 @@
   grid-row: 1;
   grid-column: 1;
   overflow: visible;
-  padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  padding: 0 env(safe-area-inset-right) calc(env(safe-area-inset-bottom) + #{px2rem(96)}) env(safe-area-inset-left);
 }

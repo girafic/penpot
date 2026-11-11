@@ -57,14 +57,12 @@
   grid-row: 1;
   grid-column: 1;
   min-inline-size: 0;
-  padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  padding: 0 env(safe-area-inset-right) calc(env(safe-area-inset-bottom) + #{px2rem(96)}) env(safe-area-inset-left);
 }
 
-// as high as what it holds, the page scrolling it; its end clear of the
-// bar of the browser
+// as high as what it holds, the page scrolling it
 [data-phone="true"] .dashboard-container {
   flex: 0 0 auto;
   margin-inline-end: 0;
   overflow: visible;
-  padding-block-end: calc(env(safe-area-inset-bottom) + #{px2rem(96)});
 }
