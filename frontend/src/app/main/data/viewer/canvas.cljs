@@ -123,17 +123,15 @@
 
 (defn- clamp-axis
   "Where the screen starts along an axis, `at`, over `content` (`[from
-  size]`) it shows `visible` of: the content as far as an edge of the
-  screen, or in its middle when smaller than it."
+  size]`) it shows `visible` of: an edge of the content as far as the
+  middle of the screen, so that it moves past the content half a screen
+  each way."
   [at [from size] visible]
-  (if (<= size visible)
-    (- from (/ (- visible size) 2))
-    (mth/clamp at from (- (+ from size) visible))))
+  (mth/clamp at (- from (/ visible 2)) (- (+ from size) (/ visible 2))))
 
 (defn clamp-view
   "The `view` within the zooms of the canvas of `bounds` on a `screen`,
-  the content as far as its edges, or in the middle along an axis where
-  it is smaller than the screen."
+  an edge of the content as far as the middle of the screen."
   [{:keys [zoom x y]} bounds screen]
   (let [[lo hi] (zoom-range bounds screen)
         zoom    (mth/clamp zoom lo hi)]

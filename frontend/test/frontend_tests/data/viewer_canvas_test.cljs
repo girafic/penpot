@@ -259,7 +259,7 @@
     (t/is (mth/close? 0.083 zoom 1e-3))
     (t/is (= [0 0] [x y]) "from its top left corner")))
 
-(t/deftest a-small-content-starts-in-the-middle
+(t/deftest a-small-content-starts-as-wide-as-the-screen
   (let [bounds (grc/make-rect 0 0 50 50)
         [lo hi] (dvc/zoom-range bounds phone-screen)
         {:keys [zoom x y]} (dvc/initial-view bounds phone-screen)]
@@ -267,20 +267,21 @@
     (t/is (= [3.75 7.5] [lo hi]))
     (t/is (= 7.5 zoom))
     (t/is (= 0 x) "as wide as the screen")
-    (t/is (mth/close? (- (/ (- (/ 812 7.5) 50) 2)) y 1e-9) "in the middle from top to bottom")
+    (t/is (mth/close? (- 50 (/ 812 7.5 2)) y 1e-9) "its bottom at the middle of the screen, as far as it goes")
     (t/is (= 3.75 (:zoom (dvc/clamp-view {:zoom 1 :x 0 :y 0} bounds phone-screen))))))
 
-(t/deftest the-view-stays-over-the-content
+(t/deftest the-view-moves-past-the-content-half-a-screen
   (let [bounds (grc/make-rect 0 0 4520 21760)
         start  (/ 375 4520)]
     (t/is (= dvc/max-zoom (:zoom (dvc/clamp-view {:zoom 1000 :x 0 :y 0} bounds phone-screen))))
     (t/is (mth/close? (/ start 2) (:zoom (dvc/clamp-view {:zoom 1e-6 :x 0 :y 0} bounds phone-screen)) 1e-9))
     (let [{:keys [x y]} (dvc/clamp-view {:zoom 1 :x 1e9 :y -1e9} bounds phone-screen)]
-      (t/is (= (- 4520 375) x) "its right edge at the right of the screen")
-      (t/is (= 0 y) "its top at the top"))
-    (t/testing "zoomed out, in the middle"
-      (let [{:keys [x]} (dvc/clamp-view {:zoom (/ start 2) :x 1e9 :y 0} bounds phone-screen)]
-        (t/is (mth/close? (- (/ 4520 2)) x 1e-6))))))
+      (t/is (= (- 4520 (/ 375 2)) x) "its right edge at the middle of the screen")
+      (t/is (= (- (/ 812 2)) y) "its top at the middle"))
+    (t/testing "at the start view, sideways too"
+      (let [view (dvc/initial-view bounds phone-screen)]
+        (t/is (mth/close? (- (/ 4520 2)) (:x (dvc/clamp-view (assoc view :x -1e9) bounds phone-screen)) 1e-6))
+        (t/is (mth/close? (/ 4520 2) (:x (dvc/clamp-view (assoc view :x 1e9) bounds phone-screen)) 1e-6))))))
 
 (t/deftest a-zoom-keeps-the-point-under-the-fingers
   (let [view  {:zoom 0.1 :x 300 :y 2000}
@@ -346,8 +347,9 @@
 (t/deftest how-far-a-view-is-past-the-edges
   (let [bounds (grc/make-rect 0 0 4520 21760)]
     (t/is (= [0 0] (dvc/overshoot {:zoom 1 :x 100 :y 100} bounds phone-screen)))
-    (t/is (= [-50 0] (dvc/overshoot {:zoom 0.5 :x -100 :y 0} bounds phone-screen)) "past the left, in px")
-    (t/is (= [0 30] (dvc/overshoot {:zoom 1 :x 0 :y (+ (- 21760 812) 30)} bounds phone-screen))
+    (t/is (= [0 0] (dvc/overshoot {:zoom 0.5 :x -100 :y 0} bounds phone-screen)) "within half a screen")
+    (t/is (= [-50 0] (dvc/overshoot {:zoom 0.5 :x -475 :y 0} bounds phone-screen)) "past the left, in px")
+    (t/is (= [0 30] (dvc/overshoot {:zoom 1 :x 0 :y (+ (- 21760 406) 30)} bounds phone-screen))
           "past the bottom")))
 
 (t/deftest the-speed-fingers-let-go-at
@@ -386,9 +388,9 @@
   (let [bounds (grc/make-rect 0 0 4520 21760)
         inside {:zoom 1 :x 100 :y 100}]
     (t/is (= inside (uvc/shown-view inside bounds phone-screen)) "within the edges, as it is")
-    (let [{:keys [y]} (uvc/shown-view {:zoom 1 :x 100 :y -200} bounds phone-screen)]
-      (t/is (< -200 y 0) "dragged 200 px past the top, it gives less")
-      (t/is (< y (:y (uvc/shown-view {:zoom 1 :x 100 :y -100} bounds phone-screen)))
+    (let [{:keys [y]} (uvc/shown-view {:zoom 1 :x 100 :y -606} bounds phone-screen)]
+      (t/is (< -606 y -406) "dragged 200 px past the top, it gives less")
+      (t/is (< y (:y (uvc/shown-view {:zoom 1 :x 100 :y -506} bounds phone-screen)))
             "and more the further"))))
 
 ;; --- What a tap opens
