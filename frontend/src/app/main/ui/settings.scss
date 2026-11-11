@@ -38,11 +38,20 @@
 
 // a phone shows the page alone, as wide as its screen, below its notch;
 // the sidebar comes over it from the left as a drawer (see
-// `app.main.ui.dashboard.phone-drawer`)
+// `app.main.ui.dashboard.phone-drawer`). It runs under the bars of the
+// browser, as the dashboard does: as high as the screen, the page itself
+// never scrolls
 .dashboard[data-phone="true"] {
   grid-template-columns: 100%;
   grid-template-rows: 100%;
-  block-size: 100dvh;
+  block-size: 100lvh;
+}
+
+:global(html):has(.dashboard[data-phone="true"]),
+:global(body):has(.dashboard[data-phone="true"]),
+:global(#app):has(.dashboard[data-phone="true"]) {
+  block-size: 100lvh;
+  overflow: hidden;
 }
 
 [data-phone="true"] .dashboard-content {
@@ -52,7 +61,8 @@
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
 }
 
+// what scrolls ends clear of the bar of the browser
 [data-phone="true"] .dashboard-container {
   margin-inline-end: 0;
-  padding-block-end: env(safe-area-inset-bottom);
+  padding-block-end: calc(env(safe-area-inset-bottom) + #{px2rem(96)});
 }

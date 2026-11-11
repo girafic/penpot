@@ -30,11 +30,21 @@
 
 // a phone shows the content alone, as wide as its screen, below its
 // notch; the sidebar comes over it from the left as a drawer (see
-// `app.main.ui.dashboard.phone-drawer`)
+// `app.main.ui.dashboard.phone-drawer`). It runs under the bars of the
+// browser, which float over it on iOS 26, as high as the screen; the
+// page itself never scrolls, what scrolls ends clear of them (see
+// `.dashboard-grid`)
 .dashboard[data-phone="true"] {
   grid-template-columns: 100%;
   grid-template-rows: 100%;
-  block-size: 100dvh;
+  block-size: 100lvh;
+}
+
+:global(html):has(.dashboard[data-phone="true"]),
+:global(body):has(.dashboard[data-phone="true"]),
+:global(#app):has(.dashboard[data-phone="true"]) {
+  block-size: 100lvh;
+  overflow: hidden;
 }
 
 [data-phone="true"] .dashboard-content {
