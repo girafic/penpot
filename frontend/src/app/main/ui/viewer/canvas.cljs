@@ -13,12 +13,15 @@
   `app.main.ui.viewer.drag-scroll`), two fingers zoom it about their
   middle, a double tap zooms to a board and back, a tap opens the board
   under it as the prototype; a wheel moves it and zooms it with ctrl, as
-  a trackpad does. Its boards show as designed: their animations play
-  in the prototype."
+  a trackpad does. Its boards show as designed, their names over them:
+  their animations play in the prototype."
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
+   [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.render-viewer-wasm :as rwv]
@@ -62,14 +65,25 @@
   [e]
   (- 1 (mth/pow (- 1 e) 3)))
 
+(defn- place-names!
+  "Move the names of the boards in `names` (see `canvas-viewport*`) with
+  the `view`: they keep their size at any zoom."
+  [^js names {:keys [zoom x y]}]
+  (when (some? names)
+    (let [style (.-style names)]
+      (.setProperty style "--zoom" zoom)
+      (.setProperty style "--view-x" x)
+      (.setProperty style "--view-y" y))))
+
 (defn- use-gestures!
   "The fingers, a wheel and a trackpad on `canvas-ref` move and zoom the
   view of `view-ref` (`{:page-id :screen :view}`) about what `live-ref`
   holds (`{:page :bounds :objects :render!}`): shown from the tiles in
   the cache while it moves (see `rwv/move-page-view`), rendered in full
   by `render!` once it rests. A tap opens the board under it as the
-  prototype, once no second tap made it a double tap."
-  [canvas-ref view-ref live-ref]
+  prototype, once no second tap made it a double tap. The names of the
+  boards in `names-ref` move with it."
+  [canvas-ref names-ref view-ref live-ref]
   (mf/with-effect []
     (let [^js canvas (mf/ref-val canvas-ref)
           ;; the fingers down (`{id point}`), what they do (`:pan`,
@@ -99,12 +113,14 @@
 
           show!
           (fn [view]
+            (place-names! (mf/ref-val names-ref) view)
             (rwv/move-page-view canvas (:zoom view) (dvc/view-box view (get-screen))))
 
           ;; at rest, within the edges, in full
           rest!
           (fn []
             (set-view! (dvc/clamp-view (get-view) (get-bounds) (get-screen)))
+            (place-names! (mf/ref-val names-ref) (get-view))
             ((:render! (mf/ref-val live-ref))))
 
           end-anim!
@@ -345,8 +361,17 @@
   `on-drawn` once it shows (and `data-canvas-drawn` on the canvas)."
   [{:keys [page size on-drawn]}]
   (let [canvas-ref (mf/use-ref nil)
+        names-ref  (mf/use-ref nil)
         page-id    (:id page)
         objects    (mf/with-memo [page] (dvc/canvas-objects (:objects page)))
+        ;; the top-level boards it draws, named over them
+        boards     (mf/with-memo [objects]
+                     (into []
+                           (keep (fn [id]
+                                   (let [shape (get objects id)]
+                                     (when (cfh/frame-shape? shape)
+                                       shape))))
+                           (dm/get-in objects [uuid/zero :shapes])))
         bounds     (mf/with-memo [objects] (dvc/content-bounds objects))
         width      (:width size 0)
         height     (:height size 0)
@@ -380,12 +405,22 @@
                        (dvc/resize-view (:view prev) (:screen prev) screen bounds)
                        (dvc/initial-view bounds screen))]
           (mf/set-ref-val! view-ref {:page-id page-id :screen screen :view view})
+          (place-names! (mf/ref-val names-ref) view)
           (render!))))
 
-    (use-gestures! canvas-ref view-ref live-ref)
+    (use-gestures! canvas-ref names-ref view-ref live-ref)
 
-    [:canvas {:ref canvas-ref
-              :class (stl/css :canvas)
-              :data-dpr dpr
-              :width (mth/round (* width dpr))
-              :height (mth/round (* height dpr))}]))
+    [:div {:class (stl/css :canvas-viewport)}
+     [:canvas {:ref canvas-ref
+               :class (stl/css :canvas)
+               :data-dpr dpr
+               :width (mth/round (* width dpr))
+               :height (mth/round (* height dpr))}]
+     [:div {:ref names-ref :class (stl/css :names) :aria-hidden true}
+      (for [{:keys [id name selrect]} boards]
+        [:span {:key (dm/str id)
+                :class (stl/css :name)
+                :style #js {"--board-x" (:x selrect)
+                            "--board-y" (:y selrect)
+                            "--board-width" (:width selrect)}}
+         name])]]))

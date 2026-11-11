@@ -139,11 +139,17 @@
      :x    (clamp-axis x [(:x bounds) (:width bounds)] (/ (:width screen) zoom))
      :y    (clamp-axis y [(:y bounds) (:height bounds)] (/ (:height screen) zoom))}))
 
+(def ^:private names-inset
+  "How far, px of the screen, the start view shows above the content: the
+  names of its top boards show there."
+  24)
+
 (defn initial-view
   "The view the canvas of `bounds` starts at on a `screen`: as wide as
-  it, from the top."
+  it, from the top, the names of the top boards above it."
   [bounds screen]
-  (clamp-view {:zoom (start-zoom bounds screen) :x (:x bounds) :y (:y bounds)} bounds screen))
+  (let [zoom (start-zoom bounds screen)]
+    (clamp-view {:zoom zoom :x (:x bounds) :y (- (:y bounds) (/ names-inset zoom))} bounds screen)))
 
 (defn view-box
   "The rect of the page that `view` shows on a `screen`."

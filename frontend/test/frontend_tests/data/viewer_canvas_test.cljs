@@ -257,7 +257,8 @@
         {:keys [zoom x y]} (dvc/initial-view bounds phone-screen)]
     (t/is (mth/close? (/ 375 4520) zoom 1e-9))
     (t/is (mth/close? 0.083 zoom 1e-3))
-    (t/is (= [0 0] [x y]) "from its top left corner")))
+    (t/is (= 0 x) "from its left edge")
+    (t/is (mth/close? (- (/ 24 zoom)) y 1e-6) "the names of the top boards above it")))
 
 (t/deftest a-small-content-starts-as-wide-as-the-screen
   (let [bounds (grc/make-rect 0 0 50 50)
