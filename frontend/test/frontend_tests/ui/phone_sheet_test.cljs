@@ -209,3 +209,29 @@
         "the canvas shows the page as it is")
   (t/is (= {:sections 3 :share? true :edit? false} (phone-sheet false))
         "the prototype its sections and share, but no edit"))
+
+(mf/defc keyer*
+  {::mf/private true}
+  [{:keys [is-enabled on-key]}]
+  (phone-sheet/use-sheet-key! is-enabled on-key)
+  [:div])
+
+(t/deftest alt-o-opens-and-closes-the-sheet-on-a-desktop
+  (let [key (fn [props] (phone-sheet/sheet-key? (js/Object.assign #js {:code "KeyO" :altKey true
+                                                                       :target #js {:tagName "DIV"}}
+                                                                  props)))]
+    (t/is (true? (key #js {})) "Alt+O")
+    (t/is (false? (key #js {:altKey false})) "O alone")
+    (t/is (false? (key #js {:metaKey true})) "with Cmd")
+    (t/is (false? (key #js {:ctrlKey true})) "with Ctrl")
+    (t/is (false? (key #js {:code "KeyP"})) "another key")
+    (t/is (false? (key #js {:target #js {:tagName "TEXTAREA"}})) "in a field it types")
+    (t/is (false? (key #js {:target #js {:tagName "DIV" :isContentEditable true}})) "in a text it types"))
+  (doseq [enabled? [true false]]
+    (thd/with-dom
+      (fn [{:keys [root window]}]
+        (let [keys (atom 0)]
+          (thd/render! root (mf/element keyer* #js {:isEnabled enabled? :onKey #(swap! keys inc)}))
+          (thd/act #(.dispatchEvent window (new (.-KeyboardEvent window) "keydown"
+                                                #js {:code "KeyO" :altKey true :bubbles true})))
+          (t/is (= (if enabled? 1 0) @keys) (if enabled? "while enabled" "not while disabled")))))))

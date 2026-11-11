@@ -185,6 +185,36 @@
             (.removeEventListener target "touchcancel" cancel! #js {:passive true})
             (cancel!)))))))
 
+(defn sheet-key?
+  "Whether the key `event` opens or closes the sheet on a desktop that
+  shows the view mode of a phone (the device mode of the developer tools
+  of a browser), which has no two fingers to hold: Alt+O, not in a field."
+  [^js event]
+  (let [target (.-target event)]
+    (and (.-altKey event)
+         (not (.-metaKey event))
+         (not (.-ctrlKey event))
+         (= "KeyO" (.-code event))
+         (not (contains? #{"INPUT" "TEXTAREA" "SELECT"} (some-> target .-tagName)))
+         (not (some-> target .-isContentEditable)))))
+
+(defn use-sheet-key!
+  "Calls `on-key` at the key that opens or closes the sheet (see
+  `sheet-key?`) while `enabled?`."
+  [enabled? on-key]
+  (let [on-key-ref (mf/use-ref on-key)]
+    (mf/set-ref-val! on-key-ref on-key)
+    (mf/with-effect [enabled?]
+      (when enabled?
+        (let [on-keydown
+              (fn [^js event]
+                (when (sheet-key? event)
+                  (.preventDefault event)
+                  ((mf/ref-val on-key-ref))))]
+          (.addEventListener g/window "keydown" on-keydown)
+          (fn []
+            (.removeEventListener g/window "keydown" on-keydown)))))))
+
 (defn use-keyboard-inset!
   "Keeps on the page, while `enabled?`, how high the keyboard of a phone
   covers its bottom, as `--keyboard-inset`: what docks at the bottom of

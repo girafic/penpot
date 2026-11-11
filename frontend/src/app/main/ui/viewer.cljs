@@ -1063,9 +1063,11 @@
                           (and (some? device-layout) (dvd/touch? (:kind device)))
                           (some-> frame :fills first :fill-color))
 
-    ;; two fingers held on a phone open its sheet; what docks at its
-    ;; bottom, a comment, stays above its keyboard
+    ;; two fingers held on a phone open its sheet, and on a desktop that
+    ;; plays one Alt+O opens and closes it; what docks at its bottom, a
+    ;; comment, stays above its keyboard
     (phone-sheet/use-two-finger-hold! (and phone? (not canvas?)) #(reset! sheet* true))
+    (phone-sheet/use-sheet-key! (and phone? (not canvas?)) #(swap! sheet* not))
     (phone-sheet/use-keyboard-inset! phone?)
 
     ;; the canvas has its sheet docked: going to a board or back, none
