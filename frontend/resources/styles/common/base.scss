@@ -146,3 +146,13 @@ select {
   -khtml-user-drag: element;
   -webkit-user-drag: element;
 }
+
+// iOS Safari zooms into a field under 16px when it gets the focus: the
+// fields of the pages a phone lays out for itself (the dashboard, the
+// settings and the view mode) are 16px there
+:root:has([data-phone="true"]) input,
+:root:has([data-phone="true"]) textarea,
+:root:has([data-phone="true"]) select,
+:root:has([data-phone="true"]) [contenteditable="true"] {
+  font-size: 1rem;
+}
