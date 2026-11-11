@@ -18,6 +18,13 @@
   z-index: var(--z-index-set);
   background-color: rgb(0 0 0 / 0.3);
   animation: fade-in 0.2s ease;
+  touch-action: none;
+}
+
+// the page behind an open drawer scrolls not (the page of a phone
+// scrolls as a website does, see dashboard.scss)
+:global(html):has(.drawer-backdrop) {
+  overflow: hidden;
 }
 
 @keyframes fade-in {
