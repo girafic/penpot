@@ -1065,8 +1065,13 @@
 
     ;; two fingers held on a phone open its sheet; what docks at its
     ;; bottom, a comment, stays above its keyboard
-    (phone-sheet/use-two-finger-hold! phone? #(reset! sheet* true))
+    (phone-sheet/use-two-finger-hold! (and phone? (not canvas?)) #(reset! sheet* true))
     (phone-sheet/use-keyboard-inset! phone?)
+
+    ;; the canvas has its sheet docked: going to a board or back, none
+    ;; opens by itself
+    (mf/with-effect [canvas?]
+      (reset! sheet* false))
 
     ;; a phone scrolls the board itself, and it gives past an end as that
     ;; screen does, its fixed layers staying
@@ -1395,16 +1400,18 @@
      ;; on a phone the board alone: two fingers held open what the
      ;; bars hold elsewhere, which a note tells the first time, once the
      ;; board shows
-     (when (and phone? drawn? (not sheet?))
+     (when (and phone? drawn? (not sheet?) (not canvas?))
        [:> phone-sheet/hold-hint*])
 
-     (when (and phone? sheet?)
+     ;; on the canvas it stays, docked at the bottom
+     (when (and phone? (or sheet? canvas?))
        [:> phone-sheet/phone-sheet*
         {:page page
          :file file
          :frame frame
          :index index
          :is-canvas canvas?
+         :is-docked canvas?
          :has-canvas (and wasm? (contains? cf/flags :phone-canvas))
          :permissions permissions
          :section section

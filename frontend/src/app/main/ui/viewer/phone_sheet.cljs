@@ -209,9 +209,10 @@
   nearest of these heights, or the next one it was flicked to, or it
   calls `on-close` (see `sheet-rest`). A tap beside it closes it too,
   which dims what it covers, unless `open-beside`: then what shows above
-  it takes taps."
-  [{:keys [label height open-beside on-close children]}]
-  (let [resting*   (mf/use-state :low)
+  it takes taps. `docked`, it starts at a little of the screen and stays
+  there instead of closing."
+  [{:keys [label height open-beside docked on-close children]}]
+  (let [resting*   (mf/use-state (if (true? docked) :small :low))
         resting    (deref resting*)
         drag*      (mf/use-state nil)
         drag       (deref drag*)
@@ -247,7 +248,7 @@
 
         on-drag-end
         (mf/use-fn
-         (mf/deps drag on-close)
+         (mf/deps drag docked on-close)
          (fn [^js event]
            (let [{:keys [heights speed]} (mf/ref-val gesture-ref)]
              (mf/set-ref-val! gesture-ref nil)
@@ -255,9 +256,10 @@
              (when (some? drag)
                ;; the screen's speed up: the finger's down
                (let [to (sheet-rest drag (- (dds/speed speed (.-timeStamp event))) heights)]
-                 (if (= to :closed)
-                   (on-close)
-                   (reset! resting* to)))))))
+                 (cond
+                   (and (= to :closed) (true? docked)) (reset! resting* (ffirst heights))
+                   (= to :closed)                      (on-close)
+                   :else                               (reset! resting* to)))))))
 
         {:keys [block-size transform]}
         (when (some? drag)
@@ -319,9 +321,10 @@
   `section` shown: its flows and how its interactions show
   (`interactions-mode`, in the prototype), or which comments show and
   their list. What changes the view closes it, but going to another
-  section."
+  section. `is-docked`, it stays at the bottom of the canvas, the switch
+  to the prototype first (see `sheet*`)."
   [{:keys [page file frame index permissions section interactions-mode timeline on-close
-           is-canvas has-canvas]}]
+           is-canvas has-canvas is-docked]}]
   (let [frames     (:frames page)
         total      (count frames)
         flows      (not-empty (:flows page))
@@ -347,9 +350,31 @@
         (fn []
           (on-close)
           (modal/show! :share-link {:page page :file file})
-          (modal/disallow-click-outside!))]
+          (modal/disallow-click-outside!))
 
-    [:> sheet* {:label (tr "viewer.phone.options") :on-close on-close}
+        ;; the page as a whole, or its boards one by one
+        view-switch
+        (when (true? has-canvas)
+          (mf/html
+           [:> radio-buttons* {:name "phone-view"
+                               :extended true
+                               :selected (if (true? is-canvas) "canvas" "prototype")
+                               :on-change #(act! (if (= "canvas" %) dv/show-canvas (dv/go-to-frame-auto)))
+                               :options [{:id "phone-view-canvas"
+                                          :value "canvas"
+                                          :label (tr "viewer.phone.canvas")}
+                                         {:id "phone-view-prototype"
+                                          :value "prototype"
+                                          :label (tr "viewer.phone.prototype")}]}]))]
+
+    [:> sheet* {:label (tr "viewer.phone.options")
+                :docked (true? is-docked)
+                :open-beside (true? is-docked)
+                :on-close on-close}
+     ;; docked, the switch shows at its little height
+     (when (true? is-docked)
+       view-switch)
+
      ;; back to the dashboard, as the logo of the header goes for the
      ;; team, and the file, which a phone shows no header for
      (when (:in-team permissions)
@@ -395,18 +420,8 @@
                      :on-click #(do (on-close) (header/open-login-dialog))}
          (tr "labels.log-or-sign")])]
 
-     ;; the page as a whole, or its boards one by one
-     (when (true? has-canvas)
-       [:> radio-buttons* {:name "phone-view"
-                           :extended true
-                           :selected (if (true? is-canvas) "canvas" "prototype")
-                           :on-change #(act! (if (= "canvas" %) dv/show-canvas (dv/go-to-frame-auto)))
-                           :options [{:id "phone-view-canvas"
-                                      :value "canvas"
-                                      :label (tr "viewer.phone.canvas")}
-                                     {:id "phone-view-prototype"
-                                      :value "prototype"
-                                      :label (tr "viewer.phone.prototype")}]}])
+     (when-not (true? is-docked)
+       view-switch)
 
      ;; the boards
      (when-not (true? is-canvas)
