@@ -157,6 +157,12 @@
 
 // a phone: the name of a project before its actions, which it shows with
 // no pointer over them, and an arrow alone to all of its files
+// on a phone the last projects scroll clear of the bar of the browser,
+// which floats over the bottom of the page on iOS 26
+[data-phone="true"] .dashboard-container {
+  padding-block-end: calc(env(safe-area-inset-bottom) + #{px2rem(96)});
+}
+
 [data-phone="true"] .project {
   padding-inline-start: var(--sp-s);
 }
