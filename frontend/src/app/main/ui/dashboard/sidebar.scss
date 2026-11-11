@@ -334,6 +334,19 @@
   visibility: hidden;
 }
 
+// its first entry leads back there: an arrow and its title, at the start
+// and quieter than its entries (as the back entry of a DS menu)
+.submenu-back {
+  justify-content: flex-start;
+  gap: var(--sp-s);
+  color: var(--color-foreground-secondary);
+}
+
+.back-icon {
+  flex-shrink: 0;
+  color: var(--color-foreground-secondary);
+}
+
 .submenu-item {
   @extend %menu-item-base;
   @include use-typography("body-medium");

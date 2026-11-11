@@ -43,6 +43,7 @@
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [app.util.timers :as ts]
+   [app.util.touch :as touch]
    [cuerdas.core :as str]
    [goog.functions :as f]
    [rumext.v2 :as mf]))
@@ -393,9 +394,26 @@
            [:span {:class (stl/css :empty-text)} (tr "dashboard.no-projects-placeholder")]])]]
       [:div {:class (stl/css-case :separator true :overflow-separator overflow?)}]]]))
 
+(mf/defc sub-menu-back*
+  "On a phone a submenu takes the place of the profile menu (see
+  sidebar.scss): its first entry, an arrow and the title of the
+  submenu, leads back there."
+  {::mf/private true}
+  [{:keys [label on-click]}]
+  [:*
+   [:> dropdown-menu-item* {:class (stl/css :submenu-item :submenu-back)
+                            :on-click on-click
+                            :on-key-down (fn [event]
+                                           (when (kbd/enter? event)
+                                             (on-click event)))
+                            :data-testid "sub-menu-back"}
+    [:> icon* {:icon-id i/arrow-left :class (stl/css :back-icon)}]
+    [:span {:class (stl/css :item-name)} label]]
+   [:hr {:role "separator" :class (stl/css :submenu-separator)}]])
+
 (mf/defc help-learning-menu*
   {::mf/private true}
-  [{:keys [on-close on-click on-pointer-enter on-pointer-leave]}]
+  [{:keys [on-close on-back on-click on-pointer-enter on-pointer-leave]}]
   (let [handle-click-url
         (mf/use-fn
          (fn [event]
@@ -415,6 +433,9 @@
                         :on-close on-close
                         :on-pointer-enter on-pointer-enter
                         :on-pointer-leave on-pointer-leave}
+
+     (when on-back
+       [:> sub-menu-back* {:label (tr "labels.help-learning") :on-click on-back}])
 
      [:> dropdown-menu-item* {:class (stl/css :submenu-item)
                               :data-url "https://help.penpot.app"
@@ -441,7 +462,7 @@
 
 (mf/defc community-contributions-menu*
   {::mf/private true}
-  [{:keys [on-close on-pointer-enter on-pointer-leave]}]
+  [{:keys [on-close on-back on-pointer-enter on-pointer-leave]}]
   (let [handle-click-url
         (mf/use-fn
          (fn [event]
@@ -459,6 +480,9 @@
                         :on-pointer-enter on-pointer-enter
                         :on-pointer-leave on-pointer-leave}
 
+     (when on-back
+       [:> sub-menu-back* {:label (tr "labels.community-contributions") :on-click on-back}])
+
      [:> dropdown-menu-item* {:class (stl/css :submenu-item)
                               :data-url "https://github.com/penpot/penpot"
                               :on-click handle-click-url
@@ -473,7 +497,7 @@
 
 (mf/defc about-penpot-menu*
   {::mf/private true}
-  [{:keys [on-close on-close-profile on-pointer-enter on-pointer-leave]}]
+  [{:keys [on-close on-back on-close-profile on-pointer-enter on-pointer-leave]}]
   (let [version     cf/version
         checking*   (mf/use-state false)
         checking?   (deref checking*)
@@ -517,6 +541,9 @@
                         :on-close on-close
                         :on-pointer-enter on-pointer-enter
                         :on-pointer-leave on-pointer-leave}
+
+     (when on-back
+       [:> sub-menu-back* {:label (tr "labels.about-penpot") :on-click on-back}])
 
      [:> dropdown-menu-item* {:class (stl/css :submenu-item)
                               :on-click show-release-notes}
@@ -562,6 +589,10 @@
         ;; between them while the pointer travels across.
         hovering?*     (mf/use-ref false)
         version        (:base cf/version)
+
+        ;; on a phone a submenu takes the place of the profile menu and
+        ;; leads back to it (see `sub-menu-back*`)
+        phone?         (mf/with-memo [] (touch/phone?))
 
         close-sub-menu
         (mf/use-fn
@@ -757,17 +788,20 @@
        (case sub-menu
          :help-learning
          [:> help-learning-menu* {:on-close close-sub-menu
+                                  :on-back (when phone? close-sub-menu)
                                   :on-click on-click
                                   :on-pointer-enter on-sub-menu-pointer-enter
                                   :on-pointer-leave on-menu-pointer-leave}]
 
          :community-contributions
          [:> community-contributions-menu* {:on-close close-sub-menu
+                                            :on-back (when phone? close-sub-menu)
                                             :on-pointer-enter on-sub-menu-pointer-enter
                                             :on-pointer-leave on-menu-pointer-leave}]
 
          :about-penpot
          [:> about-penpot-menu* {:on-close close-sub-menu
+                                 :on-back (when phone? close-sub-menu)
                                  :on-close-profile on-close
                                  :on-pointer-enter on-sub-menu-pointer-enter
                                  :on-pointer-leave on-menu-pointer-leave}]
