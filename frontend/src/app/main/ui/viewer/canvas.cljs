@@ -357,7 +357,8 @@
 (mf/defc canvas-viewport*
   "The `page` as a whole on a screen of `size` (`{:width :height}`, CSS
   px: the section of the view mode), from its start view, about its
-  middle as the phone turns, at its start view again on another page.
+  middle as the phone turns, at its start view again on another page,
+  on the color of its canvas in the workspace (`dvc/background`).
   `on-drawn` once it shows (and `data-canvas-drawn` on the canvas)."
   [{:keys [page size on-drawn]}]
   (let [canvas-ref (mf/use-ref nil)
@@ -410,7 +411,8 @@
 
     (use-gestures! canvas-ref names-ref view-ref live-ref)
 
-    [:div {:class (stl/css :canvas-viewport)}
+    [:div {:class (stl/css :canvas-viewport)
+           :style #js {:backgroundColor (dvc/background page)}}
      [:canvas {:ref canvas-ref
                :class (stl/css :canvas)
                :data-dpr dpr

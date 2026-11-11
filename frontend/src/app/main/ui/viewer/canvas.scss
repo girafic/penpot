@@ -4,13 +4,12 @@
 //
 // Copyright (c) KALEIDOS INC
 
-@use "ds/_borders.scss" as *;
 @use "ds/_utils.scss" as *;
 @use "ds/mixins.scss" as *;
 @use "ds/typography.scss" as *;
 
-// the whole section of the view mode, the background of the prototype
-// behind it
+// the whole section of the view mode, on the color of the canvas of the
+// page (its style, see `dvc/background`)
 .canvas-viewport {
   position: relative;
   flex: 0 0 100%;
@@ -28,7 +27,8 @@
 }
 
 // the names of the boards over their top left corners, as large at any
-// zoom (see `place-names!`), legible over any background
+// zoom (see `place-names!`), as the workspace draws them over its canvas,
+// whose color the canvas has (see `dvc/background`)
 .names {
   position: absolute;
   inset: 0;
@@ -43,9 +43,6 @@
   inset-inline-start: calc((var(--board-x) - var(--view-x)) * var(--zoom) * 1px);
   inset-block-start: calc((var(--board-y) - var(--view-y)) * var(--zoom) * 1px - #{px2rem(4)});
   max-inline-size: calc(var(--board-width) * var(--zoom) * 1px);
-  padding: 0 var(--sp-xs);
-  border-radius: $br-4;
-  background-color: rgb(0 0 0 / 0.55);
-  color: var(--color-static-white);
+  color: #8f9da3; // the color of a board title in the workspace
   transform: translateY(-100%);
 }

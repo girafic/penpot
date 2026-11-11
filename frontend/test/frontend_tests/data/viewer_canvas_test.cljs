@@ -394,6 +394,12 @@
       (t/is (< y (:y (uvc/shown-view {:zoom 1 :x 100 :y -506} bounds phone-screen)))
             "and more the further"))))
 
+;; --- The color behind it
+
+(t/deftest the-canvas-has-the-color-of-the-canvas-of-the-workspace
+  (t/is (= "#1A1C24" (dvc/background {:background "#1A1C24"})) "the one its canvas is given")
+  (t/is (= "#E8E9EA" (dvc/background {})) "else the default one there"))
+
 ;; --- What a tap opens
 
 (t/deftest a-tap-opens-a-board-the-view-mode-lists

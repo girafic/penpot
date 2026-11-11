@@ -13,6 +13,7 @@
   on its board. Pure: the events that go there live in
   `app.main.data.viewer`."
   (:require
+   [app.common.colors :as clr]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
@@ -298,6 +299,14 @@
   (and (some? before)
        (< (- (:t tap) (:t before)) double-tap-ms)
        (< (mth/hypot (- (:x tap) (:x before)) (- (:y tap) (:y before))) double-tap-px)))
+
+;; --- The color behind it
+
+(defn background
+  "The color behind the shapes of `page` on its canvas: the one its
+  canvas has in the workspace, else the default one there."
+  [page]
+  (get page :background clr/canvas))
 
 ;; --- What a tap opens
 
