@@ -434,3 +434,13 @@
   max-height: $sz-480;
   overflow-y: auto;
 }
+
+// on a phone the row of the current team is as high as the header of the
+// page, and its dropdown opens right below it
+[data-phone="true"] .switch-button-row {
+  block-size: $sz-48;
+}
+
+[data-phone="true"] .organization-team-dropdown {
+  top: calc(var(--sp-s) + #{$sz-48} + var(--sp-xs));
+}
