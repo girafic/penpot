@@ -142,9 +142,12 @@
 }
 
 // a phone: the header after the button of the drawer of the sidebar (see
-// `dashboard*`), its title giving way to its actions
+// `dashboard*`), its title giving way to its actions, no higher than they
+// need
 [data-phone="true"] .dashboard-header {
   gap: $s-8;
+  height: $s-48;
+  max-height: $s-48;
   padding-inline: $s-48 $s-8;
 
   .dashboard-title {
@@ -172,7 +175,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   height: auto;
   max-height: none;
-  padding-block: $s-8 0;
+  padding-block: 0;
 
   .dashboard-title {
     min-height: $s-48;

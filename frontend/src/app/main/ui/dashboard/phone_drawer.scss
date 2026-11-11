@@ -4,9 +4,10 @@
 //
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
+// in the middle of the header, as high as its title (see `.dashboard-header`)
 .drawer-button {
   position: fixed;
-  inset-block-start: calc(env(safe-area-inset-top) + var(--sp-l));
+  inset-block-start: calc(env(safe-area-inset-top) + var(--sp-s));
   inset-inline-start: calc(env(safe-area-inset-left) + var(--sp-s));
   z-index: var(--z-index-panels);
 }
