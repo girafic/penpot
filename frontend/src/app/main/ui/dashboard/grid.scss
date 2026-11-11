@@ -273,6 +273,20 @@ $thumbnail-default-height: px2rem(168);
   display: contents;
 }
 
+// on a phone the files sit closer, the projects too (see
+// `.dashboard-project-row`): 16 px between rows, nothing more below them
+[data-phone="true"] .grid-item {
+  margin-block: var(--sp-s);
+}
+
+[data-phone="true"] .grid-row {
+  margin-block: 0;
+}
+
+[data-phone="true"] .dashboard-grid {
+  padding-block-end: 0;
+}
+
 [data-phone="true"] .list-item-text {
   align-items: center;
   column-gap: var(--sp-s);

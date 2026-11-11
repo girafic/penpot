@@ -167,6 +167,10 @@
   overflow: clip visible;
 }
 
+[data-phone="true"] .dashboard-project-row {
+  margin-block-end: var(--sp-s);
+}
+
 [data-phone="true"] .project {
   padding-inline-start: var(--sp-s);
 }
