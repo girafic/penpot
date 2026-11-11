@@ -8,7 +8,17 @@
   (:require
    ["@penpot/ui/menu" :as menu]
    [app.common.data :as d]
+   [app.util.touch :as touch]
    [rumext.v2 :as mf]))
+
+(defn- max-width-of
+  "The `max-width` of a menu; on a phone, without one, the screen less
+  the margin react-aria keeps to its edges: the larger entries of a
+  phone fit (see the phone rules of `common/base.scss`), where the 250px
+  of the component cut them."
+  [max-width]
+  (or max-width
+      (when (touch/phone?) "calc(100vw - 24px)")))
 
 (def ^:private schema:menu
   [:map
@@ -37,7 +47,7 @@
                           :trigger trigger
                           :placement placement
                           :on-action on-action
-                          :max-width max-width
+                          :max-width (max-width-of max-width)
                           :is-dense is-dense})]
     [:> menu/Menu props
      children]))
@@ -87,7 +97,7 @@
                           :text-value text-value
                           :on-action on-action
                           :variant variant
-                          :max-width max-width})]
+                          :max-width (max-width-of max-width)})]
     [:> menu/SubMenu props
      children]))
 
@@ -129,7 +139,7 @@
                           :placement placement
                           :is-disabled is-disabled
                           :on-action on-action
-                          :max-width max-width
+                          :max-width (max-width-of max-width)
                           :is-dense is-dense
                           :on-open-change on-open-change})]
     [:> menu/ContextMenu props

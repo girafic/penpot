@@ -156,3 +156,32 @@ select {
 :root:has([data-phone="true"]) [contenteditable="true"] {
   font-size: 1rem;
 }
+
+// on those pages the entries of a menu or of a select, and the value a
+// select shows, are as large as the text of a phone too
+:root:has([data-phone="true"]) [role="menuitem"],
+:root:has([data-phone="true"]) [role="menuitemradio"],
+:root:has([data-phone="true"]) [role="menuitemcheckbox"],
+:root:has([data-phone="true"]) [role="option"],
+:root:has([data-phone="true"]) [role="combobox"] {
+  font-size: 1rem;
+}
+
+// a menu of react-aria is as wide as its entries there, up to the screen
+// less a margin: else the room right of where it first opens bounds it,
+// which cuts the larger entries of a phone
+:root:has([data-phone="true"]) [data-rac][data-placement]:has(> [role="menu"]) {
+  inline-size: max-content;
+  max-inline-size: calc(100vw - 2 * var(--sp-m));
+}
+
+// an entry of such a menu too long for a phone wraps instead of being cut
+:root:has([data-phone="true"]) [data-rac][role="menuitem"] {
+  block-size: auto;
+  min-block-size: 2rem;
+  padding-block: var(--sp-xs);
+}
+
+:root:has([data-phone="true"]) [data-rac][role="menuitem"] > span {
+  white-space: normal;
+}
