@@ -59,22 +59,29 @@
   the top of what it holds: as `.small`."
   0.1)
 
+(def ^:private docked-of-screen
+  "How high a docked sheet starts, of the screen: as `.start`."
+  0.3)
+
 (defn sheet-heights
   "The heights, px, a sheet rests at on a screen `vh` px high, lowest
   first, `[[rest px]...]`: `:small`, `:low` and `:high`, a little of the
   screen, half of it and most of it for a sheet as high as `:half`; else
   as high as what it holds, `natural` px, up to them, which leaves out
-  those it is not as high as."
-  [height vh natural]
+  those it is not as high as. A `docked` sheet rests where it starts
+  too, `:start`, between the little and the half."
+  [height vh natural & {:keys [docked]}]
   (let [small (* little-of-screen vh)
+        start (* docked-of-screen vh)
         half  (* 0.5 vh)
         most  (* most-of-screen vh)
         low   (if (= height :half) half (min half natural))
         high  (if (= height :half) most (min most natural))]
     (cond-> []
-      (< small low) (conj [:small small])
-      :always       (conj [:low low])
-      (> high low)  (conj [:high high]))))
+      (< small low)                     (conj [:small small])
+      (and (true? docked) (< start low)) (conj [:start start])
+      :always                           (conj [:low low])
+      (> high low)                      (conj [:high high]))))
 
 (defn sheet-rest
   "Where a sheet let go rests, dragged by its grip to `h` px high going
@@ -209,10 +216,10 @@
   nearest of these heights, or the next one it was flicked to, or it
   calls `on-close` (see `sheet-rest`). A tap beside it closes it too,
   which dims what it covers, unless `open-beside`: then what shows above
-  it takes taps. `docked`, it starts at a little of the screen and stays
-  there instead of closing."
+  it takes taps. `docked`, it starts at a third of the screen or so and
+  rests at a little of it instead of closing."
   [{:keys [label height open-beside docked on-close children]}]
-  (let [resting*   (mf/use-state (if (true? docked) :small :low))
+  (let [resting*   (mf/use-state (if (true? docked) :start :low))
         resting    (deref resting*)
         drag*      (mf/use-state nil)
         drag       (deref drag*)
@@ -222,13 +229,13 @@
 
         on-drag-start
         (mf/use-fn
-         (mf/deps height resting)
+         (mf/deps height resting docked)
          (fn [^js event]
            (let [y       (.. event -touches (item 0) -clientY)
                  sheet   (mf/ref-val sheet-ref)
                  natural (+ (some-> sheet .-firstChild .-offsetHeight)
                             (some-> sheet .-lastChild .-scrollHeight))
-                 heights (sheet-heights height (.-innerHeight g/window) natural)
+                 heights (sheet-heights height (.-innerHeight g/window) natural :docked docked)
                  shown   (some-> sheet .-offsetHeight)]
              (mf/set-ref-val! gesture-ref {:y0 y
                                            :h0 (if (pos? shown)
@@ -271,6 +278,7 @@
      [:div {:class (stl/css-case :sheet true
                                  :floating (not= resting :high)
                                  :small (= resting :small)
+                                 :start (= resting :start)
                                  :half (and (= height :half) (= resting :low))
                                  :full (and (= height :half) (= resting :high))
                                  :grown (and (nil? height) (= resting :high)))

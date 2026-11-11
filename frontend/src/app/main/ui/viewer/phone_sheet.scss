@@ -81,6 +81,12 @@
   max-block-size: 10dvh;
 }
 
+// where a sheet docked on the canvas starts (see `sheet-heights`)
+.start {
+  block-size: 30dvh;
+  max-block-size: 30dvh;
+}
+
 // what drags the sheet up and down
 .grip-zone {
   display: grid;
