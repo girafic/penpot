@@ -143,12 +143,17 @@
 
 // a phone: the header after the button of the drawer of the sidebar (see
 // `dashboard*`), its title giving way to its actions, no higher than they
-// need
+// need; it stays at the top as the page scrolls, under the notch too
 [data-phone="true"] .dashboard-header {
+  position: sticky;
+  top: 0;
+  z-index: $z-index-3;
   gap: $s-8;
-  height: $s-48;
-  max-height: $s-48;
+  height: calc(#{$s-48} + env(safe-area-inset-top));
+  max-height: calc(#{$s-48} + env(safe-area-inset-top));
+  padding-block-start: calc(env(safe-area-inset-top) + #{$s-4});
   padding-inline: $s-48 $s-8;
+  background-color: var(--color-background-primary);
 
   .dashboard-title {
     flex: 1;
@@ -175,7 +180,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   height: auto;
   max-height: none;
-  padding-block: 0;
+  padding-block: env(safe-area-inset-top) 0;
 
   .dashboard-title {
     min-height: $s-48;
