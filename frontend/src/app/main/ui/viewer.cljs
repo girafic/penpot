@@ -1327,7 +1327,6 @@
          ;; the page as designed, its boards that scroll at their size
          canvas?
          [:> canvas-viewport* {:page (get-in data [:pages page-id])
-                               :files files
                                :size (:viewport-size local)
                                :on-drawn #(reset! drawn* true)}]
 

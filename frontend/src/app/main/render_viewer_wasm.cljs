@@ -339,7 +339,7 @@
 ;; boards, so that going from it to a board and back loads nothing again
 
 (defn- render-page-view*
-  [page-key page-objects canvas zoom vbox modif-tree on-render]
+  [page-key page-objects canvas zoom vbox on-render]
   (p/create
    (fn [resolve _reject]
      (let [prev-disable @wasm/disable-request-render?
@@ -348,11 +348,10 @@
                           (when (fn? on-render) (on-render))
                           (resolve nil))
            draw!        (fn [os-canvas prev-props]
-                          ;; the shapes in the poses of the animation, or
-                          ;; as designed: none in the pose a board shown
-                          ;; before left them in
+                          ;; the shapes as designed: none in the pose a
+                          ;; board shown before left them in
                           (let [shown? (= (:props-uses @viewer-snapshot) wasm/shape-uses)
-                                props  (show-animation! page-objects prev-props shown? modif-tree nil)]
+                                props  (show-animation! page-objects prev-props shown? nil nil)]
                             (swap! viewer-snapshot assoc :props props :props-uses wasm/shape-uses
                                    :render-key nil))
                           (viewer-disable-wasm-ui-overlay!)
@@ -370,17 +369,15 @@
 
 (defn render-page-view
   "Render the page `page-objects`, the page `page-key`, at `zoom` and
-  `vbox` onto `canvas` (its `data-dpr`, see `canvas-dpr`), the shapes in
-  the poses of the animation `modif-tree` (see `show-animation!`), or as
-  designed with none: as the canvas shows, at each frame of its
-  animations, and once a move of it settles. `on-render` once it shows.
-  Serialized with the other renders."
-  [page-key page-objects canvas zoom vbox modif-tree on-render]
+  `vbox` onto `canvas` (its `data-dpr`, see `canvas-dpr`), the shapes as
+  designed: as the canvas shows, and once a move of it settles.
+  `on-render` once it shows. Serialized with the other renders."
+  [page-key page-objects canvas zoom vbox on-render]
   (->> @wasm.api/module
        (p/mcat (fn [ready?]
                  (if ready?
                    (enqueue-wasm-render!
-                    #(render-page-view* page-key page-objects canvas zoom vbox modif-tree on-render))
+                    #(render-page-view* page-key page-objects canvas zoom vbox on-render))
                    (p/resolved nil))))))
 
 ;; The move of the page asked last and not shown yet (see

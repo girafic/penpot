@@ -13,17 +13,12 @@
   `app.main.ui.viewer.drag-scroll`), two fingers zoom it about their
   middle, a double tap zooms to a board and back, a tap opens the board
   under it as the prototype; a wheel moves it and zooms it with ctrl, as
-  a trackpad does. Its boards play their animations as they come into
-  view, without sound."
+  a trackpad does. Its boards show as designed: their animations play
+  in the prototype."
   (:require-macros [app.main.style :as stl])
   (:require
-   [app.common.data.macros :as dm]
-   [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
-   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
-   [app.common.types.animation :as cta]
-   [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.render-viewer-wasm :as rwv]
@@ -33,7 +28,6 @@
    [app.util.dom :as dom]
    [app.util.timers :as ts]
    [app.util.touch :as touch]
-   [promesa.core :as p]
    [rumext.v2 :as mf]))
 
 (def ^:private tween-ms
@@ -72,11 +66,10 @@
   "The fingers, a wheel and a trackpad on `canvas-ref` move and zoom the
   view of `view-ref` (`{:page-id :screen :view}`) about what `live-ref`
   holds (`{:page :bounds :objects :render!}`): shown from the tiles in
-  the cache while it moves (see `rwv/move-page-view`), which `moving-ref`
-  tells, rendered in full by `render!` once it rests. A tap opens the
-  board under it as the prototype, once no second tap made it a double
-  tap."
-  [canvas-ref view-ref live-ref moving-ref]
+  the cache while it moves (see `rwv/move-page-view`), rendered in full
+  by `render!` once it rests. A tap opens the board under it as the
+  prototype, once no second tap made it a double tap."
+  [canvas-ref view-ref live-ref]
   (mf/with-effect []
     (let [^js canvas (mf/ref-val canvas-ref)
           ;; the fingers down (`{id point}`), what they do (`:pan`,
@@ -111,7 +104,6 @@
           ;; at rest, within the edges, in full
           rest!
           (fn []
-            (mf/set-ref-val! moving-ref false)
             (set-view! (dvc/clamp-view (get-view) (get-bounds) (get-screen)))
             ((:render! (mf/ref-val live-ref))))
 
@@ -123,7 +115,6 @@
 
           draw!
           (fn draw! []
-            (mf/set-ref-val! moving-ref true)
             (when (nil? @raf)
               (vreset! raf
                        (ts/raf
@@ -347,65 +338,12 @@
         (some-> @rest-timer js/clearTimeout)
         (cancel-tap!)))))
 
-(defn- board-plays
-  "What the top-level boards of the canvas of `page` (`objects`, what it
-  draws) play as the prototype plays them, `{id {:clock :copies}}`: those
-  with a timeline of their own or animated component copies in it that
-  play as they show (see `dv/board-clock`). `files` holds the files of
-  the components, by id."
-  [page files objects]
-  (into {}
-        (keep (fn [id]
-                (when (cfh/frame-shape? (get objects id))
-                  (when-let [clock (dv/board-clock page files id)]
-                    (when (cta/autoplay? clock)
-                      [id {:clock  clock
-                           :copies (vals (cltl/copy-timelines (:objects page) (:timelines page) files id))}])))))
-        (dm/get-in objects [uuid/zero :shapes])))
-
-(defn- use-animations!
-  "The boards of `plays` (see `board-plays`) play on the canvas as they
-  come into the view of `view-ref`, or half a screen round it, each
-  from its start (see `dvc/animation-frame`), into `anim-ref`: a frame
-  renders once the one before did, as fast as the phone renders, and
-  none while fingers move it (`moving-ref`), when it shows from the
-  cache. What `live-ref` holds: `:page`, `:files`, `:objects` and
-  `:render!`."
-  [view-ref live-ref anim-ref moving-ref plays]
-  (mf/with-effect [plays]
-    (when (seq plays)
-      (let [ids   (keys plays)
-            raf   (volatile! nil)
-            busy  (volatile! false)
-            tick
-            (fn tick [now]
-              (let [{:keys [view screen]} (mf/ref-val view-ref)]
-                (when (and (some? view) (not @busy) (not (mf/ref-val moving-ref)))
-                  (let [{:keys [page files objects render!]} (mf/ref-val live-ref)
-                        {:keys [stamps ended tree]} (mf/ref-val anim-ref)
-                        in-view (dvc/boards-in-view objects ids (dvc/view-box view screen)
-                                                    (/ (:height screen) 2 (:zoom view)))
-                        stamps  (dvc/entered stamps in-view now)
-                        frame   (dvc/animation-frame page files plays stamps ended now)]
-                    (mf/set-ref-val! anim-ref (assoc frame :stamps stamps))
-                    ;; what holds still renders no more
-                    (when (not= tree (:tree frame))
-                      (vreset! busy true)
-                      (-> (p/resolved (render!))
-                          (p/finally (fn [_ _] (vreset! busy false)))))))
-                (vreset! raf (ts/raf tick))))]
-        (vreset! raf (ts/raf tick))
-        (fn []
-          (some-> @raf ts/cancel-af!)
-          (mf/set-ref-val! anim-ref nil))))))
-
 (mf/defc canvas-viewport*
   "The `page` as a whole on a screen of `size` (`{:width :height}`, CSS
   px: the section of the view mode), from its start view, about its
-  middle as the phone turns, at its start view again on another page,
-  its boards playing (`files`, the files of the components, by id).
+  middle as the phone turns, at its start view again on another page.
   `on-drawn` once it shows (and `data-canvas-drawn` on the canvas)."
-  [{:keys [page files size on-drawn]}]
+  [{:keys [page size on-drawn]}]
   (let [canvas-ref (mf/use-ref nil)
         page-id    (:id page)
         objects    (mf/with-memo [page] (dvc/canvas-objects (:objects page)))
@@ -416,14 +354,8 @@
         ;; the view, with the page and the screen it is for: it changes
         ;; at each step of a gesture, so it is no state that renders
         view-ref   (mf/use-ref nil)
-        ;; what the gestures and the animations read as they come
+        ;; what the gestures read as they come
         live-ref   (mf/use-ref nil)
-        ;; the animation shown, `{:tree :stamps :ended}` (see
-        ;; `use-animations!`), and whether fingers move the canvas
-        anim-ref   (mf/use-ref nil)
-        moving-ref (mf/use-ref false)
-        plays      (mf/with-memo [page files objects]
-                     (board-plays page files objects))
 
         render!
         (mf/use-fn
@@ -433,13 +365,12 @@
                  {:keys [view screen]} (mf/ref-val view-ref)]
              (when (and (some? canvas) (some? view))
                (rwv/render-page-view page-id objects canvas (:zoom view) (dvc/view-box view screen)
-                                     (:tree (mf/ref-val anim-ref))
                                      (fn []
                                        (dom/set-attribute! canvas "data-canvas-drawn" "true")
                                        (when (fn? on-drawn)
                                          (on-drawn))))))))]
 
-    (mf/set-ref-val! live-ref {:page page :files files :bounds bounds :objects objects :render! render!})
+    (mf/set-ref-val! live-ref {:page page :bounds bounds :objects objects :render! render!})
 
     (mf/with-effect [page-id objects bounds width height dpr]
       (when (and (some? (mf/ref-val canvas-ref)) (some? bounds) (pos? width) (pos? height))
@@ -451,8 +382,7 @@
           (mf/set-ref-val! view-ref {:page-id page-id :screen screen :view view})
           (render!))))
 
-    (use-gestures! canvas-ref view-ref live-ref moving-ref)
-    (use-animations! view-ref live-ref anim-ref moving-ref plays)
+    (use-gestures! canvas-ref view-ref live-ref)
 
     [:canvas {:ref canvas-ref
               :class (stl/css :canvas)

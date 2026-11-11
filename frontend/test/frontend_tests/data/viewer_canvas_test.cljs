@@ -11,10 +11,6 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.math :as mth]
-   [app.common.test-helpers.compositions :as ctho]
-   [app.common.test-helpers.files :as cthf]
-   [app.common.test-helpers.ids-map :as cthi]
-   [app.common.types.animation :as cta]
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.viewer :as dv]
@@ -395,7 +391,7 @@
       (t/is (< y (:y (uvc/shown-view {:zoom 1 :x 100 :y -100} bounds phone-screen)))
             "and more the further"))))
 
-;; --- What a tap opens, and the animations of the canvas
+;; --- What a tap opens
 
 (t/deftest a-tap-opens-a-board-the-view-mode-lists
   (let [objects (dvc/canvas-objects page-objects)
@@ -404,52 +400,3 @@
           "the strip, for a tap on the card in it")
     (t/is (nil? (dvc/board-to-open page objects (gpt/point 200 1330))) "a board the view mode does not list")
     (t/is (nil? (dvc/board-to-open page objects (gpt/point 4600 2500))) "nothing there")))
-
-(defn- animated-page
-  "A page with board A at 0,0 moving right over 1000 ms, played
-  `playback`, and board B still at 0,2000."
-  [playback]
-  (let [file (-> (cthf/sample-file :file1)
-                 (ctho/add-frame :board-a :x 0 :y 0 :width 400 :height 300)
-                 (ctho/add-frame :board-b :x 0 :y 2000 :width 400 :height 300))
-        a    (cthi/id :board-a)
-        tl   (-> (cta/make-timeline {:board-id a :duration 1000 :playback playback})
-                 (cta/add-keyframe a {:time 0 :property :x :value 0})
-                 (cta/add-keyframe a {:time 1000 :property :x :value 100}))]
-    (assoc (cthf/current-page file) :timelines {a tl})))
-
-(t/deftest the-boards-in-view-and-a-margin-round-it
-  (let [page    (animated-page :once)
-        [a b]   [(cthi/id :board-a) (cthi/id :board-b)]
-        objects (:objects page)]
-    (t/is (= #{a} (dvc/boards-in-view objects [a b] {:x 0 :y 0 :width 375 :height 812} 100)))
-    (t/is (= #{a b} (dvc/boards-in-view objects [a b] {:x 0 :y 0 :width 375 :height 812} 1200))
-          "within the margin")
-    (t/is (= #{b} (dvc/boards-in-view objects [a b] {:x 0 :y 1500 :width 375 :height 812} 100)))))
-
-(t/deftest a-board-plays-from-its-start-as-it-comes-into-view
-  (t/is (= {:a 100 :b 500} (dvc/entered {:a 100} #{:a :b} 500)) "kept, and the new one from now")
-  (t/is (= {:b 500} (dvc/entered {:a 100 :b 500} #{:b} 900)) "out of view: forgotten")
-  (t/is (= {:a 900} (dvc/entered {:b 500} #{:a} 900)) "back in view: from its start again"))
-
-(t/deftest the-animation-of-the-boards-in-view
-  (let [play (fn [playback]
-               (let [page  (animated-page playback)
-                     a     (cthi/id :board-a)
-                     clock (dv/board-clock page {} a)]
-                 [page {a {:clock clock :copies []}} a]))]
-    (t/testing "a board that loops plays on"
-      (let [[page plays a] (play :loop)
-            {:keys [tree ended]} (dvc/animation-frame page {} plays {a 0} {} 500)]
-        (t/is (contains? tree a) "moved")
-        (t/is (empty? ended))))
-    (t/testing "a board played once holds its end, worked out once"
-      (let [[page plays a] (play :once)
-            ended  (dvc/animation-frame page {} plays {a 0} {} 1500)
-            later  (dvc/animation-frame page {} plays {a 0} (:ended ended) 1600)]
-        (t/is (contains? (:ended ended) a))
-        (t/is (identical? (get-in ended [:ended a]) (get-in later [:ended a])))
-        (t/is (= (:tree ended) (:tree later)))))
-    (t/testing "no board in view, no animation"
-      (let [[page plays] (play :loop)]
-        (t/is (= {:tree {} :ended {}} (dvc/animation-frame page {} plays {} {} 500)))))))
