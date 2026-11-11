@@ -198,6 +198,12 @@ $thumbnail-default-height: px2rem(168);
   &.is-force-display {
     opacity: 1;
   }
+
+  // a finger hovers nothing: the menu of a file shows on a phone or a
+  // tablet
+  @media (hover: none) {
+    opacity: 1;
+  }
 }
 
 // ─── LIST VIEW ─────────────────────────────────
