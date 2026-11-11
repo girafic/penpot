@@ -358,9 +358,9 @@
   mode) in the prototype, the pages of the file, then what the header
   holds in the `section` shown: its flows and how its interactions show
   (`interactions-mode`, in the prototype), or which comments show and
-  their list. What changes the view closes it, but going to another
-  section. `is-docked`, it stays at the bottom of the canvas, the switch
-  to the prototype first (see `sheet*`)."
+  their list, the switch between the canvas and the prototype first.
+  What changes the view closes it, but going to another section.
+  `is-docked`, it stays at the bottom of the canvas (see `sheet*`)."
   [{:keys [page file frame index permissions section interactions-mode timeline on-close
            is-canvas has-canvas is-docked]}]
   (let [frames     (:frames page)
@@ -409,15 +409,16 @@
                 :docked (true? is-docked)
                 :open-beside (true? is-docked)
                 :on-close on-close}
-     ;; docked, the switch shows at its little height
-     (when (true? is-docked)
-       view-switch)
+     ;; the switch first, in the prototype as on the canvas, where the
+     ;; docked sheet shows it at its little height
+     view-switch
 
      ;; back to the dashboard, as the logo of the header goes for the
      ;; team, and the file, which a phone shows no header for
      (when (:in-team permissions)
        [:div {:class (stl/css :row)}
         [:> button* {:variant "ghost"
+                     :class (stl/css :back)
                      :icon i/arrow-left
                      :on-click #(act! (dv/go-to-dashboard))}
          (tr "labels.dashboard")]
@@ -454,9 +455,6 @@
           [:> button* {:variant "ghost"
                        :on-click #(do (on-close) (header/open-login-dialog))}
            (tr "labels.log-or-sign")])])
-
-     (when-not (true? is-docked)
-       view-switch)
 
      ;; the boards
      (when-not (true? is-canvas)

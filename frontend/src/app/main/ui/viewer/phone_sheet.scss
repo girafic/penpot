@@ -105,7 +105,8 @@
   gap: var(--sp-s);
   min-block-size: 0;
   padding: 0 calc(env(safe-area-inset-right) + var(--sp-m))
-    calc(max(env(safe-area-inset-bottom), var(--sp-l)) + var(--sp-m)) calc(env(safe-area-inset-left) + var(--sp-m));
+    calc(max(env(safe-area-inset-bottom), var(--sp-l)) + var(--sp-m))
+    calc(env(safe-area-inset-left) + var(--sp-m));
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -122,6 +123,12 @@
   align-items: center;
   gap: var(--sp-xs);
   min-block-size: $sz-32;
+}
+
+// the way back to the dashboard, its arrow at the start of the sheet as
+// the switch, the sections and the pages: its padding out to the left
+.back {
+  margin-inline-start: calc(-1 * var(--sp-m));
 }
 
 .board-name {
