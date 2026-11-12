@@ -70,6 +70,29 @@
   []
   (uuid/next))
 
+(defn job-params
+  "The job (see `schema:params`) exporting the board `board-id` of the
+  page `page-id` of the file `file-id`, or the `boards`
+  (`[{:board-id :scale}]`) into a ZIP, as `params` (see
+  `dea/export-animation`), with the renderer `wasm?`: from the workspace
+  (see `deaw/export-job`) or the view mode (see
+  `app.main.data.viewer.export-job`)."
+  [{:keys [file-id page-id board-id wasm?]}
+   {:keys [format quality fps scale loop? audio? boards] :as params}]
+  (cond-> {:file-id file-id
+           :page-id page-id
+           :board-id (or (:board-id (first boards)) board-id)
+           :job-id (new-job-id)
+           :format format
+           :quality (or quality :high)
+           :fps (or fps 30)
+           :scale (or (:scale (first boards)) scale 1)
+           :loop? (not (false? loop?))
+           :audio? (not (false? audio?))
+           :wasm? (boolean wasm?)}
+    :always              (into (keep #(when (true? (get params %)) [% true])) (keys svg-options))
+    (> (count boards) 1) (assoc :boards (vec boards))))
+
 (defn encode-params
   "The query params of the tab of the job `params` (see `schema:params`),
   the renderer the workspace uses as `wasm`, which the app honours (see

@@ -48,6 +48,7 @@
    [frontend-tests.data.uploads-test]
    [frontend-tests.data.viewer-canvas-test]
    [frontend-tests.data.viewer-devices-test]
+   [frontend-tests.data.viewer-export-job-test]
    [frontend-tests.data.viewer-playback-test]
    [frontend-tests.data.viewer-scroll-test]
    [frontend-tests.data.viewer-test]
@@ -299,6 +300,7 @@
    'frontend-tests.data.svg-vectors-test
    'frontend-tests.data.uploads-test
    'frontend-tests.data.viewer-canvas-test
+   'frontend-tests.data.viewer-export-job-test
    'frontend-tests.data.viewer-devices-test
    'frontend-tests.data.viewer-playback-test
    'frontend-tests.data.touch-devices-test
