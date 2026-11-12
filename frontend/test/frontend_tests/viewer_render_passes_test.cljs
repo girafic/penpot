@@ -16,7 +16,9 @@
    [app.main.render-viewer-wasm :as rwv]
    [app.main.ui.viewer.viewport-common :as vpc]
    [app.main.ui.viewer.viewport-wasm :as vpw]
-   [cljs.test :as t :include-macros true]))
+   [app.render-wasm.api :as wasm.api]
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.mock :as mock]))
 
 (def ^:private board-id (uuid/custom 12 1))
 (def ^:private tabs (uuid/custom 12 2))
@@ -145,3 +147,36 @@
     (present canvas #js {:transferToImageBitmap (constantly :bitmap)} uuid/zero 10 10 #(swap! finished inc))
     (t/is (= :bitmap @shown) "a context that is there shows its frame")
     (t/is (= 2 @finished))))
+
+(t/deftest another-page-loads-into-the-same-offscreen-canvas
+  (let [on-snapshot @#'rwv/on-snapshot!
+        snapshot    @#'rwv/viewer-snapshot
+        os          #js {}
+        canvas      #js {:width 300 :height 600 :dataset #js {:dpr "2"}}
+        objects-a   {:page :a}
+        objects-b   {:page :b}
+        objects-c   {:page :c}
+        contexts    (atom 0)
+        loads       (atom [])
+        drawn       (atom [])
+        draw!       (fn [os' _] (swap! drawn conj (if (identical? os os') :drawn :another-canvas)))
+        finish      #(swap! drawn conj :finished)]
+    (reset! snapshot {:os-canvas os :page-key :a :objects objects-a :props []
+                      :canvas-w 300 :canvas-h 600 :dpr 2})
+    (with-redefs [wasm.api/initialized?        (constantly true)
+                  wasm.api/init-canvas-context (mock/stub (fn [& _] (swap! contexts inc) true))
+                  wasm.api/clear-canvas        (mock/stub (fn [& _] (swap! contexts inc)))
+                  wasm.api/initialize-viewport (fn [objects _zoom _vbox & {:keys [on-render]}]
+                                                 (swap! loads conj [objects on-render]))]
+      (on-snapshot :b objects-b canvas 1 {} draw! finish)
+      (t/is (= 0 @contexts) "no new WebGL context: Safari keeps each one of them")
+      (t/is (= [objects-b] (map first @loads)) "the shapes of the other page load into it")
+      (t/is (identical? os (:os-canvas @snapshot)))
+      (t/is (= :b (:page-key @snapshot)))
+
+      ;; the shapes of page b load late: page c took the canvas meanwhile
+      (on-snapshot :c objects-c canvas 1 {} draw! finish)
+      ((second (nth @loads 1)))
+      ((second (nth @loads 0)))
+      (t/is (= [:drawn :finished] @drawn) "page c draws, what page b loaded late draws nothing"))
+    (@#'rwv/reset-viewer-snapshot!)))
