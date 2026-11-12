@@ -309,8 +309,7 @@
 
 // a phone shows an open thread and a new one at the bottom of its screen,
 // as wide as it, above its keyboard (see `phone-sheet/use-keyboard-inset!`):
-// a sheet floating in from its edges, as its others, its corners as round
-// as its field and buttons
+// a sheet floating in from its edges, as its others
 .floating-thread-wrapper.docked,
 .floating-thread-draft-inner-wrapper.docked {
   position: fixed;
@@ -323,7 +322,7 @@
   padding: var(--sp-xl) calc(env(safe-area-inset-right) + var(--sp-m))
     calc(env(safe-area-inset-bottom) + var(--sp-xl)) calc(env(safe-area-inset-left) + var(--sp-m));
   border: none;
-  border-radius: $br-8;
+  border-radius: var(--phone-sheet-radius);
   box-shadow: 0 0 px2rem(16) rgb(0 0 0 / 0.2);
   transform: none;
 }
