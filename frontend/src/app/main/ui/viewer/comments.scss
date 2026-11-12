@@ -121,7 +121,7 @@
   inset-block: auto 0;
   inline-size: auto;
   block-size: 85dvh;
-  padding-block-end: env(safe-area-inset-bottom);
+  padding-block: var(--sp-l) env(safe-area-inset-bottom);
   padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
   overflow: hidden;
   border-radius: var(--phone-sheet-radius) var(--phone-sheet-radius) 0 0;
