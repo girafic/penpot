@@ -16,6 +16,7 @@
    [app.main.data.modal :as modal]
    [app.main.refs :as refs]
    [app.main.store :as st]
+   [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.util.dom :as dom]
    [app.util.dom.normalize-wheel :as nw]
@@ -27,6 +28,23 @@
 
 (def builtin-templates
   (l/derived :builtin-templates st/state))
+
+(defn- shown-templates
+  "The templates to offer: all but those every new team gets already."
+  [templates]
+  (filterv #(and (not= (:id %) "welcome")
+                 (not= (:id %) "tutorial-for-beginners"))
+           templates))
+
+(defn- event-section
+  "Where a template is added, for the events: the route `route-name`, the
+  drafts or another project when it shows the project `project-id`."
+  [route-name project-id default-project-id]
+  (if (= route-name :dashboard-files)
+    (if (= project-id default-project-id)
+      "dashboard-drafts"
+      "dashboard-project")
+    (name route-name)))
 
 (defn- import-template!
   [template team-id project-id default-project-id section]
@@ -168,17 +186,11 @@
   [{:keys [default-project-id profile project-id team-id]}]
   (let [templates   (mf/deref builtin-templates)
         templates   (mf/with-memo [templates]
-                      (filterv #(and
-                                 (not= (:id %) "welcome")
-                                 (not= (:id %) "tutorial-for-beginners")) templates))
+                      (shown-templates templates))
 
         route       (mf/deref refs/route)
         route-name  (get-in route [:data :name])
-        section     (if (= route-name :dashboard-files)
-                      (if (= project-id default-project-id)
-                        "dashboard-drafts"
-                        "dashboard-project")
-                      (name route-name))
+        section     (event-section route-name project-id default-project-id)
 
         collapsed*  (mf/use-state
                      #(get storage/global ::collapsed))
@@ -297,3 +309,70 @@
                  :aria-label (tr "labels.next")}
         [:> icon* {:icon-id i/arrow
                    :class (stl/css :arrow-icon)}]])]))
+
+(mf/defc templates-sheet*
+  "On a phone, which shows no templates below its projects, from its
+  drawer: the templates as a sheet from the bottom, two in a row, the
+  link to more last. A tap on one adds a copy of it to the project
+  `project-id`, the drafts (`default-project-id`) when none, as below the
+  projects of a computer (see `templates-section*`); a tap beside the
+  sheet or its close button closes it."
+  {::mf/register modal/components
+   ::mf/register-as :dashboard-templates}
+  [all-props]
+  ;; shown as a modal: its props come as they were given (see
+  ;; `modal/show`)
+  (let [{:keys [team-id project-id default-project-id]} (js->clj all-props :keywordize-keys true)
+        templates  (mf/deref builtin-templates)
+        templates  (mf/with-memo [templates]
+                     (shown-templates templates))
+        route-name (dm/get-in (mf/deref refs/route) [:data :name])
+        section    (event-section route-name project-id default-project-id)
+
+        on-close
+        (mf/use-fn
+         (fn [] (st/emit! (modal/hide))))
+
+        ;; the dimmed screen around the sheet, not the sheet
+        on-click-beside
+        (mf/use-fn
+         (mf/deps on-close)
+         (fn [event]
+           (when (identical? (dom/get-target event) (dom/get-current-target event))
+             (on-close))))
+
+        on-import
+        (mf/use-fn
+         (mf/deps default-project-id project-id section team-id)
+         (fn [template _event]
+           (import-template! template team-id project-id default-project-id section)))]
+
+    (mf/with-effect []
+      (st/emit! (dd/fetch-builtin-templates)))
+
+    [:div {:class (stl/css :phone-sheet-overlay)
+           :on-click on-click-beside}
+     [:div {:class (stl/css :phone-sheet)
+            :role "dialog"
+            :aria-label (tr "dashboard.libraries-and-templates")}
+      [:div {:class (stl/css :phone-sheet-header)}
+       [:h2 {:class (stl/css :phone-sheet-title)}
+        (tr "dashboard.libraries-and-templates")]
+       [:> icon-button* {:variant "ghost"
+                         :aria-label (tr "labels.close")
+                         :icon i/close
+                         :on-click on-close}]]
+      [:p {:class (stl/css :phone-sheet-description)}
+       (tr "dashboard.libraries-and-templates.description")]
+      [:div {:class (stl/css :phone-sheet-grid)}
+       (for [[index item] (map-indexed vector templates)]
+         [:> card-item* {:key (:id item)
+                         :item item
+                         :index index
+                         :is-visible true
+                         :collapsed false
+                         :on-import on-import}])
+       [:> card-item-link* {:is-visible true
+                            :collapsed false
+                            :section section
+                            :total (count templates)}]]]]))

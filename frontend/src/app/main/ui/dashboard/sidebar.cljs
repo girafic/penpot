@@ -242,7 +242,7 @@
 
 (mf/defc sidebar-content*
   {::mf/private true}
-  [{:keys [projects profile section team project search-term default-project] :as props}]
+  [{:keys [projects profile section team project search-term default-project on-open-templates] :as props}]
   (let [default-project-id
         (get default-project :id)
 
@@ -372,7 +372,15 @@
                      :data-testid "libs-link-sidebar"
                      :class (stl/css :sidebar-link)
                      :keyboard-action go-libs-with-key}
-           [:span {:class (stl/css :element-title)} (tr "labels.shared-libraries")]]]]]
+           [:span {:class (stl/css :element-title)} (tr "labels.shared-libraries")]]]
+         ;; on a phone, which shows no templates below its projects
+         (when (fn? on-open-templates)
+           [:li {:class (stl/css :sidebar-nav-item)}
+            [:> link* {:action on-open-templates
+                       :data-testid "templates-link-sidebar"
+                       :class (stl/css :sidebar-link)}
+             [:span {:class (stl/css :element-title)}
+              (tr "dashboard.libraries-and-templates")]]])]]
 
        [:div {:class (stl/css :sidebar-content-section)
               :data-testid "pinned-projects"}

@@ -334,6 +334,21 @@
         open-drawer     (mf/use-fn #(reset! drawer* true))
         close-drawer    (mf/use-fn #(reset! drawer* false))
 
+        ;; the templates, which a phone shows not below its projects: from
+        ;; its drawer, as a sheet (see `templates-sheet*`)
+        open-templates
+        (mf/use-fn
+         (mf/deps team-id project-id default-project)
+         (fn [_event]
+           (reset! drawer* false)
+           (st/emit! (modal/show :dashboard-templates
+                                 {:team-id team-id
+                                  :project-id project-id
+                                  :default-project-id (:id default-project)}))))
+        templates?      (and phone?
+                             (contains? cf/flags :dashboard-templates-section)
+                             can-edit?)
+
         on-layout-change
         (mf/use-fn
          (fn [value]
@@ -389,7 +404,8 @@
                     :default-project default-project
                     :profile profile
                     :section section
-                    :search-term search-term}]
+                    :search-term search-term
+                    :on-open-templates (when templates? open-templates)}]
       [:> dashboard-content* {:projects projects
                               :profile profile
                               :project project
