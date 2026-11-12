@@ -175,6 +175,17 @@
   color: var(--color-foreground-secondary);
 }
 
+// a menu beside share (see `sheet-menu*`): its button with its name and an
+// arrow, its entries ticked at their end
+.menu-button {
+  flex-shrink: 0;
+}
+
+.menu-label {
+  flex: 1;
+  min-inline-size: 0;
+}
+
 .board-name {
   @include use-typography("body-medium");
   @include text-ellipsis;

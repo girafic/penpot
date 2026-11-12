@@ -14,8 +14,11 @@
    [app.util.globals :as globals]))
 
 (def ^:private dom-globals
-  "What the page and React reach the DOM by."
-  ["window" "document" "Node" "HTMLElement" "navigator"])
+  "What the page, React and react-aria (the menus of the design system)
+  reach the DOM by."
+  ["window" "document" "navigator" "Node" "Element" "SVGElement" "HTMLElement"
+   "HTMLAnchorElement" "HTMLButtonElement" "HTMLInputElement" "HTMLSelectElement"
+   "HTMLTextAreaElement"])
 
 (defn act
   "Call `f` and let React render what it changed before going on."

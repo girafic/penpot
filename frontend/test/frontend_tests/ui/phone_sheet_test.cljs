@@ -9,12 +9,17 @@
   the sheet with what its bars hold elsewhere (Penpot Motion)."
   (:require
    [app.common.uuid :as uuid]
+   [app.main.data.comments :as dcm]
+   [app.main.data.viewer :as dv]
    [app.main.data.viewer.shortcuts :as sc]
+   [app.main.store :as st]
    [app.main.ui.viewer.phone-sheet :as phone-sheet]
    [app.util.i18n :refer [tr]]
    [app.util.storage :as storage]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
+   [frontend-tests.helpers.mock :as mock]
+   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
 (t/deftest two-fingers-hold-still
@@ -211,6 +216,7 @@
          :share?   (boolean (some #{(tr "labels.share")} (labels)))
          :edit?    (some? (.querySelector document (str "[aria-label=\"" (tr "labels.edit") "\"]")))
          :page?    (boolean (some #{"Page"} (labels)))
+         :modes?   (boolean (some #{(tr "viewer.header.interactions")} (labels)))
          :names-first?
          (let [switch    (.querySelector document "input[name=phone-view]")
                dashboard (.querySelector document (str "button[aria-label=\"" (tr "labels.dashboard") "\"]"))
@@ -220,9 +226,9 @@
                 (pos? (bit-and (.compareDocumentPosition switch dashboard) 2))))}))))
 
 (t/deftest the-canvas-shows-no-sections-and-no-phone-edits
-  (t/is (= {:sections 0 :share? false :edit? false :names-first? true :page? true} (phone-sheet true))
+  (t/is (= {:sections 0 :share? false :edit? false :names-first? true :page? true :modes? false} (phone-sheet true))
         "the canvas shows the page as it is")
-  (t/is (= {:sections 3 :share? true :edit? false :names-first? true :page? true} (phone-sheet false))
+  (t/is (= {:sections 3 :share? true :edit? false :names-first? true :page? true :modes? true} (phone-sheet false))
         "the prototype its sections and share, but no edit, the logo and the names first too"))
 
 (mf/defc keyer*
@@ -263,3 +269,70 @@
               "as high as it was, whatever it holds")
         (thd/act #(touch! (.querySelector document "[class*=grip-zone]") "touchstart" [[100 400]]))
         (t/is (true? @dragged?) "until its grip drags it")))))
+
+(t/deftest another-page-keeps-the-options-open
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [[page-id other-id] [(uuid/next) (uuid/next)]
+            frame   {:id (uuid/next) :name "Board"}
+            closed? (atom false)
+            emitted (atom [])]
+        (with-redefs [st/emit! (mock/stub (fn [& events] (swap! emitted into events)))]
+          (thd/render! root (mf/element phone-sheet/phone-sheet*
+                                        #js {:page {:id page-id :frames [frame]}
+                                             :file {:name "File"
+                                                    :data {:pages [page-id other-id]
+                                                           :pages-index {page-id {:name "Page"}
+                                                                         other-id {:name "Other"}}}}
+                                             :frame frame :index 0
+                                             :permissions {:in-team true :is-logged true}
+                                             :section :interactions
+                                             :onClose #(reset! closed? true)}))
+          (thd/click! window (->> (.querySelectorAll document "button")
+                                  (filter #(= "Other" (.-textContent %)))
+                                  (first)))
+          (t/is (= [::dv/go-to-page] (map ptk/type @emitted)) "to the other page")
+          (t/is (false? @closed?) "the options stay open"))))))
+
+(defn- sheet-taps
+  "What a tap on the button of the options of a phone that `pick` finds
+  among its buttons emits, and whether it closed them: on the second of
+  two boards, which show their interactions on click."
+  [pick]
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [page-id (uuid/next)
+            frames  [{:id (uuid/next) :name "Board"} {:id (uuid/next) :name "Other"}]
+            closed? (atom false)
+            emitted (atom [])
+            button  (fn [f] (->> (.querySelectorAll document "button") (filter f) (first)))]
+        (with-redefs [st/emit! (mock/stub (fn [& events] (swap! emitted into events)))]
+          (thd/render! root (mf/element phone-sheet/phone-sheet*
+                                        #js {:page {:id page-id :frames frames}
+                                             :file {:name "File" :data {:pages [page-id]
+                                                                        :pages-index {page-id {:name "Page"}}}}
+                                             :frame (second frames) :index 1
+                                             :permissions {:in-team true :is-logged true}
+                                             :section :interactions
+                                             :interactionsMode :show-on-click
+                                             :onClose #(reset! closed? true)}))
+          (thd/click! window (button pick))
+          [(map ptk/type @emitted) @closed?])))))
+
+(t/deftest its-buttons-keep-the-options-open
+  (let [;; by the tooltip that names it (see `icon-button*`)
+        labelled (fn [label]
+                   (fn [^js node]
+                     (= label (some-> (.getAttribute node "aria-labelledby")
+                                      (as-> id (.getElementById (.-ownerDocument node) id))
+                                      (.getAttribute "aria-label")))))]
+    (t/is (= [[::dv/select-prev-frame] false] (sheet-taps (labelled (tr "labels.previous"))))
+          "the board before")
+    (t/is (= [[::dv/select-first-frame] false] (sheet-taps (labelled (tr "viewer.go-to-first-board"))))
+          "the first board")))
+
+(t/deftest the-menu-of-the-comments
+  (let [events #(map ptk/type (@#'phone-sheet/comments-events %1 %2))]
+    (t/is (= [::dcm/update-filters] (events "yours" false)) "which comments show")
+    (t/is (= [::dcm/update-filters] (events "resolved" true)) "the resolved ones or not")
+    (t/is (= [::dcm/update-options] (events "list" false)) "their list, above the options")))

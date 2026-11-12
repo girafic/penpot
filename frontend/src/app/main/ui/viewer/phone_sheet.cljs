@@ -25,6 +25,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
+   [app.main.ui.ds.layout.menu :refer [menu* menu-item* menu-separator*]]
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.viewer.header :as header]
@@ -389,21 +390,63 @@
              :on-click hide!}
        (tr "viewer.phone.hold-hint")])))
 
+(defn- comments-events
+  "The events of the entry `id` of the menu of the comments of the
+  options of a phone, where they show the resolved ones too (`resolved?`):
+  which comments show, or their list, which opens above the options."
+  [id resolved?]
+  (case id
+    "resolved" [(dcm/update-filters {:show (if resolved? :pending :all)})]
+    "list"     [(dcm/update-options {:show-sidebar? true})]
+    [(dcm/update-filters {:mode (keyword id)})]))
+
+(mf/defc sheet-menu*
+  "A menu of the options of a phone beside share, as the header holds it:
+  a button (as a select of the design system) named `label` with an
+  arrow, its `items` below it, or above where they have no room,
+  `{:id :label :ticked :icon}` or `:separator`, and `on-action` with the
+  id of the one tapped."
+  {::mf/private true}
+  [{:keys [label items on-action]}]
+  (let [open* (mf/use-state false)
+        open? (deref open*)]
+    [:> menu* {:is-open open?
+               :on-open-change #(reset! open* %)
+               ;; down over what the sheet holds, up where it has no room
+               :placement "bottom end"
+               :on-action on-action
+               :trigger (mf/html
+                         [:> button* {:variant "secondary"
+                                      :class (stl/css :menu-button)
+                                      :aria-expanded open?
+                                      :on-click #(swap! open* not)}
+                          label
+                          [:> icon* {:icon-id i/arrow-down :size "s"}]])}
+     (for [[n item] (map-indexed vector items)]
+       (if (= item :separator)
+         [:> menu-separator* {:key (dm/str "separator-" n)}]
+         (let [{:keys [id label ticked icon]} item]
+           [:> menu-item* {:key id :id id :text-value label}
+            (when icon [:> icon* {:icon-id icon :size "s"}])
+            [:span {:class (stl/css :menu-label)} label]
+            (when ticked [:> icon* {:icon-id i/tick :size "s"}])])))]))
+
 (mf/defc phone-sheet*
   "The options of the view mode of a phone over the board `frame`, the
-  `index`th of `page` of `file` of `project`, or over the canvas of the page
-  (`is-canvas`): the sections `permissions` allow and share (in the
-  prototype only), the canvas or the prototype where it `has-canvas`,
-  its boards and its animation (`timeline`, the controls of the view
-  mode) in the prototype, the pages of the file, then what the header
-  holds in the `section` shown: its flows and how its interactions show
-  (`interactions-mode`, in the prototype), or which comments show and
-  their list, the logo back to the dashboard with the project and the
-  file, and the switch between the canvas and the prototype first.
-  What changes the view closes it, but going to another section.
-  `is-docked`, it stays at the bottom of the canvas (see `sheet*`). The
-  switch keeps it open, as high as it is: it calls `on-switch` first,
-  which keeps it shown in the other mode."
+  `index`th of `page` of `file` of `project`, or over the canvas of the
+  page (`is-canvas`). First the logo back to the dashboard with the
+  project and the file, then the switch between the canvas and the
+  prototype where it `has-canvas`. In the prototype then the sections
+  `permissions` allow, a menu of what the header holds in the `section`
+  shown (how the interactions show, `interactions-mode`, or which
+  comments show and their list) and share; its boards and its animation
+  (`timeline`, the controls of the view mode); its flows. Last the pages
+  of the file. It stays open as it goes to another section, page, board
+  or flow, changes how the interactions or the comments show and opens
+  the list of the comments, which shows above it; it closes as it leaves
+  the view mode or opens what shows instead (share, log in). `is-docked`, it stays at the bottom of the
+  canvas (see `sheet*`). The switch keeps it open, as high as it is: it
+  calls `on-switch` first, which keeps it shown in the other mode."
   [{:keys [page file project frame index permissions section interactions-mode timeline on-close
            is-canvas has-canvas is-docked on-switch]}]
   (let [frames     (:frames page)
@@ -508,6 +551,27 @@
                             :icon i/code
                             :on-click #(go-to-section :inspect)}])
         [:span {:class (stl/css :gap)}]
+        ;; how the interactions show, the one shown ticked
+        (when (= section :interactions)
+          (let [shown (or interactions-mode :show-on-click)]
+            [:> sheet-menu* {:label (tr "viewer.header.interactions")
+                             :on-action #(st/emit! (dv/set-interactions-mode (keyword %)))
+                             :items [{:id "hide" :label (tr "viewer.header.dont-show-interactions")
+                                      :ticked (= shown :hide)}
+                                     {:id "show" :label (tr "viewer.header.show-interactions")
+                                      :ticked (= shown :show)}
+                                     {:id "show-on-click" :label (tr "viewer.header.show-interactions-on-click")
+                                      :ticked (= shown :show-on-click)}]}]))
+        ;; which comments show, and their list, above the options
+        (when (= section :comments)
+          [:> sheet-menu* {:label (tr "labels.comments")
+                           :on-action #(apply st/emit! (comments-events % resolved?))
+                           :items [{:id "all" :label (tr "labels.show-all-comments") :ticked (= cmode :all)}
+                                   {:id "yours" :label (tr "labels.show-your-comments") :ticked (= cmode :yours)}
+                                   {:id "mentions" :label (tr "labels.show-mentions") :ticked (= cmode :mentions)}
+                                   :separator
+                                   {:id "resolved" :label (tr "labels.hide-resolved-comments") :ticked (not resolved?)}
+                                   {:id "list" :label (tr "labels.show-comments-list") :icon i/comments}]}])
         (when (:in-team permissions)
           [:> button* {:variant "primary" :on-click open-share}
            (tr "labels.share")])
@@ -525,17 +589,17 @@
                           :aria-label (tr "viewer.go-to-first-board")
                           :icon i/reload
                           :disabled (zero? index)
-                          :on-click #(act! dv/select-first-frame)}]
+                          :on-click #(st/emit! dv/select-first-frame)}]
         [:> icon-button* {:variant "ghost"
                           :aria-label (tr "labels.previous")
                           :icon i/arrow-left
                           :disabled (zero? index)
-                          :on-click #(act! dv/select-prev-frame)}]
+                          :on-click #(st/emit! dv/select-prev-frame)}]
         [:> icon-button* {:variant "ghost"
                           :aria-label (tr "labels.next")
                           :icon i/arrow-right
                           :disabled (>= (inc index) total)
-                          :on-click #(act! dv/select-next-frame)}]])
+                          :on-click #(st/emit! dv/select-next-frame)}]])
 
      ;; its animation
      (when (and (some? timeline) (not (true? is-canvas)))
@@ -550,7 +614,8 @@
            [:button {:type "button"
                      :class (stl/css :item)
                      :aria-pressed (= id (:id page))
-                     :on-click #(act! (dv/go-to-page id))}
+                     ;; the sheet stays, over the other page
+                     :on-click #(st/emit! (dv/go-to-page id))}
             [:> icon* {:icon-id i/document :size "s"}]
             [:span {:class (stl/css :label)} (dm/get-in file [:data :pages-index id :name])]
             (when (= id (:id page))
@@ -564,52 +629,8 @@
            [:button {:type "button"
                      :class (stl/css :item)
                      :aria-pressed (= flow-id (:id flow))
-                     :on-click #(act! (dv/go-to-frame (:starting-frame item)))}
+                     :on-click #(st/emit! (dv/go-to-frame (:starting-frame item)))}
             [:> icon* {:icon-id i/play :size "s"}]
             [:span {:class (stl/css :label)} (:name item)]
             (when (= flow-id (:id flow))
-              [:> icon* {:icon-id i/tick :size "s"}])]])])
-
-     ;; how the interactions show, on its boards
-     (when (and (= section :interactions) (not (true? is-canvas)))
-       [:ul {:class (stl/css :list)}
-        (for [[mode label] [[:hide (tr "viewer.header.dont-show-interactions")]
-                            [:show (tr "viewer.header.show-interactions")]
-                            [:show-on-click (tr "viewer.header.show-interactions-on-click")]]]
-          [:li {:key (name mode)}
-           [:button {:type "button"
-                     :class (stl/css :item)
-                     :aria-pressed (= mode interactions-mode)
-                     :on-click #(act! (dv/set-interactions-mode mode))}
-            [:span {:class (stl/css :label)} label]
-            (when (= mode interactions-mode)
-              [:> icon* {:icon-id i/tick :size "s"}])]])])
-
-     ;; which comments show, and their list
-     (when (= section :comments)
-       [:ul {:class (stl/css :list)}
-        (for [[mode label] [[:all (tr "labels.show-all-comments")]
-                            [:yours (tr "labels.show-your-comments")]
-                            [:mentions (tr "labels.show-mentions")]]]
-          [:li {:key (name mode)}
-           [:button {:type "button"
-                     :class (stl/css :item)
-                     :aria-pressed (= mode cmode)
-                     :on-click #(act! (dcm/update-filters {:mode mode}))}
-            [:span {:class (stl/css :label)} label]
-            (when (= mode cmode)
-              [:> icon* {:icon-id i/tick :size "s"}])]])
-        [:li
-         [:button {:type "button"
-                   :class (stl/css :item)
-                   :aria-pressed (not resolved?)
-                   :on-click #(act! (dcm/update-filters {:show (if resolved? :pending :all)}))}
-          [:span {:class (stl/css :label)} (tr "labels.hide-resolved-comments")]
-          (when-not resolved?
-            [:> icon* {:icon-id i/tick :size "s"}])]]
-        [:li
-         [:button {:type "button"
-                   :class (stl/css :item)
-                   :on-click #(act! (dcm/update-options {:show-sidebar? true}))}
-          [:> icon* {:icon-id i/comments :size "s"}]
-          [:span {:class (stl/css :label)} (tr "labels.show-comments-list")]]]])]))
+              [:> icon* {:icon-id i/tick :size "s"}])]])])]))
