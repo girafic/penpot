@@ -577,6 +577,19 @@
                       :duration))
           "a longer duration set on it")))
 
+(t/deftest a-board-exports-with-its-copies
+  (let [{:keys [objects timelines board copy-rect main-page]} (component-scene)
+        copies (cltl/instance-timelines objects board nil main-page)
+        clip   {:id (uuid/next) :audio-id (uuid/next) :name "ding.wav" :source-duration 1000
+                :start 0 :offset 0 :duration 1000 :lane 0}
+        sound  (update-vals copies #(assoc % :audio-clips {(:id clip) clip}))
+        tl     (cltl/with-copies (cta/make-timeline {:board-id board}) sound objects false)]
+    (t/is (nil? (get timelines board)) "a board with no timeline of its own")
+    (t/is (= [1000 :loop] [(:duration tl) (:playback tl)]) "on the clock of its copies")
+    (t/is (contains? (:tracks tl) copy-rect) "with their animations")
+    (t/is (= [1000] (:copy-loops tl)))
+    (t/is (= 1 (count (:audio-clips tl))) "and the sound of their mains")))
+
 (defn- scale-copy
   "`objects` with the copy `copy-id` and its layers as big as `factor`
   times, from its top left corner (only their selrects, all the timelines

@@ -8,7 +8,6 @@
   (:require
    [app.main.ui.exports.animated :as uea]
    [app.main.ui.workspace.sidebar.options.menus.export-issues :as issues]
-   [app.main.ui.workspace.sidebar.options.menus.exports :as exp]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [rumext.v2 :as mf]))
@@ -17,23 +16,23 @@
 (def ^:private timeline {:board-id :board :tracks {}})
 
 (t/deftest animation-tab-hidden-without-timeline
-  (t/is (nil? (exp/animation-export-boards :frame [board] {})))
-  (t/is (nil? (exp/animation-export-boards :frame [board] nil))))
+  (t/is (nil? (uea/animation-export-boards :frame [board] {})))
+  (t/is (nil? (uea/animation-export-boards :frame [board] nil))))
 
 (t/deftest animation-tab-shown-when-board-has-timeline
-  (t/is (= [board] (exp/animation-export-boards :frame [board] {:board timeline}))))
+  (t/is (= [board] (uea/animation-export-boards :frame [board] {:board timeline}))))
 
 (t/deftest animation-tab-shown-for-several-boards
   (let [other {:id :other :type :frame}
         still {:id :still :type :frame}]
     (t/is (= [board other]
-             (exp/animation-export-boards :multiple [board still other]
+             (uea/animation-export-boards :multiple [board still other]
                                           {:board timeline :other (assoc timeline :board-id :other)}))
           "the animated ones")))
 
 (t/deftest animation-tab-hidden-for-non-board-selection
-  (t/is (nil? (exp/animation-export-boards :rect [board] {:board timeline})))
-  (t/is (nil? (exp/animation-export-boards :multiple [board {:id :rect :type :rect}] {:board timeline}))
+  (t/is (nil? (uea/animation-export-boards :rect [board] {:board timeline})))
+  (t/is (nil? (uea/animation-export-boards :multiple [board {:id :rect :type :rect}] {:board timeline}))
         "not with other shapes"))
 
 (t/deftest the-export-button-follows-the-export

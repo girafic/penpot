@@ -217,9 +217,7 @@
                                                                       (alottie/parent-candidates own objects)
                                                                       (constantly false)))
             bake                  (cta/drop-guides))
-          (cltl/with-copies-clock (vals copies) stored?)
-          (cltl/with-instance-tracks (vals copies) objects :text-split text-split)
-          (cltl/with-instance-clips copies)
+          (cltl/with-copies copies objects stored? :text-split text-split)
           ;; and those of the copies
           (cond-> bake (cta/drop-guides))))))
 

@@ -1056,6 +1056,20 @@
       [timeline lanes]
       mains))))
 
+
+(defn with-copies
+  "`timeline`, of a board, as the exports read it with the component
+  copies in it, `copies` (by key, see `copy-timelines`): keeping time
+  with them while it has no tracks (see `with-copies-clock`, `stored?`),
+  with their animations (see `with-instance-tracks`, which takes
+  `text-split`) and the sound of their mains (see
+  `with-instance-clips`). What the workspace exports and what the view
+  mode shows of the export of a board."
+  [timeline copies objects stored? & {:keys [text-split]}]
+  (-> timeline
+      (with-copies-clock (vals copies) stored?)
+      (with-instance-tracks (vals copies) objects :text-split text-split)
+      (with-instance-clips copies)))
 (defn layer-ids
   "The ids of `id` and the layers in it, in the order of the layers panel
   and the dock: the shape, then its layers top-most first, depth first."

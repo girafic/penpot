@@ -55,18 +55,6 @@
        (= (unchecked-get old-props "values")
           (unchecked-get new-props "values"))))
 
-(defn animation-export-boards
-  "The selected boards that have a timeline to export, their own or the
-  one of the component copies in them (`timelines` holds them by board,
-  see `dwa/board-export-timeline`), when only boards are selected (`type`
-  is `:frame` or `:multiple`); else nil. The Animated export tab is shown
-  only for them: one, or several into a ZIP."
-  [type shapes timelines]
-  (when (and (contains? #{:frame :multiple} type)
-             (seq shapes)
-             (every? cfh/frame-shape? shapes))
-    (not-empty (filterv #(contains? timelines (:id %)) shapes))))
-
 (mf/defc animated-exports*
   "The Animated export of the `boards` selected (one, or several into a
   ZIP), with their `timelines` (by board id), as the workspace has it:
@@ -341,7 +329,7 @@
 
         animated-boards
         (when (seq formats)
-          (animation-export-boards type shapes timelines))
+          (uea/animation-export-boards type shapes timelines))
 
         animated-board (first animated-boards)
         animated-id    (str/join "," (map :id animated-boards))

@@ -38,21 +38,14 @@
   `dea/export-formats`, which needs the encoders)."
   [:mp4 :webm :gif :avif :svg :lottie :dotlottie])
 
-(defn animated-boards
-  "The boards of `shapes` a member of the team exports as an animation from
-  the view mode: those with a timeline of their own on `page`, when only
-  boards are selected; nil without."
-  [shapes page]
-  (when (and (seq shapes) (every? cfh/frame-shape? shapes))
-    (not-empty (filterv #(contains? (:timelines page) (:id %)) shapes))))
-
 (def ^:private export-progress-ref
   "How far the animated export of the view mode is (see
   `vej/start-job`), nil without one."
   (l/derived :viewer-export-animation st/state))
 
 (mf/defc animated-export*
-  "The animated export of the `boards` of `page` from the view mode, as the
+  "The animated export of the `boards` of `page` from the view mode, with
+  their `timelines` (by board id, see `dv/board-export-timeline`), as the
   workspace offers it (see `uea/animated-export*`): the settings the
   workspace keeps with the timeline of the first, changed for this export
   only, and the export in the tab the workspace exports in, which loads
@@ -61,9 +54,8 @@
   and come back meanwhile. No list of what a format plays otherwise
   (see `dea/export-issues`, which needs the encoders)."
   {::mf/private true}
-  [{:keys [boards page file-id]}]
-  (let [timelines    (into {} (map (fn [{:keys [id]}] [id (get-in page [:timelines id])])) boards)
-        stored       (:export (get timelines (:id (first boards))))
+  [{:keys [boards timelines page file-id]}]
+  (let [stored       (:export (get timelines (:id (first boards))))
         changes*     (mf/use-state {})
         export       (merge stored (deref changes*))
         progress     (mf/deref export-progress-ref)
@@ -119,13 +111,26 @@
         page        (get-in vstate [:pages page-id])
 
         ;; a member of the team exports the animation of a board, as the
-        ;; workspace does (Penpot Motion)
-        animated    (when (get-in vstate [:permissions :in-team])
-                      (animated-boards shapes page))
+        ;; workspace does (Penpot Motion): the selected boards with a
+        ;; timeline of their own or animated component copies in them,
+        ;; their timelines as the export reads them
+        files       (mf/deref refs/files)
+        in-team?    (get-in vstate [:permissions :in-team])
+        board-ids   (when (and in-team? (every? cfh/frame-shape? shapes))
+                      (mapv :id shapes))
+        ;; by value: a new vector each render would build them again
+        boards-key  (str/join "," board-ids)
+        timelines   (mf/with-memo [page files boards-key]
+                      (into {}
+                            (keep (fn [id]
+                                    (when-let [tl (dv/board-export-timeline page files id)]
+                                      [id tl])))
+                            board-ids))
+        animated    (uea/animation-export-boards type shapes timelines)
         animated-key (str/join "," (map :id animated))
         tab*        (mf/use-state nil)
         tab         (or (deref tab*)
-                        (if (some? (get-in page [:timelines (:id (first animated)) :export]))
+                        (if (some? (:export (get timelines (:id (first animated)))))
                           "animated"
                           "static"))
         filename    (if (= (count shapes) 1)
@@ -331,6 +336,7 @@
           (if (= tab "animated")
             [:> animated-export* {:key animated-key
                                   :boards animated
+                                  :timelines timelines
                                   :page page
                                   :file-id file-id}]
             static)]

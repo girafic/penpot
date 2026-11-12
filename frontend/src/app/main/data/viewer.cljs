@@ -1561,6 +1561,25 @@
         copies
         (some? own)))))
 
+(defn board-export-timeline
+  "The timeline the animated export of the board `board-id` of `page`
+  reads, as its settings show it (see `uea/animated-export*`): its own,
+  a new one while it has none, with the animations of the component
+  copies in it, the sound of their mains and, while it has no tracks,
+  their clock (see `cltl/with-copies`); nil when it has neither. Without
+  what only the export itself does to it (see
+  `dwa/board-export-timeline`). `files` holds the files of the
+  components, by id."
+  [page files board-id]
+  (let [objects   (:objects page)
+        timelines (:timelines page)
+        stored?   (contains? timelines board-id)
+        copies    (cltl/copy-timelines objects timelines files board-id)]
+    (when (or stored? (seq copies))
+      (-> (or (get timelines board-id)
+              (cta/make-timeline {:board-id board-id :name (dm/get-in objects [board-id :name])}))
+          (cltl/with-copies copies objects stored?)))))
+
 (defn board-sound?
   "Whether the board `board-id` of `page` plays sound: its own audio
   clips, or those of the mains of the component copies in it (see
