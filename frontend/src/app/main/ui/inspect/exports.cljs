@@ -120,7 +120,10 @@
                                     (when-let [tl (dv/board-export-timeline page files id)]
                                       [id tl])))
                             board-ids))
-        animated    (uea/animation-export-boards type shapes timelines)
+        ;; the kind of the selection, from the shapes: the `type` this
+        ;; component gets is not it (it reads `cljs.core/type`)
+        sel-type    (if (next shapes) :multiple (:type (first shapes)))
+        animated    (uea/animation-export-boards sel-type shapes timelines)
         animated-key (str/join "," (map :id animated))
         tab*        (mf/use-state nil)
         tab         (or (deref tab*)
