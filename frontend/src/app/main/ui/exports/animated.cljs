@@ -96,12 +96,15 @@
   offers, `issues` of each, `render-wasm?`, `codec-supported?` (a
   promise of whether the browser encodes a format, see
   `daf/codec-supported?`) and which way its selects open
-  (`select-direction`, \"up\" by default)."
+  (`select-direction`, \"up\" by default, \"auto\" as they have room)."
   [{:keys [boards timelines export formats issues render-wasm? progress
            on-change on-export on-cancel on-open-tab on-export-here
            codec-supported? select-direction]}]
   (let [codec-supported? (or codec-supported? daf/codec-supported?)
-        select-direction (or select-direction "up")
+        select-direction (case select-direction
+                           nil    "up"
+                           "auto" nil
+                           select-direction)
 
         board     (first boards)
         timeline  (get timelines (:id board))

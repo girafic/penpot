@@ -181,6 +181,7 @@
    [frontend-tests.ui.exports-menu-test]
    [frontend-tests.ui.gradient-handlers-test]
    [frontend-tests.ui.history-test]
+   [frontend-tests.ui.inspect-exports-test]
    [frontend-tests.ui.inspect-geometry-test]
    [frontend-tests.ui.inspect-motion-test]
    [frontend-tests.ui.inspect-stroke-tokens-test]
@@ -433,6 +434,7 @@
    'frontend-tests.ui.error-boundary-test
    'frontend-tests.ui.export-animation-test
    'frontend-tests.ui.exports-menu-test
+   'frontend-tests.ui.inspect-exports-test
    'frontend-tests.ui.gradient-handlers-test
    'frontend-tests.ui.history-test
    'frontend-tests.ui.inspect-geometry-test

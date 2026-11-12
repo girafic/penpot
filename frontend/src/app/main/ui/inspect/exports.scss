@@ -89,3 +89,13 @@
   justify-content: center;
   inline-size: 100%;
 }
+
+// the static or the animated export of a board (Penpot Motion)
+.export-type {
+  --tabs-nav-padding-inline-start: 0;
+  --tabs-nav-padding-inline-end: 0;
+  --tabs-nav-padding-block-start: 0;
+  --tabs-nav-padding-block-end: 0;
+
+  margin-block-end: var(--sp-s);
+}
