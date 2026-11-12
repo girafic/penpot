@@ -297,6 +297,9 @@
   border-block-start: none;
   padding-inline: var(--sp-l);
   padding-block-end: calc(env(safe-area-inset-bottom) + var(--sp-xxl));
+
+  // the page scrolls, not this: a menu of a font may pass its end
+  overflow: visible;
 }
 
 [data-phone="true"] .dashboard-fonts-hero {

@@ -167,6 +167,7 @@
    [frontend-tests.ui.comments-docked-test]
    [frontend-tests.ui.comments-position-modifier-test]
    [frontend-tests.ui.component-svg-test]
+   [frontend-tests.ui.context-menu-a11y-test]
    [frontend-tests.ui.dashboard-import-linking-test]
    [frontend-tests.ui.device-frame-test]
    [frontend-tests.ui.device-menu-test]
@@ -415,6 +416,7 @@
    'frontend-tests.ui.check-updates-test
    'frontend-tests.ui.component-svg-test
    'frontend-tests.ui.ds-menu-test
+   'frontend-tests.ui.context-menu-a11y-test
    'frontend-tests.ui.color-token-position-test
    'frontend-tests.ui.colorpicker-token-set-order-test
    'frontend-tests.ui.comment-input-ime-test

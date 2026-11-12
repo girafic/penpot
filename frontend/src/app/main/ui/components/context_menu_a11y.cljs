@@ -55,6 +55,21 @@
 (def ^:private valid-option?
   (sm/lazy-validator schema:option))
 
+(def ^:private screen-margin
+  "How far from the right edge of the screen a menu beside what opened
+  it stays, px."
+  8)
+
+(defn offset-on-screen
+  "The offset of a menu that is `offset` and ends at `right` in a window
+  `window-width` wide: moved left by as much as it passes the right edge
+  less `screen-margin`, as it is when it does not."
+  [offset right window-width]
+  (let [over (- right (- window-width screen-margin))]
+    (if (pos? over)
+      (- offset over)
+      offset)))
+
 (mf/defc context-menu-inner*
   [{:keys [on-close options selectable selected
            top left fixed min-width origin width]
@@ -102,7 +117,7 @@
 
         check-menu-offscreen
         (mf/use-fn
-         (mf/deps top left offset-x offset-y)
+         (mf/deps top left offset-x offset-y fixed)
          (fn [node]
            (when (some? node)
              (let [bounding-rect   (dom/get-bounding-rect node)
@@ -115,9 +130,17 @@
                    target-offset-y (if (> (+ top node-height) window-height)
                                      (- node-height)
                                      0)
-                   target-offset-x (if (> (+ left node-width) window-width)
-                                     (- node-width)
-                                     0)]
+                   ;; at the pointer (`fixed`) it opens on its left
+                   ;; when there is no room on its right; beside what
+                   ;; opened it, it moves left as far as it passed the
+                   ;; right edge of the screen, as on a phone
+                   target-offset-x (if fixed
+                                     (if (> (+ left node-width) window-width)
+                                       (- node-width)
+                                       0)
+                                     (offset-on-screen offset-x
+                                                       (dm/get-prop bounding-rect :right)
+                                                       window-width))]
 
                (when (or (not= target-offset-y offset-y)
                          (not= target-offset-x offset-x))
