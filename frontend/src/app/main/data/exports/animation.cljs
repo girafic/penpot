@@ -33,6 +33,7 @@
    [app.common.types.shape :as cts]
    [app.common.types.stroke :as ctst]
    [app.main.data.event :as ev]
+   [app.main.data.exports.animation-formats :as daf]
    [app.main.data.exports.svg-vectors :as svgv]
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
@@ -454,21 +455,9 @@
                      {:data data :width w :height h})]
     (assoc flat :format (if flatten-bg "RGBX" "RGBA"))))
 
-(def ^:private avif-bitrate-factor
-  "AV1 needs about half the bitrate of H.264 for the same quality."
-  0.5)
-
 (defn avif-bitrate
   [width height quality]
-  (max 1 (mth/round (* avif-bitrate-factor (cta/video-bitrate width height quality)))))
-
-(defn- av1-codec
-  "AV1 codec string (main profile, 8 bit) with a level that allows a
-  `width`×`height` frame: 5.1 up to 8192×4352, 6.0 above."
-  [width height]
-  (if (and (<= width 8192) (<= height 4352) (<= (* width height) 8912896))
-    "av01.0.13M.08"
-    "av01.0.16M.08"))
+  (max 1 (mth/round (* daf/avif-bitrate-factor (cta/video-bitrate width height quality)))))
 
 (def ^:private av1-color-space
   "The color space of `rgba->i420` output (see `video-color-space`)."
@@ -518,7 +507,7 @@
      (let [encoder (:video-encoder (merge (default-av1) media))]
        (if (nil? encoder)
          (js/Promise.resolve false)
-         (-> (.isConfigSupported ^js encoder #js {:codec (av1-codec 64 64) :width 64 :height 64})
+         (-> (.isConfigSupported ^js encoder #js {:codec (daf/av1-codec 64 64) :width 64 :height 64})
              (.then #(boolean (.-supported ^js %)))
              (.catch (fn [_] false)))))
 
@@ -563,10 +552,6 @@
   or strikes some of its text as animations of the whole text (see
   `unit-texts`)."
   #{:svg :lottie :dotlottie})
-
-(def audio-formats
-  "The formats that carry the sound of the audio clips."
-  #{:mp4 :webm})
 
 (def markup-formats
   "The formats written as markup over pictures of the layers (see
@@ -1227,7 +1212,7 @@
         h               (when raw-h (even-dim raw-h))]
     (if (or (nil? video-encoder) (nil? video-frame) (nil? w))
       (js/Promise.resolve {:status :unavailable})
-      (let [config #js {:codec (av1-codec w h)
+      (let [config #js {:codec (daf/av1-codec w h)
                         :width w
                         :height h
                         :bitrate bitrate
@@ -1320,28 +1305,6 @@
   (str (-> (or name "animation")
            (str/replace #"[^a-zA-Z0-9_-]+" "-"))
        ext))
-
-(defn approx-size-label
-  [bytes]
-  (cond
-    (< bytes 1024)
-    (str "~" bytes " B")
-
-    (< bytes (* 1024 1024))
-    (str "~" (mth/round (/ bytes 1024.0)) " KB")
-
-    :else
-    (str "~" (mth/precision (/ bytes (* 1024.0 1024.0)) 1) " MB")))
-
-(defn estimated-size
-  [format width height quality duration fps]
-  (let [times (cta/frame-times duration fps)]
-    (case format
-      (:mp4 :webm) (cta/estimated-video-bytes width height quality duration)
-      :avif (mth/round (* avif-bitrate-factor
-                          (cta/estimated-video-bytes width height quality duration)))
-      :gif (cta/estimated-gif-bytes width height (count times))
-      0)))
 
 (defn- u8->base64
   [bytes]
@@ -1795,16 +1758,6 @@
                     (fn [result]
                       (cond-> (assoc result :name (or (:name board) (:name tl)))
                         (< fit 1) (assoc :fitted [(even-dim bw) (even-dim bh)]))))))))))))
-
-(def format-labels
-  "How the formats of an animation export are written."
-  {:mp4 "MP4"
-   :webm "WebM"
-   :gif "GIF"
-   :avif "AVIF"
-   :svg "SVG"
-   :lottie "Lottie"
-   :dotlottie "dotLottie"})
 
 (def ^:private dotlottie-mtype
   "The media type of a dotLottie archive, whose file ends in `.lottie`."

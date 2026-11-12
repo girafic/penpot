@@ -25,6 +25,7 @@
    [frontend-tests.data.event-test]
    [frontend-tests.data.export-animation-job-test]
    [frontend-tests.data.export-job-workspace-test]
+   [frontend-tests.data.exports-animation-formats-test]
    [frontend-tests.data.exports-animation-test]
    [frontend-tests.data.exports-assets-test]
    [frontend-tests.data.exports-avif-test]
@@ -165,13 +166,13 @@
    [frontend-tests.ui.comments-docked-test]
    [frontend-tests.ui.comments-position-modifier-test]
    [frontend-tests.ui.component-svg-test]
-   [frontend-tests.ui.ds-menu-test]
    [frontend-tests.ui.dashboard-import-linking-test]
    [frontend-tests.ui.device-frame-test]
    [frontend-tests.ui.device-menu-test]
    [frontend-tests.ui.drag-scroll-test]
    [frontend-tests.ui.drawarea-test]
    [frontend-tests.ui.ds-controls-numeric-input-test]
+   [frontend-tests.ui.ds-menu-test]
    [frontend-tests.ui.dynamic-modifiers-test]
    [frontend-tests.ui.easing-menu-test]
    [frontend-tests.ui.error-boundary-test]
@@ -286,6 +287,7 @@
    'frontend-tests.data.export-animation-job-test
    'frontend-tests.data.export-job-workspace-test
    'frontend-tests.data.exports-animation-test
+   'frontend-tests.data.exports-animation-formats-test
    'frontend-tests.data.exports-avif-test
    'frontend-tests.data.exports-files-test
    'frontend-tests.data.imports-test

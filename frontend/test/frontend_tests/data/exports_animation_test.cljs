@@ -22,6 +22,7 @@
    [app.common.types.text :as txt]
    [app.common.uuid :as uuid]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.exports.animation-formats :as daf]
    [app.main.data.exports.animation-tab :as dat]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.lottie :as dwl]
@@ -992,9 +993,9 @@
       (t/is (= [] (dea/crop-frames [] [] {:x 0 :y 0 :width 2 :height 2} 1))))))
 
 (t/deftest estimated-size-is-positive-for-raster
-  (t/is (pos? (dea/estimated-size :mp4 100 80 :high 1000 30)))
-  (t/is (pos? (dea/estimated-size :gif 100 80 :high 1000 30)))
-  (t/is (zero? (dea/estimated-size :svg 100 80 :high 1000 30))))
+  (t/is (pos? (daf/estimated-size :mp4 100 80 :high 1000 30)))
+  (t/is (pos? (daf/estimated-size :gif 100 80 :high 1000 30)))
+  (t/is (zero? (daf/estimated-size :svg 100 80 :high 1000 30))))
 
 (t/deftest collect-layer-images-builds-assets
   (let [{:keys [objects bid cid]} (test-objects)
@@ -1673,7 +1674,7 @@
           "MP4 and WebM carry it")
     (t/testing "a board that plays only audio"
       (t/is (= [:mp4 :webm :gif :avif :svg :lottie :dotlottie] (dea/export-formats objects clips true)))
-      (t/is (not-any? dea/audio-formats (dea/export-formats objects clips false))
+      (t/is (not-any? daf/audio-formats (dea/export-formats objects clips false))
             "without the WASM renderer, no format with sound"))))
 
 (defn- export-scene

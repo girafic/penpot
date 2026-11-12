@@ -13,6 +13,7 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.exports.animation-formats :as daf]
    [app.main.data.exports.animation-job :as job]
    [app.main.data.exports.animation-workspace :as deaw]
    [app.main.data.exports.assets :as de]
@@ -188,10 +189,10 @@
               boards)
 
         estimate  (when (and timeline raster?)
-                    (dea/approx-size-label
+                    (daf/approx-size-label
                      (reduce + (map (fn [board {:keys [scale]}]
                                       (let [[w h] (board-size board)]
-                                        (dea/estimated-size format (mth/round (* w scale)) (mth/round (* h scale))
+                                        (daf/estimated-size format (mth/round (* w scale)) (mth/round (* h scale))
                                                             quality
                                                             (cta/cycle-duration (get timelines (:id board)))
                                                             fps)))
@@ -199,13 +200,13 @@
 
         format-options
         (filterv #(some #{(keyword (:value %))} formats)
-                 [{:value "mp4" :label (:mp4 dea/format-labels) :disabled (not (:mp4 support))}
-                  {:value "webm" :label (:webm dea/format-labels) :disabled (not (:webm support))}
-                  {:value "gif" :label (:gif dea/format-labels)}
-                  {:value "avif" :label (:avif dea/format-labels) :disabled (not (:avif support))}
-                  {:value "svg" :label (:svg dea/format-labels)}
-                  {:value "lottie" :label (:lottie dea/format-labels)}
-                  {:value "dotlottie" :label (:dotlottie dea/format-labels)}])
+                 [{:value "mp4" :label (:mp4 daf/format-labels) :disabled (not (:mp4 support))}
+                  {:value "webm" :label (:webm daf/format-labels) :disabled (not (:webm support))}
+                  {:value "gif" :label (:gif daf/format-labels)}
+                  {:value "avif" :label (:avif daf/format-labels) :disabled (not (:avif support))}
+                  {:value "svg" :label (:svg daf/format-labels)}
+                  {:value "lottie" :label (:lottie daf/format-labels)}
+                  {:value "dotlottie" :label (:dotlottie daf/format-labels)}])
 
         quality-options
         [{:value "low" :label (tr "workspace.options.export.quality-low")}
@@ -348,7 +349,7 @@
                           :on-change on-bbox}]])
 
         [:> export-issues* {:kinds (get issues format)
-                            :format-label (get dea/format-labels format)}]
+                            :format-label (get daf/format-labels format)}]
 
         (when raster?
           [:*
@@ -381,7 +382,7 @@
               [:> switch* {:aria-label (tr "workspace.animation.loop")
                            :default-checked loop?
                            :on-change on-loop}]])
-           (when (and clips? (contains? dea/audio-formats format))
+           (when (and clips? (contains? daf/audio-formats format))
              [:div {:class (stl/css :animated-row)}
               [:span {:class (stl/css :row-label)} (tr "workspace.options.export.include-audio")]
               [:> switch* {:aria-label (tr "workspace.options.export.include-audio")

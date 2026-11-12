@@ -11,6 +11,7 @@
    [app.common.math :as mth]
    [app.config :as cf]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.exports.animation-formats :as daf]
    [app.main.data.exports.animation-job :as job]
    [app.main.data.exports.animation-tab :as dat]
    [app.main.store :as st]
@@ -72,7 +73,7 @@
         shape  (get-in page [:objects (:board-id (nth boards index))])
         board  (:name shape)
         frame  (frame-view (:selrect shape) frame-scale)
-        format (some->> (:format params) name keyword (get dea/format-labels))]
+        format (some->> (:format params) name keyword (get daf/format-labels))]
     (case status
       ;; before the tab starts its job
       nil        {:text ["export-animation.waiting"] :actions []}

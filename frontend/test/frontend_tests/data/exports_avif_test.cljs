@@ -8,6 +8,7 @@
   (:require
    ["/app/main/data/exports/avif.js" :as avif]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.exports.animation-formats :as daf]
    [cljs.test :as t :include-macros true]))
 
 ;; OBUs as Chrome's AV1 encoder writes them: every temporal unit starts
@@ -383,7 +384,7 @@
                (->vec (:data yuv)))))))
 
 (t/deftest avif-is-estimated-below-video
-  (let [avif-size (dea/estimated-size :avif 1920 1080 :high 2000 30)
-        mp4-size  (dea/estimated-size :mp4 1920 1080 :high 2000 30)]
+  (let [avif-size (daf/estimated-size :avif 1920 1080 :high 2000 30)
+        mp4-size  (daf/estimated-size :mp4 1920 1080 :high 2000 30)]
     (t/is (pos? avif-size))
     (t/is (< avif-size mp4-size))))
