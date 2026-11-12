@@ -59,6 +59,17 @@
   padding-block-end: calc(50dvh + var(--phone-sheet-gap));
 }
 
+// the way back to the interactions, at the start of the sheet, above its
+// tabs: its arrow at their edge, its padding out to the left
+.phone-back {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.phone-back-button {
+  margin-inline-start: calc(-1 * var(--sp-m));
+}
+
 .phone-tabs {
   flex: 1;
   min-block-size: 0;

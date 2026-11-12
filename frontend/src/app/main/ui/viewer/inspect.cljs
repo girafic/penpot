@@ -12,6 +12,8 @@
    [app.main.constants :refer [right-sidebar-default-width right-sidebar-default-max-width]]
    [app.main.data.viewer :as dv]
    [app.main.store :as st]
+   [app.main.ui.ds.buttons.button :refer [button*]]
+   [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
    [app.main.ui.hooks.resize :refer [use-resize-hook]]
    [app.main.ui.inspect.left-sidebar :refer [left-sidebar]]
@@ -46,10 +48,12 @@
 (mf/defc phone-viewport*
   "Inspect on a phone: the board alone, a tap on a layer selects it and
   opens a sheet over the bottom half of the screen with what it is and its
-  code, or the layers of the board. Above the sheet the board still takes
-  taps, and it scrolls as far as to show its bottom there."
+  code, or the layers of the board, the way back to the interactions
+  first, which opens the options there (`on-back`). Above the sheet the
+  board still takes taps, and it scrolls as far as to show its bottom
+  there."
   {::mf/private true}
-  [{:keys [local file page frame size share-id]}]
+  [{:keys [local file page frame size share-id on-back]}]
   (let [sheet* (mf/use-state false)
         sheet? (deref sheet*)
         tab*   (mf/use-state "info")
@@ -59,7 +63,15 @@
         (mf/use-fn #(reset! sheet* true))
 
         close-sheet
-        (mf/use-fn #(reset! sheet* false))]
+        (mf/use-fn #(reset! sheet* false))
+
+        ;; as the sections of the options of a phone go, the options open
+        back-to-interactions
+        (mf/use-fn
+         (mf/deps on-back)
+         (fn []
+           (when (fn? on-back) (on-back))
+           (st/emit! dv/close-thumbnails-panel (dv/go-to-section :interactions))))]
 
     [:*
      [:div#inspect-svg-wrapper {:class (stl/css :inspect-svg-wrapper)
@@ -75,6 +87,12 @@
                                :height :half
                                :open-beside true
                                :on-close close-sheet}
+        [:div {:class (stl/css :phone-back)}
+         [:> button* {:variant "ghost"
+                      :icon i/arrow-left
+                      :class (stl/css :phone-back-button)
+                      :on-click back-to-interactions}
+          (tr "workspace.options.interactions")]]
         [:> tab-switcher* {:tabs [{:label (tr "inspect.layer-info") :id "info"}
                                   {:label (tr "workspace.sidebar.layers") :id "layers"}]
                            :selected tab
@@ -95,7 +113,7 @@
                                :fill true}])]])]))
 
 (mf/defc viewport
-  [{:keys [local file page frame index viewer-pagination size share-id phone]}]
+  [{:keys [local file page frame index viewer-pagination size share-id phone on-back]}]
   (let [inspect-svg-container-ref (mf/use-ref nil)
         current-section* (mf/use-state :info)
         current-section  (deref current-section*)
@@ -151,7 +169,8 @@
                            :page page
                            :frame frame
                            :size size
-                           :share-id share-id}]
+                           :share-id share-id
+                           :on-back on-back}]
       [:*
        [:& left-sidebar {:frame frame
                          :local local

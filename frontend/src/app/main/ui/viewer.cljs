@@ -1354,7 +1354,9 @@
              :viewer-pagination viewer-pagination
              :interactions-mode interactions-mode
              :share-id share-id
-             :phone phone?}]
+             :phone phone?
+             ;; back on a phone to the interactions, its options open
+             :on-back #(reset! sheet* true)}]
 
            [:& (mf/provider ctx/current-zoom) {:value zoom}
             [:& viewer-wrapper
