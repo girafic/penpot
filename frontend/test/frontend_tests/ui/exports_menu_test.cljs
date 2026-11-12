@@ -7,7 +7,7 @@
 (ns frontend-tests.ui.exports-menu-test
   (:require
    [app.main.ui.exports.animated :as uea]
-   [app.main.ui.workspace.sidebar.options.menus.export-issues :as issues]
+   [app.main.ui.exports.issues :as issues]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [rumext.v2 :as mf]))

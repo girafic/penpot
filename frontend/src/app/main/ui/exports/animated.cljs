@@ -23,7 +23,7 @@
    [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
    [app.main.ui.ds.controls.combobox :refer [combobox*]]
    [app.main.ui.ds.controls.switch :refer [switch*]]
-   [app.main.ui.workspace.sidebar.options.menus.export-issues :refer [export-issues*]]
+   [app.main.ui.exports.issues :refer [export-issues*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -108,18 +108,15 @@
   `dea/export-animation`), `on-cancel`, and `on-open-tab` and
   `on-export-here` (none where it cannot export in place) when the tab
   of the job said nothing. `formats` it
-  offers, `issues` of each, `render-wasm?`, `codec-supported?` (a
-  promise of whether the browser encodes a format, see
-  `daf/codec-supported?`) and which way its selects open
-  (`select-direction`, \"up\" by default, \"auto\" as they have room)."
+  offers, `issues` of each (none in the view mode, which loads not what
+  finds them, see `dea/export-issues`), `render-wasm?`,
+  `codec-supported?` (a promise of whether the browser encodes a format,
+  see `daf/codec-supported?`) and which way its selects open
+  (`select-direction`, as they have room by default)."
   [{:keys [boards timelines export formats issues render-wasm? progress
            on-change on-export on-cancel on-open-tab on-export-here
            codec-supported? select-direction]}]
   (let [codec-supported? (or codec-supported? daf/codec-supported?)
-        select-direction (case select-direction
-                           nil    "up"
-                           "auto" nil
-                           select-direction)
 
         board     (first boards)
         timeline  (get timelines (:id board))

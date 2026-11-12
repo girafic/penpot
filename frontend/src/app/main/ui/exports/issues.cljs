@@ -4,10 +4,11 @@
 ;;
 ;; Copyright (c) KALEIDOS INC
 
-(ns app.main.ui.workspace.sidebar.options.menus.export-issues
-  "The issues of an Animated export, as Figma lists them: what the format
-  chosen plays otherwise than the canvas (see `dea/export-issues`),
-  counted in a pill that opens their list beside the sidebar."
+(ns app.main.ui.exports.issues
+  "The issues of an Animated export (see `uea/animated-export*`): what
+  the format chosen plays otherwise than the canvas (see
+  `dea/export-issues`), counted in a pill that opens their list beside
+  the column it is in."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
@@ -54,7 +55,8 @@
 
 (defn- popover-place
   "Where the list opens for the pill at the client rect `rect`, in a row
-  of the sidebar from `row-left`: left of the sidebar (its padding is 12
+  from `row-left` of the column it is in (the sidebar of the workspace,
+  the inspect of the view mode): left of the column (its padding is 12
   px), by the top of the pill when it is in the upper half of the window,
   else by its bottom (the export panel is low)."
   [rect row-left]

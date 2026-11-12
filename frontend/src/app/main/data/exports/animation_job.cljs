@@ -16,10 +16,11 @@
    [app.common.schema :as sm]
    [app.common.transit :as t]
    [app.common.uuid :as uuid]
+   [app.main.data.exports.animation-formats :as daf]
    [cuerdas.core :as str]))
 
 (def formats
-  #{:mp4 :webm :gif :avif :svg :lottie :dotlottie})
+  (set daf/formats))
 
 (def ^:private qualities
   #{:low :medium :high})
@@ -67,7 +68,7 @@
   `dea/export-formats`). With WASM, a Lottie takes the pictures of the
   layers that are not vectors through it too."
   [format]
-  (not (contains? #{:lottie :dotlottie} format)))
+  (not (contains? (set daf/vector-formats) format)))
 
 (defn new-job-id
   []

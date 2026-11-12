@@ -531,12 +531,12 @@
   [objects timeline render-wasm?]
   (cond
     (nil? timeline) []
-    render-wasm?    [:mp4 :webm :gif :avif :svg :lottie :dotlottie]
+    render-wasm?    daf/formats
     :else
     (let [ids   (aexp/export-layer-ids objects timeline)
           idset (set ids)]
       (if (every? #(alottie/lottie-vector-layer? objects idset %) ids)
-        [:lottie :dotlottie]
+        daf/vector-formats
         []))))
 
 (defn- decorated?

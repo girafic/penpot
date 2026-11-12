@@ -14,6 +14,16 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]))
 
+(def formats
+  "The formats of an animation export, in menu order (see
+  `dea/export-formats`)."
+  [:mp4 :webm :gif :avif :svg :lottie :dotlottie])
+
+(def vector-formats
+  "The formats that draw vector layers as they are, without the WASM
+  renderer (see `job/needs-wasm?`)."
+  [:lottie :dotlottie])
+
 (def format-labels
   "How the formats of an animation export are written."
   {:mp4 "MP4"
@@ -64,9 +74,11 @@
 
 (def ^:private video-codecs
   "The video codecs the encoder may write in a container, as WebCodecs
-  names them, in the order it prefers them."
-  {:mp4  ["avc1.42001f" "hvc1.1.6.L93.B0" "vp09.00.10.08" "av01.0.04M.08"]
-   :webm ["vp09.00.10.08" "vp8" "av01.0.04M.08"]})
+  names them for a small frame, in the order it tries them: as
+  Mediabunny asks for them (AVC High, HEVC Main, VP9, AV1, VP8; see its
+  `buildVideoCodecString` at 64×64, medium quality)."
+  {:mp4  ["avc1.64000a" "hev1.1.6.L30.B0" "vp09.00.10.08" "av01.0.00M.08" "vp8"]
+   :webm ["vp09.00.10.08" "av01.0.00M.08" "vp8"]})
 
 (defn- config-supported?
   "A promise of whether `encoder` (`VideoEncoder`) encodes a small frame
@@ -81,8 +93,10 @@
   WebCodecs only, which the encoders write through: MP4 and WebM with one
   of the codecs their container takes, AVIF with AV1; the others always.
   The workspace asks the encoders themselves (see
-  `app.main.data.exports.animation/codec-supported?`). `encoder` replaces
-  `VideoEncoder` (in tests)."
+  `app.main.data.exports.animation/codec-supported?`), which on Firefox
+  trust `isConfigSupported` less: there this may say yes where the export
+  then finds the codec unavailable. `encoder` replaces `VideoEncoder` (in
+  tests)."
   ([format]
    (codec-supported? format (when (exists? js/VideoEncoder) js/VideoEncoder)))
   ([format encoder]

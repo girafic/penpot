@@ -9,6 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
+   [app.main.data.exports.animation-formats :as daf]
    [app.main.data.exports.assets :as de]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.export-job :as vej]
@@ -32,12 +33,6 @@
 (def ^:private exports-cache-ref
   (l/derived :inspect-exports-cache st/state))
 
-(def ^:private all-formats
-  "What the view mode exports an animation as with the WASM renderer;
-  without it only Lottie, which the export checks draws as vectors (see
-  `dea/export-formats`, which needs the encoders)."
-  [:mp4 :webm :gif :avif :svg :lottie :dotlottie])
-
 (def ^:private export-progress-ref
   "How far the animated export of the view mode is (see
   `vej/start-job`), nil without one."
@@ -60,7 +55,7 @@
         export       (merge stored (deref changes*))
         progress     (mf/deref export-progress-ref)
         render-wasm? (features/use-feature "render-wasm/v1")
-        formats      (if render-wasm? all-formats [:lottie :dotlottie])
+        formats      (if render-wasm? daf/formats daf/vector-formats)
 
         on-change
         (mf/use-fn #(swap! changes* merge %))
@@ -99,8 +94,7 @@
                               :on-change on-change
                               :on-export on-export
                               :on-cancel on-cancel
-                              :on-open-tab on-open-tab
-                              :select-direction "auto"}]))
+                              :on-open-tab on-open-tab}]))
 
 (mf/defc exports
   {::mf/wrap [#(mf/memo % =)]}
