@@ -6,6 +6,7 @@
 
 (ns frontend-tests.ui.exports-menu-test
   (:require
+   [app.main.ui.exports.animated :as uea]
    [app.main.ui.workspace.sidebar.options.menus.export-issues :as issues]
    [app.main.ui.workspace.sidebar.options.menus.exports :as exp]
    [cljs.test :as t :include-macros true]
@@ -38,36 +39,36 @@
 (t/deftest the-export-button-follows-the-export
   (t/testing "idle, and again once an export is done"
     (t/is (= {:label ["workspace.options.export.export-format" "MP4"] :action :export :disabled? false}
-             (exp/export-button-state nil "MP4" false)))
-    (t/is (:disabled? (exp/export-button-state nil "MP4" true))))
+             (uea/export-button-state nil "MP4" false)))
+    (t/is (:disabled? (uea/export-button-state nil "MP4" true))))
   (t/testing "in place"
     (t/is (= {:label ["workspace.options.export.exporting" 3] :action :cancel :disabled? false}
-             (exp/export-button-state {:in-progress true :phase :capture :current 3 :total 90 :percent 3}
+             (uea/export-button-state {:in-progress true :phase :capture :current 3 :total 90 :percent 3}
                                       "MP4" true))
           "how far it is, while it takes the frames")
     (t/is (= {:label ["workspace.options.export.exporting" 85] :action :cancel :disabled? false}
-             (exp/export-button-state {:in-progress true :phase :encode :current 2 :total 90 :percent 85}
+             (uea/export-button-state {:in-progress true :phase :encode :current 2 :total 90 :percent 85}
                                       "MP4" true))
           "then how far it is"))
   (t/testing "in a tab"
     (let [job {:in-progress true :in-tab? true}]
       (t/is (= {:label ["workspace.options.export.opening-tab"] :action :cancel :disabled? false}
-               (exp/export-button-state job "MP4" true))
+               (uea/export-button-state job "MP4" true))
             "until it says hello")
       (t/is (= {:label ["workspace.options.export.in-tab" 45] :action :cancel :disabled? false}
-               (exp/export-button-state (assoc job :opened? true :percent 45) "MP4" true)))
-      (t/is (:disabled? (exp/export-button-state (assoc job :opened? true :cancelling? true) "MP4" true))
+               (uea/export-button-state (assoc job :opened? true :percent 45) "MP4" true)))
+      (t/is (:disabled? (uea/export-button-state (assoc job :opened? true :cancelling? true) "MP4" true))
             "no second Cancel")
       (t/is (= ["workspace.options.export.tab-paused"]
-               (:note (exp/export-button-state (assoc job :opened? true :paused? true) "MP4" true)))
+               (:note (uea/export-button-state (assoc job :opened? true :paused? true) "MP4" true)))
             "paused while hidden")
       (t/is (= {:label ["labels.cancel"] :action :cancel :disabled? false
                 :note ["workspace.options.export.tab-blocked"] :offer? true}
-               (exp/export-button-state (assoc job :offer? true) "MP4" true))
+               (uea/export-button-state (assoc job :offer? true) "MP4" true))
             "the offer when it said nothing"))))
 
 (t/deftest the-animated-size-offers-its-own-size
-  (let [labels #(mapv :label (exp/animated-size-options %))]
+  (let [labels #(mapv :label (uea/animated-size-options %))]
     (t/is (= ["0.5x" "1x" "2x" "1920w" "720h" "1080h" "1440h" "2160h"] (labels "1")))
     (t/is (= "3.5x" (last (labels "3.5"))) "a typed one after the presets")
     (t/is (= "512w" (last (labels "w512"))))

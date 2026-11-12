@@ -1,0 +1,79 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/_sizes.scss" as *;
+@use "refactor/common-refactor.scss" as deprecated;
+
+// Settings, output info and the export button, each group apart.
+.animated-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-l);
+  padding-block-start: var(--sp-m);
+}
+
+.animated-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+}
+
+.animated-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-s);
+}
+
+.row-label {
+  @include deprecated.body-small-typography;
+
+  color: var(--color-foreground-secondary);
+}
+
+.row-control {
+  flex: 0 0 50%;
+  min-width: 0;
+}
+
+.row-value {
+  @include deprecated.body-small-typography;
+
+  color: var(--color-foreground-primary);
+}
+
+.animated-export-btn {
+  width: 100%;
+}
+
+// read by screen readers, not shown
+.sr-status {
+  position: absolute;
+  inline-size: $sz-1;
+  block-size: $sz-1;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.animated-offer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.animated-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.hint {
+  @include deprecated.body-small-typography;
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
