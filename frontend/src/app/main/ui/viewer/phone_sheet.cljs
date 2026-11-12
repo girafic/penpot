@@ -443,8 +443,9 @@
   (`timeline`, the controls of the view mode); its flows. Last the pages
   of the file. It stays open as it goes to another section, page, board
   or flow, changes how the interactions or the comments show and opens
-  the list of the comments, which shows above it; it closes as it leaves
-  the view mode or opens what shows instead (share, log in). `is-docked`, it stays at the bottom of the
+  the list of the comments or sharing, which show above it; it closes as
+  it leaves the view mode or opens what shows instead (log in).
+  `is-docked`, it stays at the bottom of the
   canvas (see `sheet*`). The switch keeps it open, as high as it is: it
   calls `on-switch` first, which keeps it shown in the other mode."
   [{:keys [page file project frame index permissions section interactions-mode timeline on-close
@@ -470,9 +471,9 @@
             (st/emit! dv/close-thumbnails-panel (dv/go-to-section section))
             (do (on-close) (header/open-login-dialog))))
 
+        ;; sharing shows as a second sheet above this one, which stays
         open-share
         (fn []
-          (on-close)
           (modal/show! :share-link {:page page :file file})
           (modal/disallow-click-outside!))
 

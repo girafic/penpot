@@ -171,6 +171,9 @@
           (swap! options* assoc :who-comment value))]
 
     [:div {:class (stl/css :share-modal)}
+     ;; on a phone what is beside it, the options under it too: a tap
+     ;; there closes it alone, back to them
+     [:div {:class (stl/css :phone-backdrop) :on-click on-close}]
      [:div  {:class (stl/css :share-link-dialog)}
       [:div {:class (stl/css :share-link-header)}
        [:h2 {:class (stl/css :share-link-title)}
