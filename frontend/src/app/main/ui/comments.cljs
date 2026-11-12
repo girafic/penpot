@@ -512,6 +512,11 @@
         (mf/use-fn
          (fn []
            (when-let [node (mf/ref-val local-ref)]
+             ;; without the caret in the input, as on a phone before a tap
+             ;; in it (which gets no focus by itself): the caret at its end
+             (when-not (current-text-node node)
+               (dom/focus! node)
+               (some-> (last (seq (dom/get-children node))) (wapi/set-cursor-after!)))
              (when-let [[span-node] (current-text-node node)]
                (let [node-text (dom/get-text span-node)
                      at-symbol (if (blank-content? node-text) "@" " @")]

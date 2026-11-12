@@ -328,6 +328,12 @@
   transform: none;
 }
 
+// the people to mention open above the sheet, not below the screen
+.docked .comments-mentions-choice {
+  inset-block: auto 100%;
+  margin-block: 0 var(--sp-s);
+}
+
 .docked .floating-thread-main {
   flex: 1;
   min-block-size: 0;
