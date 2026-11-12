@@ -148,7 +148,15 @@
     (t/is (= :bitmap @shown) "a context that is there shows its frame")
     (t/is (= 2 @finished))))
 
-(t/deftest another-page-loads-into-the-same-offscreen-canvas
+(defn- fake-offscreen-canvas
+  "A stand-in of `OffscreenCanvas`, which node has not."
+  [width height]
+  (this-as this
+           (set! (.-width this) width)
+           (set! (.-height this) height)
+           this))
+
+(t/deftest another-page-gets-a-canvas-of-its-own
   (let [on-snapshot @#'rwv/on-snapshot!
         snapshot    @#'rwv/viewer-snapshot
         os          #js {}
@@ -156,27 +164,36 @@
         objects-a   {:page :a}
         objects-b   {:page :b}
         objects-c   {:page :c}
+        cleared     (atom [])
         contexts    (atom 0)
         loads       (atom [])
         drawn       (atom [])
-        draw!       (fn [os' _] (swap! drawn conj (if (identical? os os') :drawn :another-canvas)))
-        finish      #(swap! drawn conj :finished)]
+        draw!       (fn [os' _] (swap! drawn conj (if (identical? os' (:os-canvas @snapshot)) :drawn :stale)))
+        finish      #(swap! drawn conj :finished)
+        global      (unchecked-get js/globalThis "OffscreenCanvas")]
     (reset! snapshot {:os-canvas os :page-key :a :objects objects-a :props []
                       :canvas-w 300 :canvas-h 600 :dpr 2})
-    (with-redefs [wasm.api/initialized?        (constantly true)
-                  wasm.api/init-canvas-context (mock/stub (fn [& _] (swap! contexts inc) true))
-                  wasm.api/clear-canvas        (mock/stub (fn [& _] (swap! contexts inc)))
-                  wasm.api/initialize-viewport (fn [objects _zoom _vbox & {:keys [on-render]}]
-                                                 (swap! loads conj [objects on-render]))]
-      (on-snapshot :b objects-b canvas 1 {} draw! finish)
-      (t/is (= 0 @contexts) "no new WebGL context: Safari keeps each one of them")
-      (t/is (= [objects-b] (map first @loads)) "the shapes of the other page load into it")
-      (t/is (identical? os (:os-canvas @snapshot)))
-      (t/is (= :b (:page-key @snapshot)))
+    (set! (.-OffscreenCanvas js/globalThis) fake-offscreen-canvas)
+    (try
+      (with-redefs [wasm.api/initialized?        (constantly true)
+                    wasm.api/init-canvas-context (mock/stub (fn [& _] (swap! contexts inc) true))
+                    wasm.api/clear-canvas        (mock/stub (fn [& args] (swap! cleared conj (vec args))))
+                    wasm.api/initialize-viewport (fn [objects _zoom _vbox & {:keys [on-render]}]
+                                                   (swap! loads conj [objects on-render]))]
+        (on-snapshot :b objects-b canvas 1 {} draw! finish)
+        (t/is (= [[]] @cleared)
+              "the context of the page before lost (as clear-canvas does by default): Safari keeps it else")
+        (t/is (= 1 @contexts) "a new one for the other page")
+        (t/is (not (identical? os (:os-canvas @snapshot)))
+              "on a canvas of its own: no tiles of the page before to show as it moves")
+        (t/is (= [objects-b] (map first @loads)))
+        (t/is (= :b (:page-key @snapshot)))
 
-      ;; the shapes of page b load late: page c took the canvas meanwhile
-      (on-snapshot :c objects-c canvas 1 {} draw! finish)
-      ((second (nth @loads 1)))
-      ((second (nth @loads 0)))
-      (t/is (= [:drawn :finished] @drawn) "page c draws, what page b loaded late draws nothing"))
-    (@#'rwv/reset-viewer-snapshot!)))
+        ;; the shapes of page b load late: page c took over meanwhile
+        (on-snapshot :c objects-c canvas 1 {} draw! finish)
+        ((second (nth @loads 1)))
+        ((second (nth @loads 0)))
+        (t/is (= [:drawn :finished] @drawn) "page c draws, what page b loaded late draws nothing"))
+      (finally
+        (set! (.-OffscreenCanvas js/globalThis) global)
+        (@#'rwv/reset-viewer-snapshot!)))))

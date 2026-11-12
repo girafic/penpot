@@ -246,18 +246,19 @@
 (defn- on-snapshot!
   "Run `draw!` once the shared OffscreenCanvas holds the shapes of
   `page-objects`, the page `page-key`, at the size of `canvas`: the same
-  one, resized, its shapes loaded again when they are others or of
-  another page, as the workspace goes to another page; a new one, its
-  WASM context set up at `zoom` and `vbox`, only when there is none or
-  its WebGL context is lost. A new one at each page kept the WebGL
-  context of each page before (Safari loses none of them itself) and
-  took the GPU memory of a phone, which closed the tab. `draw!` gets it
-  and what the last frame of an animation set (see `show-animation!`),
-  none when the shapes loaded again. `finish` when it cannot."
+  one, resized, its shapes loaded again when they are others; for
+  another page a new one, its WASM context set up at `zoom` and `vbox`,
+  as the workspace goes to another page: the tiles of the page before
+  stay in the cache of a context, which a move of the canvas of a phone
+  shows (see `move-page-view`). The WebGL context of the one before is
+  lost then (see `wasm.api/clear-canvas`): Safari loses none itself, and
+  one kept at each page took the GPU memory of a phone, which closed the
+  tab. `draw!` gets it and what the last frame of an animation set (see
+  `show-animation!`), none when the shapes loaded again. `finish` when
+  it cannot."
   [page-key page-objects canvas zoom vbox draw! finish]
   (let [;; what loads its shapes ends later: by then the OffscreenCanvas
-        ;; may hold the shapes of another page or a new one have taken
-        ;; its WebGL context
+        ;; may hold other shapes or a new one have taken its place
         draw-if-current!
         (fn [os props]
           (let [snap @viewer-snapshot]
@@ -273,42 +274,24 @@
         same-size? (and (= vis-w (:canvas-w snap))
                         (= vis-h (:canvas-h snap))
                         (= dpr (:dpr snap)))
-        os         (:os-canvas snap)
-        live?      (and (some? os) (wasm.api/initialized?))]
-    (when (and live? (not same-size?))
-      (wasm.api/resize-offscreen-canvas! os vis-w vis-h dpr)
-      (swap! viewer-snapshot assoc :canvas-w vis-w :canvas-h vis-h :dpr dpr))
-    (cond
-      (and live? same-page?)
-      ;; While an animation plays the shapes stay loaded: only its
-      ;; modifiers change (see `show-animation!`).
-      (if (identical? page-objects (:objects snap))
-        (draw! os (:props snap))
-        (do
-          (swap! viewer-snapshot assoc :objects page-objects :props [] :render-key nil)
-          (wasm.api/set-objects page-objects #(draw-if-current! os []) nil true)))
-
-      live?
+        os         (:os-canvas snap)]
+    (if (and same-page? (wasm.api/initialized?) os)
       (do
-        (reset! viewer-snapshot
-                {:os-canvas os
-                 :page-key  page-key
-                 :objects   page-objects
-                 :props     []
-                 :render-key nil
-                 :canvas-w  vis-w
-                 :canvas-h  vis-h
-                 :dpr       dpr})
-        (wasm.api/initialize-viewport
-         page-objects zoom vbox
-         :background-opacity 0
-         :force-sync true
-         :on-render #(draw-if-current! os [])))
-
-      :else
+        (when-not same-size?
+          (wasm.api/resize-offscreen-canvas! os vis-w vis-h dpr)
+          (swap! viewer-snapshot assoc :canvas-w vis-w :canvas-h vis-h :dpr dpr))
+        ;; While an animation plays the shapes stay loaded: only its
+        ;; modifiers change (see `show-animation!`).
+        (if (identical? page-objects (:objects snap))
+          (draw! os (:props snap))
+          (do
+            (swap! viewer-snapshot assoc :objects page-objects :props [] :render-key nil)
+            (wasm.api/set-objects page-objects #(draw-if-current! os []) nil true))))
       (let [os-canvas (js/OffscreenCanvas. vis-w vis-h)]
+        ;; the context of the one before goes, lost: a new canvas gets
+        ;; its own
         (when (wasm.api/initialized?)
-          (wasm.api/clear-canvas {:lose-browser-context? false}))
+          (wasm.api/clear-canvas))
         (if (wasm.api/init-canvas-context os-canvas dpr)
           (do
             (reset! viewer-snapshot
