@@ -25,17 +25,6 @@
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
-(def hello-wait-ms
-  "How long the workspace waits for the export tab to say it is there
-  before it offers to open it again or to export in place: the browser
-  may have blocked it."
-  8000)
-
-(def cancel-wait-ms
-  "How long a Cancel waits for the tab to say it stopped before the panel
-  is free anyway: a tab that hangs must not block it."
-  10000)
-
 (defonce ^:private jobs
   ;; job-id -> {:channel :locks :save :lock-asked? :cancel-wait-ms}
   (atom {}))
@@ -139,15 +128,9 @@
 
     ptk/UpdateEvent
     (update [_ state]
-      (if (= job-id (current-job-id state))
-        (case type
-          :hello    (update state :export-animation assoc :opened? true :offer? false)
-          :progress (update state :export-animation merge
-                            (select-keys message [:phase :current :total :percent]))
-          :paused   (assoc-in state [:export-animation :paused?] true)
-          :resumed  (assoc-in state [:export-animation :paused?] false)
-          state)
-        state))
+      (cond-> state
+        (= job-id (current-job-id state))
+        (update :export-animation job/heard message)))
 
     ptk/WatchEvent
     (watch [_ state _]
@@ -211,17 +194,7 @@
   (ptk/reify ::start-export-job
     ptk/UpdateEvent
     (update [_ state]
-      (assoc state :export-animation {:in-progress true
-                                      :in-tab? true
-                                      :job job
-                                      :format (:format job)
-                                      :current 0
-                                      :total 0
-                                      :percent 0
-                                      :cancelling? false
-                                      :paused? false
-                                      :opened? false
-                                      :offer? false}))
+      (assoc state :export-animation (job/started job)))
 
     ptk/WatchEvent
     (watch [_ _ stream]
@@ -235,7 +208,7 @@
                                                          (or channel-ctor (job/default-channel-ctor)))]
                         (swap! jobs assoc job-id {:channel channel
                                                   :locks locks
-                                                  :cancel-wait-ms (get opts :cancel-wait-ms cancel-wait-ms)})
+                                                  :cancel-wait-ms (get opts :cancel-wait-ms job/cancel-wait-ms)})
                         (fn []
                           (when-let [close (:close channel)]
                             (close))
@@ -249,7 +222,7 @@
               (rx/map (fn [_] (job-saved job-id :saved)))
               (rx/catch (fn [_] (rx/of (job-saved job-id :save-failed))))
               (rx/take-until ended))
-         (hello-wait job-id (get opts :hello-wait-ms hello-wait-ms) stream))))))
+         (hello-wait job-id (get opts :hello-wait-ms job/hello-wait-ms) stream))))))
 
 (defn job-tab-reopened
   "The panel opened the tab of the job `job-id` again (see
@@ -265,7 +238,7 @@
 
     ptk/WatchEvent
     (watch [_ _ stream]
-      (hello-wait job-id (get opts :hello-wait-ms hello-wait-ms) stream))))
+      (hello-wait job-id (get opts :hello-wait-ms job/hello-wait-ms) stream))))
 
 (defn export-job-here
   "Give up the tab of the job `job-id`, which did not open, and export in
@@ -315,7 +288,7 @@
           (not opened?) (rx/of (job-ended job-id {:type :cancel}))
           :else
           (let [ended (rx/filter #(job-ended? job-id %) stream)]
-            (->> (rx/timer (get-in @jobs [job-id :cancel-wait-ms] cancel-wait-ms))
+            (->> (rx/timer (get-in @jobs [job-id :cancel-wait-ms] job/cancel-wait-ms))
                  (rx/take-until ended)
                  (rx/map (fn [_] (job-ended job-id {:type :cancel}))))))))
 

@@ -67,6 +67,33 @@
     (t/is (nil? (job/decode-message "not transit")))
     (t/is (nil? (job/decode-message #js {:type "hello"})))))
 
+(t/deftest how-far-a-job-is-as-its-tab-says
+  (let [job      (job-params)
+        progress (job/started job)]
+    (t/testing "as its tab opens: nothing done, the tab not heard"
+      (t/is (= job (:job progress)))
+      (t/is (= :mp4 (:format progress)))
+      (t/is (true? (:in-tab? progress)))
+      (t/is (false? (:opened? progress)))
+      (t/is (zero? (:percent progress))))
+    (t/testing "the tab is there: no offer to open it again"
+      (let [heard (job/heard (assoc progress :offer? true) {:type :hello})]
+        (t/is (true? (:opened? heard)))
+        (t/is (false? (:offer? heard)))))
+    (t/testing "how far it is, frozen and resumed"
+      (let [heard (job/heard progress {:type :progress :phase :capture :current 3 :total 9 :percent 27
+                                       :other "not kept"})]
+        (t/is (= [:capture 3 9 27] ((juxt :phase :current :total :percent) heard)))
+        (t/is (nil? (:other heard))))
+      (t/is (true? (:paused? (job/heard progress {:type :paused}))))
+      (t/is (false? (:paused? (job/heard (assoc progress :paused? true) {:type :resumed})))))
+    (t/testing "what ends it leaves it as it is: who started it ends it"
+      (doseq [type [:done :error :cancelled :closed]]
+        (t/is (job/ended? {:type type}))
+        (t/is (= progress (job/heard progress {:type type}))))
+      (t/is (not (job/ended? {:type :hello})))
+      (t/is (not (job/ended? {:type :progress}))))))
+
 (t/deftest the-two-sides-of-a-job-hear-each-other
   (t/async
     done

@@ -39,7 +39,10 @@
                  (t/is (true? webm) "WebM with VP8")
                  (t/is (true? avif) "AVIF with AV1")
                  (t/is (false? avif-not) "and only with it")))
-        (.finally done))))
+        (.catch (fn [cause] (t/is false (ex-message cause))))
+        ;; `done` runs the next tests and gives their promise: not
+        ;; `.finally` adopting it
+        (.finally (fn [] (done) nil)))))
 
 (t/deftest the-size-a-format-comes-out
   (t/is (pos? (daf/estimated-size :mp4 100 80 :high 1000 30)))

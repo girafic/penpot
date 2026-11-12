@@ -148,6 +148,56 @@
                (or (:wasm? params) (not (needs-wasm? (:format params)))))
       params)))
 
+;; HOW FAR A JOB IS, AS THE ONE WHO STARTED IT SEES IT (the workspace,
+;; see `deaw/start-export-job`, and the view mode, see
+;; `app.main.data.viewer.export-job`)
+
+(def hello-wait-ms
+  "How long the side that started a job waits for its tab to say it is
+  there before it offers to open it again: the browser may have blocked
+  it."
+  8000)
+
+(def cancel-wait-ms
+  "How long a Cancel waits for the tab to say it stopped before the panel
+  is free anyway: a tab that hangs must not block it."
+  10000)
+
+(defn started
+  "How far `job` is as its tab opens: nothing done, the tab not heard
+  yet."
+  [job]
+  {:in-progress true
+   :in-tab? true
+   :job job
+   :format (:format job)
+   :current 0
+   :total 0
+   :percent 0
+   :cancelling? false
+   :paused? false
+   :opened? false
+   :offer? false})
+
+(defn heard
+  "How far a job is, `progress` (see `started`), once its tab said
+  `message`: it is there (`:hello`, no offer to open it again), how far
+  it is, that the browser froze it or resumed it. A message that ends it
+  (see `ended?`) leaves it as it is: who started it ends it."
+  [progress {:keys [type] :as message}]
+  (case type
+    :hello    (assoc progress :opened? true :offer? false)
+    :progress (merge progress (select-keys message [:phase :current :total :percent]))
+    :paused   (assoc progress :paused? true)
+    :resumed  (assoc progress :paused? false)
+    progress))
+
+(defn ended?
+  "Whether the tab of a job ends it saying `message`: done, failed,
+  cancelled or closed."
+  [{:keys [type]}]
+  (contains? #{:done :error :cancelled :closed} type))
+
 ;; MESSAGES
 
 (def ^:private message-types
