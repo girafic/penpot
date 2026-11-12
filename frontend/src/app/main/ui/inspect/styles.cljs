@@ -282,7 +282,7 @@
      [:div {:class (stl/css :exports-wrapper)}
       [:& exports/exports
        {:shapes shapes
-        :type type
+        :type shape-type
         :page-id page-id
         :file-id file-id
         :share-id share-id}]]]))
