@@ -733,8 +733,14 @@
           (tr "comments.mentions.not-found" mention-filter)]
 
          (for [[idx {:keys [id fullname email] :as user}] (d/enumerate mentions-users)]
+           ;; the press keeps the focus in the input; the click, which
+           ;; lands on the entry, mentions: pressed, the list would go and
+           ;; the click land under it, on the board (a finger on a phone,
+           ;; where the list opens above the sheet), which closes the
+           ;; comment
            [:div {:key id
-                  :on-pointer-down handle-click-mention
+                  :on-pointer-down dom/prevent-default
+                  :on-click handle-click-mention
                   :data-user-id (dm/str id)
                   :class (stl/css-case :comments-mentions-entry true
                                        :is-selected (= selected idx))}
