@@ -121,12 +121,19 @@
   visible `canvas` at once and without a copy: the frame moves over as an
   ImageBitmap (`transferToImageBitmap`) into the `bitmaprenderer` context
   of `canvas`, so an animation plays without waiting for a copy and a
-  frame. A canvas that already draws in 2D goes on with `draw-bitmap!`."
+  frame. A canvas that already draws in 2D goes on with `draw-bitmap!`.
+  An OffscreenCanvas whose WebGL context the browser took (another one
+  replaced it, the GPU reset) shows nothing: the next render sets up a
+  new one."
   [canvas os-canvas object-id vis-w vis-h finish]
   (if-let [ctx (.getContext canvas "bitmaprenderer")]
     (do
-      (.transferFromImageBitmap ^js ctx (.transferToImageBitmap ^js os-canvas))
-      (dom/set-attribute! canvas "id" (str "screenshot-" object-id))
+      (try
+        (.transferFromImageBitmap ^js ctx (.transferToImageBitmap ^js os-canvas))
+        (dom/set-attribute! canvas "id" (str "screenshot-" object-id))
+        (catch :default cause
+          (js/console.warn "viewer-snapshot: its WebGL context is lost" cause)
+          (reset-viewer-snapshot!)))
       (finish))
     (draw-bitmap! canvas os-canvas object-id vis-w vis-h finish)))
 
@@ -244,7 +251,15 @@
   what the last frame of an animation set (see `show-animation!`), none
   when the shapes loaded again. `finish` when it cannot."
   [page-key page-objects canvas zoom vbox draw! finish]
-  (let [vis-w      (.-width canvas)
+  (let [;; what loads its shapes ends later: by then another page or
+        ;; size may have its own OffscreenCanvas, which took the WebGL
+        ;; context of this one
+        draw-if-current!
+        (fn [os props]
+          (if (identical? os (:os-canvas @viewer-snapshot))
+            (draw! os props)
+            (finish)))
+        vis-w      (.-width canvas)
         vis-h      (.-height canvas)
         dpr        (pixel-ratio canvas)
         snap       @viewer-snapshot
@@ -264,7 +279,7 @@
           (draw! os (:props snap))
           (do
             (swap! viewer-snapshot assoc :objects page-objects :props [] :render-key nil)
-            (wasm.api/set-objects page-objects #(draw! os []) nil true))))
+            (wasm.api/set-objects page-objects #(draw-if-current! os []) nil true))))
       (let [os-canvas (js/OffscreenCanvas. vis-w vis-h)]
         (when (wasm.api/initialized?)
           (wasm.api/clear-canvas {:lose-browser-context? false}))
@@ -283,7 +298,7 @@
              page-objects zoom vbox
              :background-opacity 0
              :force-sync true
-             :on-render #(draw! os-canvas [])))
+             :on-render #(draw-if-current! os-canvas [])))
           (finish))))))
 
 (defn- render-viewer-frame*

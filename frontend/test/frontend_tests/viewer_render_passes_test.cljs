@@ -130,3 +130,18 @@
           "and one not drawn yet, or owed")
     (t/is (= #{"scroll" sticky "fixed"} (tags (rwv/due-passes all {:drawn drawn})))
           "all without knowing what it touches")))
+
+(t/deftest a-lost-context-shows-nothing-and-ends
+  (let [present  @#'rwv/present-bitmap!
+        shown    (atom nil)
+        finished (atom 0)
+        canvas   #js {:getContext (fn [_] #js {:transferFromImageBitmap #(reset! shown %)})
+                      :setAttribute (fn [_ _])}
+        lost     #js {:transferToImageBitmap #(throw (js/Error. "Cannot transfer to ImageBitmap because WebGL context is lost."))}]
+    ;; no exception: the next render sets up another context
+    (present canvas lost uuid/zero 10 10 #(swap! finished inc))
+    (t/is (nil? @shown) "nothing shown")
+    (t/is (= 1 @finished) "the render ends")
+    (present canvas #js {:transferToImageBitmap (constantly :bitmap)} uuid/zero 10 10 #(swap! finished inc))
+    (t/is (= :bitmap @shown) "a context that is there shows its frame")
+    (t/is (= 2 @finished))))
