@@ -43,6 +43,18 @@
       (t/is (nil? (job/decode-params (assoc (job/encode-params params) :boards "nope:1,x"))))
       (t/is (nil? (job/decode-params (assoc (job/encode-params params) :boards (str (uuid/next) ":1"))))
             "one board is no list")))
+  (t/testing "nothing to save first, as from the view mode"
+    (let [params (job-params :saved? true)]
+      (t/is (= params (job/decode-params (job/encode-params params))))
+      (t/is (= "true" (:saved (job/encode-params params)))))
+    (t/is (not (contains? (job/decode-params (job/encode-params (job-params))) :saved?))
+          "a job of the workspace has none")
+    (t/is (true? (:saved? (job/job-params {:file-id (uuid/next) :page-id (uuid/next) :board-id (uuid/next)
+                                           :wasm? true :saved? true}
+                                          {:format :lottie}))))
+    (t/is (not (contains? (job/job-params {:file-id (uuid/next) :page-id (uuid/next) :board-id (uuid/next)}
+                                          {:format :lottie})
+                          :saved?))))
   (t/testing "bad ones are refused"
     (let [query (job/encode-params (job-params))]
       (t/is (nil? (job/decode-params (assoc query :format "mov"))))
