@@ -65,6 +65,16 @@
         close-sheet
         (mf/use-fn #(reset! sheet* false))
 
+        ;; the other tab shows from its top: the panel of both kept how
+        ;; far the one before scrolled
+        change-tab
+        (mf/use-fn
+         (fn [tab]
+           (reset! tab* tab)
+           (some-> (dom/query (dm/str "[role=dialog][aria-label=\"" (tr "workspace.options.inspect")
+                                      "\"] [role=tabpanel]"))
+                   (dom/set-scroll-pos! 0))))
+
         ;; as the sections of the options of a phone go, the options open
         back-to-interactions
         (mf/use-fn
@@ -96,7 +106,7 @@
         [:> tab-switcher* {:tabs [{:label (tr "inspect.layer-info") :id "info"}
                                   {:label (tr "workspace.sidebar.layers") :id "layers"}]
                            :selected tab
-                           :on-change #(reset! tab* %)
+                           :on-change change-tab
                            ;; its tabs stay as what they show scrolls
                            :scrollable-panel true
                            :class (stl/css :phone-tabs)}

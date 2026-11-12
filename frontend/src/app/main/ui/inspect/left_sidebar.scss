@@ -24,3 +24,15 @@
   overflow-y: auto;
   padding-top: deprecated.$s-8;
 }
+
+// in a sheet of a phone (`fill`) what holds the layers scrolls them: one
+// that scrolls too inside it, if only 2px, would take a finger that
+// starts there, and keep what it drags from them
+.fill,
+.fill .settings-bar-inside {
+  height: auto;
+}
+
+.fill .settings-bar-inside {
+  overflow: visible;
+}

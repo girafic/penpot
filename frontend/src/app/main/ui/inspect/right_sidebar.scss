@@ -146,3 +146,14 @@
 
   overflow: auto;
 }
+
+// in a sheet of a phone (`fill`) the tab of the sheet scrolls what it
+// shows: one that scrolls too inside it would take a finger that starts
+// there, and keep what it drags from it
+.fill .tool-windows {
+  block-size: auto;
+}
+
+.fill .viewer-tab-switcher {
+  overflow: visible;
+}
