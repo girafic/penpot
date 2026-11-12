@@ -35,19 +35,6 @@
    :audio? true
    :wasm? true})
 
-(defn- fake-tab
-  "The tab of `job` on `ctor` and `locks`: it holds the lock of the job
-  until `:release` resolves, and keeps what it hears in `:heard`."
-  [job ctor locks]
-  (let [heard   (atom [])
-        release (p/deferred)
-        channel (job/open-channel (:job-id job) #(swap! heard conj %) ctor)]
-    {:heard heard
-     :post (:post channel)
-     :close (:close channel)
-     :release release
-     :held (job/hold-lock (:job-id job) release locks)}))
-
 (defn- scene
   "A job started in the workspace, with its tab when `tab?`."
   [& {:keys [tab? hello-wait-ms cancel-wait-ms]
@@ -55,7 +42,7 @@
   (let [job   (new-job)
         ctor  (thj/broadcast-channels)
         locks (thj/locks)
-        tab   (when tab? (fake-tab job ctor locks))]
+        tab   (when tab? (thj/fake-tab job ctor locks))]
     (st/emit! (deaw/start-export-job job :channel-ctor ctor :locks locks
                                      :hello-wait-ms hello-wait-ms
                                      :cancel-wait-ms cancel-wait-ms))

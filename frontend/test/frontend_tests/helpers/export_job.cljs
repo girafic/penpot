@@ -5,8 +5,11 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns frontend-tests.helpers.export-job
-  "In-memory stand-ins of `BroadcastChannel` and `navigator.locks` for
-  the tests of animated export jobs.")
+  "In-memory stand-ins of `BroadcastChannel`, `navigator.locks` and the
+  export tab for the tests of animated export jobs."
+  (:require
+   [app.main.data.exports.animation-job :as job]
+   [promesa.core :as p]))
 
 (defn broadcast-channels
   "A constructor like `BroadcastChannel`: the channels it makes with the
@@ -62,6 +65,19 @@
                                    (.then (fn [value] (release! name) (resolve value))
                                           (fn [cause] (release! name) (reject cause))))))
                       (grant! name)))))))})))
+
+(defn fake-tab
+  "The tab of `job` on `ctor` and `locks`: it holds the lock of the job
+  until `:release` resolves, and keeps what it hears in `:heard`."
+  [job ctor locks]
+  (let [heard   (atom [])
+        release (p/deferred)
+        channel (job/open-channel (:job-id job) #(swap! heard conj %) ctor)]
+    {:heard heard
+     :post (:post channel)
+     :close (:close channel)
+     :release release
+     :held (job/hold-lock (:job-id job) release locks)}))
 
 (defn wait-until
   "A promise resolved once `pred` is true, checked every few ms, rejected

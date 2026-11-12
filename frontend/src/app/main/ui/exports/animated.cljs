@@ -92,7 +92,8 @@
   for all the boards. `progress` the export going on (see
   `export-button-state`); `on-export` with the params of the export (see
   `dea/export-animation`), `on-cancel`, and `on-open-tab` and
-  `on-export-here` when the tab of the job said nothing. `formats` it
+  `on-export-here` (none where it cannot export in place) when the tab
+  of the job said nothing. `formats` it
   offers, `issues` of each, `render-wasm?`, `codec-supported?` (a
   promise of whether the browser encodes a format, see
   `daf/codec-supported?`) and which way its selects open
@@ -359,10 +360,12 @@
                        :class (stl/css :animated-export-btn)
                        :on-click on-open-tab}
            (tr "workspace.options.export.open-tab")]
-          [:> button* {:variant "secondary"
-                       :class (stl/css :animated-export-btn)
-                       :on-click on-export-here}
-           (tr "workspace.options.export.export-here")]])
+          ;; not where it cannot export in place (the view mode)
+          (when (fn? on-export-here)
+            [:> button* {:variant "secondary"
+                         :class (stl/css :animated-export-btn)
+                         :on-click on-export-here}
+             (tr "workspace.options.export.export-here")])])
 
        [:> button* {:variant (if (:offer? view) "ghost" "secondary")
                     :class (stl/css :animated-export-btn)

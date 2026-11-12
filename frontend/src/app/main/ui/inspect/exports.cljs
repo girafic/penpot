@@ -9,9 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
-   [app.main.data.exports.animation-job :as job]
    [app.main.data.exports.assets :as de]
-   [app.main.data.notifications :as ntf]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.export-job :as vej]
    [app.main.features :as features]
@@ -48,43 +46,29 @@
   (when (and (seq shapes) (every? cfh/frame-shape? shapes))
     (not-empty (filterv #(contains? (:timelines page) (:id %)) shapes))))
 
-(def ^:private end-types
-  "What the tab of an export says as it ends."
-  #{:done :error :cancelled :closed})
+(def ^:private export-progress-ref
+  "How far the animated export of the view mode is (see
+  `vej/start-job`), nil without one."
+  (l/derived :viewer-export-animation st/state))
 
 (mf/defc animated-export*
   "The animated export of the `boards` of `page` from the view mode, as the
   workspace offers it (see `uea/animated-export*`): the settings the
   workspace keeps with the timeline of the first, changed for this export
-  only, and the export in the tab the workspace exports in (see
-  `vej/open!`), which shows how far it is too."
+  only, and the export in the tab the workspace exports in, which loads
+  the file itself and needs nothing of the view mode (see
+  `vej/start-job`). How far it is lives in the store: the panel may go
+  and come back meanwhile. No list of what a format plays otherwise
+  (see `dea/export-issues`, which needs the encoders)."
   {::mf/private true}
   [{:keys [boards page file-id]}]
   (let [timelines    (into {} (map (fn [{:keys [id]}] [id (get-in page [:timelines id])])) boards)
         stored       (:export (get timelines (:id (first boards))))
         changes*     (mf/use-state {})
         export       (merge stored (deref changes*))
-        progress*    (mf/use-state nil)
-        progress     (deref progress*)
-        channel-ref  (mf/use-ref nil)
+        progress     (mf/deref export-progress-ref)
         render-wasm? (features/use-feature "render-wasm/v1")
         formats      (if render-wasm? all-formats [:lottie :dotlottie])
-
-        close!
-        (mf/use-fn
-         (fn []
-           (some-> (mf/ref-val channel-ref) :close (apply []))
-           (mf/set-ref-val! channel-ref nil)))
-
-        on-message
-        (mf/use-fn
-         (mf/deps close!)
-         (fn [message]
-           (swap! progress* vej/heard message)
-           (when (= :error (:type message))
-             (st/emit! (ntf/error (apply tr (job/error-text message)))))
-           (when (contains? end-types (:type message))
-             (close!))))
 
         on-change
         (mf/use-fn #(swap! changes* merge %))
@@ -92,29 +76,27 @@
         ;; in the tab, opened in this click
         on-export
         (mf/use-fn
-         (mf/deps file-id page boards render-wasm? close! on-message)
+         (mf/deps file-id page boards render-wasm?)
          (fn [params]
-           (close!)
-           (let [job     (vej/job-of file-id (:id page) (:id (first boards)) render-wasm? params)
-                 channel (vej/open! (:router @st/state) job on-message)]
-             (when (some? channel)
-               (mf/set-ref-val! channel-ref channel)
-               (reset! progress* (vej/started job))))))
+           (let [job (vej/board-job {:file-id file-id
+                                     :page-id (:id page)
+                                     :board-id (:id (first boards))
+                                     :wasm? render-wasm?}
+                                    params)]
+             (vej/open-job-tab (:router @st/state) job)
+             (st/emit! (vej/start-job job)))))
 
-        ;; the tab stops when it is there, else it ends at once
         on-cancel
-        (mf/use-fn
-         (mf/deps progress close!)
-         (fn []
-           (if (:opened? progress)
-             (do (some-> (mf/ref-val channel-ref) :post (apply [{:type :cancel}]))
-                 (swap! progress* assoc :cancelling? true))
-             (do (close!)
-                 (reset! progress* nil)))))]
+        (mf/use-fn #(st/emit! (vej/cancel-job)))
 
-    ;; the tab goes on by itself once this is gone
-    (mf/with-effect [close!]
-      close!)
+        ;; the tab did not say it is there: open it again, in this click
+        on-open-tab
+        (mf/use-fn
+         (mf/deps progress)
+         (fn []
+           (when-let [job (:job progress)]
+             (vej/open-job-tab (:router @st/state) job)
+             (st/emit! (vej/job-tab-reopened (:job-id job))))))]
 
     [:> uea/animated-export* {:boards boards
                               :timelines timelines
@@ -125,6 +107,7 @@
                               :on-change on-change
                               :on-export on-export
                               :on-cancel on-cancel
+                              :on-open-tab on-open-tab
                               :select-direction "auto"}]))
 
 (mf/defc exports
