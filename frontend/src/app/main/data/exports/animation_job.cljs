@@ -188,24 +188,28 @@
    :opened? false
    :offer? false})
 
-(defn heard
-  "How far a job is, `progress` (see `started`), once its tab said
-  `message`: it is there (`:hello`, no offer to open it again), how far
-  it is, that the browser froze it or resumed it. A message that ends it
-  (see `ended?`) leaves it as it is: who started it ends it."
-  [progress {:keys [type] :as message}]
-  (case type
-    :hello    (assoc progress :opened? true :offer? false)
-    :progress (merge progress (select-keys message [:phase :current :total :percent]))
-    :paused   (assoc progress :paused? true)
-    :resumed  (assoc progress :paused? false)
-    progress))
-
 (defn ended?
   "Whether the tab of a job ends it saying `message`: done, failed,
   cancelled or closed."
   [{:keys [type]}]
   (contains? #{:done :error :cancelled :closed} type))
+
+(defn heard
+  "How far a job is, `progress` (see `started`), once its tab said
+  `message`: any word of it that does not end the job says it is there
+  (no offer to open it again), even when its `:hello` was lost (a view
+  mode asleep as the tab started); then how far it is, that the browser
+  froze it or resumed it. A message that ends it (see `ended?`) leaves it
+  as it is: who started it ends it."
+  [progress {:keys [type] :as message}]
+  (if (ended? message)
+    progress
+    (let [progress (assoc progress :opened? true :offer? false)]
+      (case type
+        :progress (merge progress (select-keys message [:phase :current :total :percent]))
+        :paused   (assoc progress :paused? true)
+        :resumed  (assoc progress :paused? false)
+        progress))))
 
 ;; MESSAGES
 

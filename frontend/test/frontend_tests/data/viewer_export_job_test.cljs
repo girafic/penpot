@@ -184,6 +184,45 @@
           (.catch fail)
           (.finally #(clean scene done))))))
 
+(t/deftest a-tab-whose-hello-was-lost-is-there-at-its-first-word
+  (t/async
+    done
+    ;; the view mode asleep as the tab said hello: its progress comes first
+    (let [{:keys [tab] :as scene} (scene :hello-wait-ms 20)]
+      (-> (thj/wait-until #(:offer? (export-state)))
+          (.then (fn [_]
+                   (.then (:held tab) (fn [_] ((:post tab) {:type :progress :percent 30})))
+                   (thj/wait-until #(= 30 (:percent (export-state))))))
+          (.then (fn [_]
+                   (t/is (:opened? (export-state)) "there")
+                   (t/is (not (:offer? (export-state))) "no offer to open it again")
+                   ;; the tab crashes: its lock goes, without a word
+                   ((:close tab))
+                   (p/resolve (:release tab) nil)
+                   (thj/wait-until #(nil? (export-state)))))
+          (.then (fn [_] (t/is (nil? (export-state)) "the lock freed it")))
+          (.catch fail)
+          (.finally #(clean scene done))))))
+
+(t/deftest the-word-of-another-job-changes-nothing
+  (t/async
+    done
+    (let [{:keys [tab] :as scene} (scene)
+          other (new-job)]
+      ;; another export started meanwhile: the panel follows that one
+      (st/emit! (vej/start-job other :channel-ctor (thj/broadcast-channels) :locks (thj/locks)))
+      (-> (hello scene)
+          (.then (fn [_]
+                   ((:post tab) {:type :progress :percent 70})
+                   (thj/wait-until #(seq @(:heard tab)) 100)))
+          (.catch (fn [_] nil))
+          (.then (fn [_]
+                   (t/is (= (:job-id other) (get-in (export-state) [:job :job-id])))
+                   (t/is (zero? (:percent (export-state))) "how far the other is, not this one")
+                   (t/is (not (:opened? (export-state))))))
+          (.catch fail)
+          (.finally #(clean scene done))))))
+
 (t/deftest a-tab-that-says-nothing-is-offered-again
   (t/async
     done

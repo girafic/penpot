@@ -99,6 +99,12 @@
         (t/is (nil? (:other heard))))
       (t/is (true? (:paused? (job/heard progress {:type :paused}))))
       (t/is (false? (:paused? (job/heard (assoc progress :paused? true) {:type :resumed})))))
+    (t/testing "any word of the tab says it is there, its hello lost"
+      (let [heard (job/heard (assoc progress :offer? true) {:type :progress :percent 10})]
+        (t/is (true? (:opened? heard)))
+        (t/is (false? (:offer? heard)))
+        (t/is (= 10 (:percent heard))))
+      (t/is (true? (:opened? (job/heard progress {:type :paused})))))
     (t/testing "what ends it leaves it as it is: who started it ends it"
       (doseq [type [:done :error :cancelled :closed]]
         (t/is (job/ended? {:type type}))

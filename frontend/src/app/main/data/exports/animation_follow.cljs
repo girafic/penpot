@@ -65,11 +65,12 @@
        (= job-id @event)))
 
 (defn- job-heard
-  "A message of the tab of the job `job-id` (see `job/heard`): once the
-  tab says it is there, the side that follows it asks for the lock the
-  tab holds, which it gets when the tab is gone, and does `on-hello`
-  (the job-id and the message); what ends the job ends it, an error with
-  its notification, `:done` after `done-events` (of the message)."
+  "A message of the tab of the job `job-id` (see `job/heard`): at its
+  first word the side that follows it asks for the lock the tab holds,
+  which it gets when the tab is gone; at each `:hello` it does
+  `on-hello` (the job-id and the message); what ends the job ends it, an
+  error with its notification, `:done` after `done-events` (of the
+  message)."
   [state-key job-id {:keys [type] :as message} {:keys [on-hello done-events]}]
   (ptk/reify ::job-heard
     IDeref
@@ -103,15 +104,15 @@
 
     ptk/EffectEvent
     (effect [_ _ _]
-      (when (= :hello type)
-        (when-let [{:keys [locks lock-asked?]} (get @jobs job-id)]
-          (when (fn? on-hello)
-            (on-hello job-id message))
-          (when-not lock-asked?
-            (swap! jobs assoc-in [job-id :lock-asked?] true)
-            (-> (job/when-released job-id (or locks (job/default-locks)))
-                (.then #(st/emit! (job-ended state-key job-id)))
-                (.catch (constantly nil)))))))))
+      (when-let [{:keys [locks lock-asked?]} (get @jobs job-id)]
+        (when (and (= :hello type) (fn? on-hello))
+          (on-hello job-id message))
+        ;; at its first word, whichever: its `:hello` may be lost
+        (when (and (not lock-asked?) (not (job/ended? message)))
+          (swap! jobs assoc-in [job-id :lock-asked?] true)
+          (-> (job/when-released job-id (or locks (job/default-locks)))
+              (.then #(st/emit! (job-ended state-key job-id)))
+              (.catch (constantly nil))))))))
 
 (defn- job-unanswered
   [state-key job-id]
@@ -125,13 +126,12 @@
 
 (defn- hello-wait
   "The offer to open the tab of the job `job-id` again when it says
-  nothing within `wait-ms`."
+  nothing within `wait-ms`: any word of it stops it."
   [state-key job-id wait-ms stream]
   (let [heard (rx/filter (fn [event]
                            (or (job-ended? job-id event)
                                (and (= ::job-heard (ptk/type event))
-                                    (let [{:keys [type] :as message} @event]
-                                      (and (= :hello type) (= job-id (:job-id message)))))))
+                                    (= job-id (:job-id @event)))))
                          stream)]
     (->> (rx/timer wait-ms)
          (rx/take-until heard)
