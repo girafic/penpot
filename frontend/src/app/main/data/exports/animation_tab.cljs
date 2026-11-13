@@ -428,7 +428,7 @@
   "Start the export tab of the job of the query params `query` (see
   `job/decode-params`): it takes the lock of the job, then opens the
   channel of the job and says it is there until the workspace has saved,
-  or once and loads at once when its job has nothing to save (`saved?`).
+  or once and loads at once when its job has nothing to save (`saved`).
   When another tab holds the lock, that tab exports and this one ends
   (`:duplicate`); params that are not valid end it at once.
   `channel-ctor`, `locks`, `start-wasm` and `save-wait-ms` replace
@@ -463,7 +463,7 @@
                               ;; nothing to save (the view mode): it says
                               ;; once it is there and loads, waiting for
                               ;; nobody, who may be gone or asleep
-                              (:saved? params)
+                              (:saved params)
                               (do (open-channel! job-id channel-ctor)
                                   (post! {:type :hello})
                                   (st/emit! (saved)))

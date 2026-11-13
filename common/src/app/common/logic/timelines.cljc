@@ -1056,7 +1056,6 @@
       [timeline lanes]
       mains))))
 
-
 (defn with-copies
   "`timeline`, of a board, as the exports read it with the component
   copies in it, `copies` (by key, see `copy-timelines`): keeping time
@@ -1070,6 +1069,17 @@
       (with-copies-clock (vals copies) stored?)
       (with-instance-tracks (vals copies) objects :text-split text-split)
       (with-instance-clips copies)))
+
+(defn board-timeline
+  "The timeline of `board` in `timelines` or, while it has none, a new
+  empty one named after it: the workspace shows and edits it at once
+  (its first edit stores it), and the exports of a board read it with
+  the copies in it (see `with-copies`). Nil without a board."
+  [timelines board]
+  (when-let [board-id (:id board)]
+    (or (get timelines board-id)
+        (cta/make-timeline {:board-id board-id :name (:name board)}))))
+
 (defn layer-ids
   "The ids of `id` and the layers in it, in the order of the layers panel
   and the dock: the shape, then its layers top-most first, depth first."

@@ -1576,8 +1576,7 @@
         stored?   (contains? timelines board-id)
         copies    (cltl/copy-timelines objects timelines files board-id)]
     (when (or stored? (seq copies))
-      (-> (or (get timelines board-id)
-              (cta/make-timeline {:board-id board-id :name (dm/get-in objects [board-id :name])}))
+      (-> (cltl/board-timeline timelines (or (get objects board-id) {:id board-id}))
           (cltl/with-copies copies objects stored?)))))
 
 (defn board-sound?

@@ -8,7 +8,7 @@
   "The animated export of a board from the view mode (Penpot Motion), in
   the tab the workspace exports in (see
   `app.main.data.exports.animation-tab`), which loads the file itself.
-  The view mode has nothing to save: its jobs say so (`:saved?`), and
+  The view mode has nothing to save: its jobs say so (`:saved`), and
   their tab loads at once, waiting for nobody. The view mode follows its
   jobs under `:viewer-export-animation` as the workspace does (see
   `app.main.data.exports.animation-follow`): the job lives in the store,
@@ -26,7 +26,7 @@
   `params` into a ZIP, as `params` (see `job/job-params`), with the
   renderer `wasm?`, and nothing to save first."
   [{:keys [file-id page-id board-id wasm?]} params]
-  (job/job-params {:file-id file-id :page-id page-id :board-id board-id :wasm? wasm? :saved? true}
+  (job/job-params {:file-id file-id :page-id page-id :board-id board-id :wasm? wasm? :saved true}
                   params))
 
 (defn open-job-tab

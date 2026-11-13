@@ -207,30 +207,28 @@
               (.finally #(end! scene done'))))
         done))))
 
-(t/deftest a-tab-with-nothing-to-save-loads-at-once
-  (t/async
-    done
-    ;; nobody answers its `:hello`: the view mode, gone or asleep
-    (let [{:keys [bundle heard] :as scene} (job-scene nil :params {:saved? true})
-          loaded   (atom 0)
-          statuses (atom #{})]
-      (mock/with-mocks
-        {dv/load-bundle (fn [_] (swap! statuses conj (status)) (swap! loaded inc) (rx/of bundle))
-         dea/run-export (fn [ctx _]
-                          ((:on-progress ctx) {:phase :layers :current 1 :total 2})
-                          {:promise (js/Promise.resolve (ok-result)) :cancel (fn [])})
-         dea/download-result (fn [_] nil)}
-        (fn [done']
-          (start! (assoc scene :opts {:save-wait-ms 10}))
-          (-> (thj/wait-until #(= :done (last (types heard))))
-              (.then (fn [_]
-                       (t/is (= 1 @loaded) "loaded without an answer")
-                       (t/is (= #{:loading} @statuses) "as it loads, not waiting nor stale")
-                       (t/is (= 1 (count (filter #{:hello} (types heard)))) "said once it is there")
-                       (t/is (= [:hello :progress :done] (distinct (types heard))))))
-              (.catch fail!)
-              (.finally #(end! scene done'))))
-        done))))
+(t/deftest ^:async a-tab-with-nothing-to-save-loads-at-once
+  ;; nobody answers its `:hello`: the view mode, gone or asleep
+  (let [{:keys [bundle heard ws] :as scene} (job-scene nil :params {:saved true})
+        loaded   (atom 0)
+        statuses (atom #{})]
+    (await
+     (mock/with-mocks*
+       {dv/load-bundle (fn [_] (swap! statuses conj (status)) (swap! loaded inc) (rx/of bundle))
+        dea/run-export (fn [ctx _]
+                         ((:on-progress ctx) {:phase :layers :current 1 :total 2})
+                         {:promise (js/Promise.resolve (ok-result)) :cancel (fn [])})
+        dea/download-result (fn [_] nil)}
+       (try
+         (start! (assoc scene :opts {:save-wait-ms 10}))
+         (await (thj/wait-until #(= :done (last (types heard)))))
+         (t/is (= 1 @loaded) "loaded without an answer")
+         (t/is (= #{:loading} @statuses) "as it loads, not waiting nor stale")
+         (t/is (= 1 (count (filter #{:hello} (types heard)))) "said once it is there")
+         (t/is (= [:hello :progress :done] (distinct (types heard))))
+         (finally
+           (st/emit! (dat/finalize))
+           ((:close @ws))))))))
 
 (t/deftest a-lottie-of-a-wasm-workspace-starts-wasm-first
   (t/async

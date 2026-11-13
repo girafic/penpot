@@ -160,12 +160,9 @@
 
 (defn board-timeline
   "The timeline of `board` or, while the board has none, a new empty one
-  named after it. The first edit stores the new one, so the timeline of
-  any board can be shown and edited right away."
+  named after it (see `cltl/board-timeline`)."
   [timelines board]
-  (when-let [board-id (:id board)]
-    (or (get timelines board-id)
-        (cta/make-timeline {:board-id board-id :name (:name board)}))))
+  (cltl/board-timeline timelines board))
 
 (defn- current-or-new-timeline
   "The timeline of the active board, a new one when it has none yet (see

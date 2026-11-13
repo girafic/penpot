@@ -53,7 +53,7 @@
    [:wasm? :boolean]
    ;; nothing to save before it (the view mode): its tab loads at once
    ;; instead of waiting for `:saved` (see `animation-tab/initialize`)
-   [:saved? {:optional true} :boolean]
+   [:saved {:optional true} :boolean]
    ;; several boards, each at its scale, exported into a ZIP (see
    ;; `dea/run-exports`); `board-id` and `scale` are those of the first
    [:boards {:optional true}
@@ -81,8 +81,8 @@
   `dea/export-animation`), with the renderer `wasm?`: from the workspace
   (see `deaw/export-job`) or the view mode (see
   `app.main.data.viewer.export-job`), which has nothing to save first
-  (`saved?`)."
-  [{:keys [file-id page-id board-id wasm? saved?]}
+  (`saved`)."
+  [{:keys [file-id page-id board-id wasm? saved]}
    {:keys [format quality fps scale loop? audio? boards] :as params}]
   (cond-> {:file-id file-id
            :page-id page-id
@@ -96,14 +96,14 @@
            :audio? (not (false? audio?))
            :wasm? (boolean wasm?)}
     :always              (into (keep #(when (true? (get params %)) [% true])) (keys svg-options))
-    (true? saved?)       (assoc :saved? true)
+    (true? saved)        (assoc :saved true)
     (> (count boards) 1) (assoc :boards (vec boards))))
 
 (defn encode-params
   "The query params of the tab of the job `params` (see `schema:params`),
   the renderer the workspace uses as `wasm`, which the app honours (see
   `app.main.features/setup-wasm-features`)."
-  [{:keys [file-id page-id board-id job-id format quality fps scale loop? audio? wasm? saved? boards] :as params}]
+  [{:keys [file-id page-id board-id job-id format quality fps scale loop? audio? wasm? saved boards] :as params}]
   (cond-> (into {:file-id (str file-id)
                  :page-id (str page-id)
                  :board-id (str board-id)
@@ -117,7 +117,7 @@
                  :wasm (str (boolean wasm?))}
                 (keep (fn [[option param]] (when (get params option) [param "true"])))
                 svg-options)
-    (true? saved?)
+    (true? saved)
     (assoc :saved "true")
     ;; `<board-id>:<scale>,…`
     (seq boards)
@@ -151,7 +151,7 @@
                  :always          (into (keep (fn [[option param]]
                                                 (when (= "true" (get query param)) [option true])))
                                         svg-options)
-                 (= "true" saved) (assoc :saved? true)
+                 (= "true" saved) (assoc :saved true)
                  (some? boards)   (assoc :boards (decode-boards boards)))]
     (when (and (valid-params? params)
                (or (:wasm? params) (not (needs-wasm? (:format params)))))

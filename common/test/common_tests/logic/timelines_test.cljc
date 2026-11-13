@@ -590,6 +590,14 @@
     (t/is (= [1000] (:copy-loops tl)))
     (t/is (= 1 (count (:audio-clips tl))) "and the sound of their mains")))
 
+(t/deftest the-timeline-of-a-board-or-a-new-one
+  (let [board {:id (uuid/next) :name "Hero"}
+        own   (cta/make-timeline {:board-id (:id board) :duration 2500})]
+    (t/is (= own (cltl/board-timeline {(:id board) own} board)) "its own")
+    (t/is (= [(:id board) "Hero"] ((juxt :board-id :name) (cltl/board-timeline {} board)))
+          "a new one named after it, while it has none")
+    (t/is (nil? (cltl/board-timeline {} nil)) "none without a board")))
+
 (defn- scale-copy
   "`objects` with the copy `copy-id` and its layers as big as `factor`
   times, from its top left corner (only their selrects, all the timelines

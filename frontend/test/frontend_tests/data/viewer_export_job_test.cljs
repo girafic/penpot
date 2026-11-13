@@ -70,7 +70,7 @@
                            {:format :mp4 :quality :low :fps 24 :scale 2
                             :loop? true :audio? false :ids? true :bbox? false})]
     (t/is (= {:file-id file :page-id page :board-id board :format :mp4 :quality :low :fps 24
-              :scale 2 :loop? true :audio? false :wasm? true :ids? true :saved? true}
+              :scale 2 :loop? true :audio? false :wasm? true :ids? true :saved true}
              (dissoc job :job-id))
           "its settings, the SVG options set only, nothing to save")
     (t/is (uuid? (:job-id job)))
