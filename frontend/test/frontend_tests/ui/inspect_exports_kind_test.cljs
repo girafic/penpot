@@ -19,6 +19,7 @@
    [app.main.ui.inspect.styles :refer [styles-tab*]]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
+   [frontend-tests.helpers.mock :as mock]
    [rumext.v2 :as mf]))
 
 (defn- board
@@ -36,38 +37,42 @@
    :strokes []
    :shapes []})
 
-(defn- kinds-given
-  "The kinds of the selection `shapes` that `component` gives the exports
-  of inspect, rendered with them: their component stands in for itself
-  and keeps what it gets."
+(defn- ^:async kinds-given
+  "A promise of the kinds of the selection `shapes` that `component` gives
+  the exports of inspect, rendered with them: their component stands in
+  for itself and keeps what it gets, until what was rendered settled."
   [component shapes]
   (let [given   (atom [])
         objects (into {} (map (juxt :id identity)) shapes)]
-    (with-redefs [ie/exports (fn [^js props]
-                               (swap! given conj (unchecked-get props "type"))
-                               nil)]
-      (thd/with-dom
-        (fn [{:keys [root]}]
-          (thd/render! root (mf/element component
-                                        #js {:shapes shapes
-                                             :objects objects
-                                             :libraries {}
-                                             :fileId (uuid/next)
-                                             :pageId (uuid/next)
-                                             :from :viewer
-                                             :colorSpace "hex"})))))
+    (await
+     (mock/with-mocks*
+       {ie/exports (fn [^js props]
+                     (swap! given conj (unchecked-get props "type"))
+                     nil)}
+       (await
+        (thd/with-dom
+          (fn [{:keys [root]}]
+            (thd/render! root (mf/element component
+                                          #js {:shapes shapes
+                                               :objects objects
+                                               :libraries {}
+                                               :fileId (uuid/next)
+                                               :pageId (uuid/next)
+                                               :from :viewer
+                                               :colorSpace "hex"}))
+            (thd/settle))))))
     @given))
 
-(t/deftest the-styles-tab-gives-the-kind-of-the-selection
-  (let [one (kinds-given styles-tab* [(board 0)])
-        two (kinds-given styles-tab* [(board 0) (board 200)])]
+(t/deftest ^:async the-styles-tab-gives-the-kind-of-the-selection
+  (let [one (await (kinds-given styles-tab* [(board 0)]))
+        two (await (kinds-given styles-tab* [(board 0) (board 200)]))]
     (t/is (seq one) "it shows the exports")
     (t/is (every? #{:frame} one) "one board, never a function")
     (t/is (every? #{:multiple} two) "several shapes")))
 
-(t/deftest the-attributes-tab-gives-the-kind-of-the-selection
-  (let [one (kinds-given attributes* [(board 0)])
-        two (kinds-given attributes* [(board 0) (board 200)])]
+(t/deftest ^:async the-attributes-tab-gives-the-kind-of-the-selection
+  (let [one (await (kinds-given attributes* [(board 0)]))
+        two (await (kinds-given attributes* [(board 0) (board 200)]))]
     (t/is (seq one) "it shows the exports")
     (t/is (every? #{:frame} one))
     (t/is (every? #{:multiple} two))))

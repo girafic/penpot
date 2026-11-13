@@ -87,8 +87,10 @@
     (t/is (= {:format :gif} (:export timeline)) "with its export settings")))
 
 (defn- switches-shown
-  "How many switches the Animated export of `board` shows for an MP4,
-  with `timelines`."
+  "A promise of how many switches the Animated export of `board` shows
+  for an MP4, with `timelines`, once what it asks the browser (whether
+  it encodes the format) answered: an answer after the DOM is gone
+  would reach React in a later test."
   [board timelines]
   (thd/with-dom
     (fn [{:keys [root document]}]
@@ -102,10 +104,13 @@
                                             "onExport" identity
                                             "onCancel" identity
                                             "codecSupported?" (fn [& _] (js/Promise.resolve true)))))
-      (.-length (.querySelectorAll document "[role=switch]")))))
+      (.then (thd/settle)
+             (fn [_] (.-length (.querySelectorAll document "[role=switch]")))))))
 
-(t/deftest the-panel-offers-the-sound-of-the-copies
+(t/deftest ^:async the-panel-offers-the-sound-of-the-copies
   (let [shown (fn [{:keys [page files board-b]}]
-                (switches-shown board-b {(:id board-b) (dv/board-export-timeline page files (:id board-b))}))]
-    (t/is (= (inc (shown (scene))) (shown (scene :sound? true)))
+                (switches-shown board-b {(:id board-b) (dv/board-export-timeline page files (:id board-b))}))
+        quiet (await (shown (scene)))
+        loud  (await (shown (scene :sound? true)))]
+    (t/is (= (inc quiet) loud)
           "the switch to include the sound, of the main of its copy")))
