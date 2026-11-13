@@ -169,6 +169,7 @@
    [frontend-tests.ui.component-svg-test]
    [frontend-tests.ui.context-menu-a11y-test]
    [frontend-tests.ui.dashboard-import-linking-test]
+   [frontend-tests.ui.dashboard-templates-test]
    [frontend-tests.ui.device-frame-test]
    [frontend-tests.ui.device-menu-test]
    [frontend-tests.ui.drag-scroll-test]
@@ -438,6 +439,7 @@
    'frontend-tests.ui.error-boundary-test
    'frontend-tests.ui.export-animation-test
    'frontend-tests.ui.exports-menu-test
+   'frontend-tests.ui.dashboard-templates-test
    'frontend-tests.ui.inspect-animated-export-test
    'frontend-tests.ui.inspect-exports-kind-test
    'frontend-tests.ui.inspect-exports-test

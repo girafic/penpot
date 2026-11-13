@@ -14,6 +14,7 @@
    [app.main.data.dashboard :as dd]
    [app.main.data.event :as ev]
    [app.main.data.modal :as modal]
+   [app.main.data.project :as dpj]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
@@ -56,7 +57,10 @@
                         :template (:name template)
                         :section section})
 
-             (when-not (some? project-id)
+             ;; the page of the project counts the copy among its files:
+             ;; it shows them once they are fetched again
+             (if (some? project-id)
+               (dpj/fetch-files project-id)
                (dcm/go-to-dashboard-recent
                 :team-id team-id
                 :project-id default-project-id))))]
