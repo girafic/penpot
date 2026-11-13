@@ -18,7 +18,9 @@
    [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
    [app.main.ui.exports.animated :as uea]
-   [cljs.test :as t :include-macros true]))
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.dom :as thd]
+   [rumext.v2 :as mf]))
 
 (t/use-fixtures :each {:before cthi/reset-idmap!})
 
@@ -83,3 +85,27 @@
         timeline (dv/board-export-timeline page files (:id board-c))]
     (t/is (= 2500 (:duration timeline)))
     (t/is (= {:format :gif} (:export timeline)) "with its export settings")))
+
+(defn- switches-shown
+  "How many switches the Animated export of `board` shows for an MP4,
+  with `timelines`."
+  [board timelines]
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (thd/render! root (mf/element uea/animated-export*
+                                    (js-obj "boards" [board]
+                                            "timelines" timelines
+                                            "export" {:format :mp4}
+                                            "formats" [:mp4 :lottie]
+                                            "renderWasm?" true
+                                            "onChange" identity
+                                            "onExport" identity
+                                            "onCancel" identity
+                                            "codecSupported?" (fn [& _] (js/Promise.resolve true)))))
+      (.-length (.querySelectorAll document "[role=switch]")))))
+
+(t/deftest the-panel-offers-the-sound-of-the-copies
+  (let [shown (fn [{:keys [page files board-b]}]
+                (switches-shown board-b {(:id board-b) (dv/board-export-timeline page files (:id board-b))}))]
+    (t/is (= (inc (shown (scene))) (shown (scene :sound? true)))
+          "the switch to include the sound, of the main of its copy")))
