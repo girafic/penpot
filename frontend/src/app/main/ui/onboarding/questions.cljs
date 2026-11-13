@@ -306,6 +306,7 @@
                                   :img-width "100px"
                                   :img-height "110px"
                                   :name :start-with
+                                  :class (stl/css :start-options)
                                   :on-change on-start-change}]
 
       (when (= current-start "other")

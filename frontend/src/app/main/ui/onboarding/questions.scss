@@ -136,3 +136,10 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--sp-l) var(--sp-m);
 }
+
+// where to start, six pictures of 132px each: two in a row on a phone (three
+// are wider than its screen and push the step past it, its title too)
+:global(body:has([data-phone="true"])) .start-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-m);
+}
