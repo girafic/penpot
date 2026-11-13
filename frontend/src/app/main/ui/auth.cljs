@@ -18,6 +18,7 @@
    [app.main.ui.ds.foundations.typography.heading :refer [heading*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.touch :as touch]
    [rumext.v2 :as mf]))
 
 (mf/defc auth*
@@ -34,7 +35,11 @@
         (:query-params route)
 
         error
-        (:error params)]
+        (:error params)
+
+        ;; a phone lays the page out for itself (see `auth.scss`)
+        phone?
+        (mf/with-memo [] (touch/phone?))]
 
     (mf/with-effect []
       (dom/set-html-title (tr "title.default")))
@@ -45,7 +50,8 @@
 
     [:main {:class (stl/css-case
                     :auth-section true
-                    :register is-register)}
+                    :register is-register)
+            :data-phone (dm/str phone?)}
      [:> heading* {:level 1 :typography "title-large" :class (stl/css :logo-container)}
       [:a {:href "/" :title "Penpot" :class (stl/css :logo-btn)}
        [:> raw-svg* {:id raw-svg/penpot-logo

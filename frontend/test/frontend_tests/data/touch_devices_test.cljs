@@ -80,6 +80,12 @@
            (touch/viewport-content :dashboard-files true true)
            (touch/viewport-content :settings-profile true true))
         "a phone lays the dashboard and the settings out at its own width")
+  (t/is (= "width=device-width, initial-scale=1, viewport-fit=cover"
+           (touch/viewport-content :auth-login true true)
+           (touch/viewport-content :auth-register-validate true true)
+           (touch/viewport-content :auth-recovery true true)
+           (touch/viewport-content :auth-verify-token true true))
+        "and so the pages of login and sign-up")
   (t/is (= "width=device-width, initial-scale=1"
            (touch/viewport-content :workspace false true)
            (touch/viewport-content :dashboard-recent false true))

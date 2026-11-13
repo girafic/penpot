@@ -48,29 +48,31 @@
   (let [screen (unchecked-get g/global "screen")]
     (phone-screen? (some-> screen .-width) (some-> screen .-height) (coarse?))))
 
-(defn- dashboard-screen?
-  "Whether `screen`, the name of a route, is a page of the dashboard or
-  of the settings of the account."
+(defn- phone-page?
+  "Whether `screen`, the name of a route, is a page a phone lays out for
+  itself: of the dashboard, of the settings of the account, or of login
+  and sign-up."
   [screen]
   (and (keyword? screen)
        (or (str/starts-with? (name screen) "dashboard")
-           (str/starts-with? (name screen) "settings"))))
+           (str/starts-with? (name screen) "settings")
+           (str/starts-with? (name screen) "auth"))))
 
 (defn viewport-content
   "The content of the viewport tag for the `screen` (the name of the
   route) on a `phone?` or another `coarse?` device; nil for none. The
   view mode is as wide as the device and may reach under its notch, and
-  so are the dashboard and the settings on a phone, which lay themselves
-  out for it;
+  so are the dashboard, the settings and the pages of login and sign-up
+  on a phone, which lay themselves out for it;
   elsewhere a tablet lays Penpot out at its own width, and a phone or a
   desktop keeps the width of a desktop page (no tag)."
   [screen phone? coarse?]
   (cond
-    (= screen :viewer)                    "width=device-width, initial-scale=1, viewport-fit=cover"
-    (and phone? (dashboard-screen? screen)) "width=device-width, initial-scale=1, viewport-fit=cover"
-    phone?                                nil
-    coarse?                               "width=device-width, initial-scale=1"
-    :else                                 nil))
+    (= screen :viewer)                "width=device-width, initial-scale=1, viewport-fit=cover"
+    (and phone? (phone-page? screen)) "width=device-width, initial-scale=1, viewport-fit=cover"
+    phone?                            nil
+    coarse?                           "width=device-width, initial-scale=1"
+    :else                             nil))
 
 (defn- head-tag!
   "The tag in the head of the document matching `selector`, made with
