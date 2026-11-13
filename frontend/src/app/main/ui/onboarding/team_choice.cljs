@@ -40,7 +40,8 @@
   {::mf/private true}
   []
   [:div {:class (stl/css :modal-info)}
-   [:img {:src "images/form/slide-final-team.svg"}]
+   [:img {:src "images/form/slide-final-team.svg"
+          :class (stl/css :modal-info-image)}]
 
    [:div {:class (stl/css :modal-info-desc)}
     [:> heading* {:level 2
