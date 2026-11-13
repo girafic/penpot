@@ -421,11 +421,6 @@
     calc(env(safe-area-inset-bottom) + var(--sp-xxl)) calc(env(safe-area-inset-left) + var(--sp-xs));
 }
 
-.overlay[data-phone="true"] .modal-close {
-  inset-block-start: calc(env(safe-area-inset-top) + var(--sp-l));
-  inset-inline-end: calc(env(safe-area-inset-right) + var(--sp-l));
-}
-
 .overlay[data-phone="true"] .login {
   padding-block-end: 0;
 }

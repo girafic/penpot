@@ -161,11 +161,14 @@
     [:div {:class (stl/css :overlay)
            :data-phone (dm/str phone?)}
      [:div {:class (stl/css :dialog-login)}
-      [:div {:class (stl/css :modal-close)}
-       [:> icon-button* {:variant "ghost"
-                         :aria-label (tr "labels.close")
-                         :on-click on-nav-root
-                         :icon i/close}]]
+      ;; on a phone the login is the page: nothing to close, and the login
+      ;; it went to forgets the link to go back to
+      (when-not phone?
+        [:div {:class (stl/css :modal-close)}
+         [:> icon-button* {:variant "ghost"
+                           :aria-label (tr "labels.close")
+                           :on-click on-nav-root
+                           :icon i/close}]])
       [:div {:class (stl/css :login)}
        [:div {:class (stl/css :logo)}
         [:> raw-svg*  {:id "penpot-logo"
