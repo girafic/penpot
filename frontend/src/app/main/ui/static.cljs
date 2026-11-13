@@ -9,6 +9,7 @@
   (:require
    ["rxjs" :as rxjs]
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
    [app.common.uuid :as uuid]
    [app.main.data.auth :refer [is-authenticated?]]
@@ -32,6 +33,7 @@
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.timers :as tm]
+   [app.util.touch :as touch]
    [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
@@ -150,9 +152,14 @@
            (reset! current-section :recovery-email-sent)))
 
         on-nav-root
-        (mf/use-fn #(st/emit! (rt/nav :auth-login {})))]
+        (mf/use-fn #(st/emit! (rt/nav :auth-login {})))
 
-    [:div {:class (stl/css :overlay)}
+        ;; a phone shows it over all of its screen (see `static.scss`)
+        phone?
+        (mf/with-memo [] (touch/phone?))]
+
+    [:div {:class (stl/css :overlay)
+           :data-phone (dm/str phone?)}
      [:div {:class (stl/css :dialog-login)}
       [:div {:class (stl/css :modal-close)}
        [:> icon-button* {:variant "ghost"
