@@ -441,6 +441,9 @@
   block-size: $sz-48;
 }
 
+// as high as its teams: the floor of a computer left a phone with one team
+// a dropdown mostly empty
 [data-phone="true"] .organization-team-dropdown {
   top: calc(var(--sp-s) + #{$sz-48} + var(--sp-xs));
+  min-block-size: 0;
 }
