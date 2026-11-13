@@ -120,7 +120,7 @@
                                     (when-let [tl (dv/board-export-timeline page files id)]
                                       [id tl])))
                             board-ids))
-        animated    (uea/animation-export-boards type shapes timelines)
+        animated    (uea/animation-export-boards shapes timelines)
         animated-key (str/join "," (map :id animated))
         tab*        (mf/use-state nil)
         tab         (or (deref tab*)

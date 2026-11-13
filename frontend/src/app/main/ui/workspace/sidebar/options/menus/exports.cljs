@@ -329,7 +329,7 @@
 
         animated-boards
         (when (seq formats)
-          (uea/animation-export-boards type shapes timelines))
+          (uea/animation-export-boards shapes timelines))
 
         animated-board (first animated-boards)
         animated-id    (str/join "," (map :id animated-boards))

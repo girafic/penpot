@@ -66,9 +66,9 @@
     (t/is (some? timeline) "the one of its copies")
     (t/is (= [1000 :loop] [(:duration timeline) (:playback timeline)]) "on their clock")
     (t/is (nil? (get timelines (:id board-c))) "a still board has none")
-    (t/is (= [board-b] (uea/animation-export-boards :multiple [board-b board-c] timelines))
+    (t/is (= [board-b] (uea/animation-export-boards [board-b board-c] timelines))
           "the Animated tab for it alone")
-    (t/is (nil? (uea/animation-export-boards :frame [board-c] timelines)))))
+    (t/is (nil? (uea/animation-export-boards [board-c] timelines)))))
 
 (t/deftest the-sound-of-the-copies-counts
   (let [{:keys [page files board-b]} (scene :sound? true)

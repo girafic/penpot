@@ -32,15 +32,15 @@
   ["0.5" "1" "2" "w1920" "h720" "h1080" "h1440" "h2160"])
 
 (defn animation-export-boards
-  "The selected boards that have a timeline to export, their own or the
+  "The selected `shapes` that have a timeline to export, their own or the
   one of the component copies in them (`timelines` holds them by board,
   see `dwa/board-export-timeline` and `dv/board-export-timeline`), when
-  only boards are selected (`type` is `:frame` or `:multiple`); else
-  nil. The Animated export tab is shown only for them, in the workspace
-  and in the view mode: one, or several into a ZIP."
-  [type shapes timelines]
-  (when (and (contains? #{:frame :multiple} type)
-             (seq shapes)
+  only boards are selected; else nil. The Animated export tab is shown
+  only for them, in the workspace and in the view mode: one, or several
+  into a ZIP. Boards by their shapes, not by the kind of the selection,
+  which is `:variant` for a copy of a variant component in inspect."
+  [shapes timelines]
+  (when (and (seq shapes)
              (every? cfh/frame-shape? shapes))
     (not-empty (filterv #(contains? timelines (:id %)) shapes))))
 
