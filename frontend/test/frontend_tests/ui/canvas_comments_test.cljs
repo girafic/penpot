@@ -16,11 +16,13 @@
    [app.common.uuid :as uuid]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
+   [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.viewer.canvas-comments :as cvc]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [frontend-tests.helpers.mock :as mock]
+   [okulary.core :as l]
    [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
@@ -45,36 +47,34 @@
 
 (defn- rendered
   "What the comments on the canvas show of `threads` at `zoom`, the
-  comments state `local`, and what `act` (given the document and the
-  window) then emits: `{:anchors [[x y]...] :emitted [type...]}`."
+  comments state `local`, and what `act` (given the document, the window
+  and the atom of that state) then emits: `{:anchors [[x y]...] :emitted
+  [type...]}`. The refs are mocked, not the state of the store, which
+  other tests replace."
   [threads local zoom & [act]]
-  (let [before @st/state]
-    (swap! st/state assoc
-           :profile {:id me}
-           :comment-threads (into {} (map (juxt :id identity)) threads)
-           :comments-local local
-           :viewer {:pages {page-id {:comment-thread-positions {}}}})
-    (try
-      (thd/with-dom
-        (fn [{:keys [root document window]}]
-          (let [emitted (atom [])]
-            (with-redefs [st/emit! (mock/stub (fn [& events] (swap! emitted into events)))]
-              (thd/render! root (mf/element cvc/canvas-comments*
-                                            #js {:page {:id page-id}
-                                                 :objects objects
-                                                 :zoom zoom
-                                                 :size {:width 375 :height 812}
-                                                 :viewOf (constantly {:view {:zoom 1 :x 0 :y 0}
-                                                                      :screen {:width 375 :height 812}})}))
-              (reset! emitted [])
-              (when (fn? act) (act document window))
-              {:anchors (mapv (fn [^js node]
-                                [(js/parseFloat (.getPropertyValue (.-style node) "--anchor-x"))
-                                 (js/parseFloat (.getPropertyValue (.-style node) "--anchor-y"))])
-                              (.querySelectorAll document "[class*=anchor]"))
-               :emitted @emitted}))))
-      (finally
-        (reset! st/state before)))))
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [emitted (atom [])
+            local*  (l/atom local)]
+        (with-redefs [st/emit!             (mock/stub (fn [& events] (swap! emitted into events)))
+                      refs/profile         (l/atom {:id me})
+                      refs/comment-threads (l/atom (into {} (map (juxt :id identity)) threads))
+                      refs/comments-local  local*
+                      refs/viewer-data     (l/atom {:pages {page-id {:comment-thread-positions {}}}})]
+          (thd/render! root (mf/element cvc/canvas-comments*
+                                        #js {:page {:id page-id}
+                                             :objects objects
+                                             :zoom zoom
+                                             :size {:width 375 :height 812}
+                                             :viewOf (constantly {:view {:zoom 1 :x 0 :y 0}
+                                                                  :screen {:width 375 :height 812}})}))
+          (reset! emitted [])
+          (when (fn? act) (act document window local*))
+          {:anchors (mapv (fn [^js node]
+                            [(js/parseFloat (.getPropertyValue (.-style node) "--anchor-x"))
+                             (js/parseFloat (.getPropertyValue (.-style node) "--anchor-y"))])
+                          (.querySelectorAll document "[class*=anchor]"))
+           :emitted @emitted})))))
 
 (t/deftest the-bubbles-sit-at-their-points
   (let [far-apart [(thread 1 10 20) (thread 2 90 80)]]
@@ -87,7 +87,7 @@
           "as the filters say")))
 
 (t/deftest a-tap-opens-a-thread
-  (let [tap! (fn [_ window]
+  (let [tap! (fn [_ window _]
                (thd/click! window (.querySelector (.-document window) "[class*=floating-preview-avatar]")))]
     (t/is (= [::dcm/open-comment-thread]
              (map ptk/type (:emitted (rendered [(thread 1 10 20)] {} 1 tap!)))))
@@ -99,8 +99,8 @@
   "Whether the canvas moves as the thread at `x y` of the page opens, the
   canvas at its corner, at zoom 1."
   [x y]
-  (let [open! (fn [_ _]
-                (thd/act #(swap! st/state assoc-in [:comments-local :open] (uuid/custom 4 1))))
+  (let [open! (fn [_ _ local*]
+                (thd/act #(swap! local* assoc :open (uuid/custom 4 1))))
         types (map ptk/type (:emitted (rendered [(thread 1 x y)] {} 1 open!)))]
     (boolean (some #{::dv/focus-canvas} types))))
 
@@ -112,7 +112,7 @@
   "Where one's own bubble at 10 20 dropped after a drag of `dx dy` px of
   the screen at zoom 2, as stored."
   [dx dy]
-  (let [drag! (fn [_ window]
+  (let [drag! (fn [_ window _]
                 (let [node  (.querySelector (.-document window) "[class*=floating-preview-avatar]")
                       fire! (fn [type x y]
                               (thd/act #(.dispatchEvent node (new (.-MouseEvent window) type

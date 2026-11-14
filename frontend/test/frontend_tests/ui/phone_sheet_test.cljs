@@ -12,6 +12,7 @@
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.shortcuts :as sc]
+   [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.viewer.phone-sheet :as phone-sheet]
    [app.util.i18n :refer [tr]]
@@ -19,6 +20,7 @@
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [frontend-tests.helpers.mock :as mock]
+   [okulary.core :as l]
    [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
@@ -395,42 +397,40 @@
 (defn- canvas-comments-row
   "What the sheet of the canvas shows of its comments to a viewer with
   `permissions`, the comments `local`, two threads on its board, and what
-  a tap on its switch emits."
+  a tap on its switch emits. The refs are mocked, not the state of the
+  store, which other tests replace."
   [permissions local]
-  (let [before  @st/state
-        [page-id board-id] [(uuid/next) (uuid/next)]
+  (let [[page-id board-id] [(uuid/next) (uuid/next)]
         threads (into {} (map (fn [n] [n {:id n :frame-id board-id}])) [(uuid/next) (uuid/next)])
         objects {uuid/zero {:id uuid/zero :type :frame :shapes [board-id]}
                  board-id  {:id board-id :name "Start" :type :frame :parent-id uuid/zero :frame-id uuid/zero}}]
-    (swap! st/state assoc :comment-threads threads :comments-local local)
-    (try
-      (thd/with-dom
-        (fn [{:keys [root document window]}]
-          (let [emitted (atom [])]
-            ;; in the shape of its arities: several events go to the variadic one
-            (with-redefs [st/emit! (fn
-                                     ([] nil)
-                                     ([event] (swap! emitted conj event))
-                                     ([event & events] (swap! emitted into (cons event events))))]
-              (thd/render! root (mf/element phone-sheet/phone-sheet*
-                                            #js {:page {:id page-id :objects objects :frames [(get objects board-id)]}
-                                                 :file {:name "File" :data {:pages [page-id]
-                                                                            :pages-index {page-id {:name "Page"}}}}
-                                                 :permissions permissions
-                                                 :section :interactions
-                                                 :onClose identity
-                                                 :isCanvas true :hasCanvas true :isDocked true}))
-              (let [switch (.querySelector document "[role=switch]")
-                    shown  {:switch (some-> switch .-textContent)
-                            :menu?  (boolean (some #(= (tr "labels.comments") (.-textContent %))
-                                                   (.querySelectorAll document "button")))
-                            :hint?  (some? (.querySelector document "[class*=comments-hint]"))}]
-                (some->> switch (thd/click! window))
-                (assoc shown :emitted (mapv (fn [e] [(ptk/type e) (when (= ::dcm/update-options (ptk/type e))
-                                                                    (get-in (ptk/update e {}) [:comments-local :canvas-shown?]))])
-                                            @emitted)))))))
-      (finally
-        (reset! st/state before)))))
+    (thd/with-dom
+      (fn [{:keys [root document window]}]
+        (let [emitted (atom [])]
+          ;; in the shape of its arities: several events go to the variadic one
+          (with-redefs [st/emit!             (fn
+                                               ([] nil)
+                                               ([event] (swap! emitted conj event))
+                                               ([event & events] (swap! emitted into (cons event events))))
+                        refs/comment-threads (l/atom threads)
+                        refs/comments-local  (l/atom local)]
+            (thd/render! root (mf/element phone-sheet/phone-sheet*
+                                          #js {:page {:id page-id :objects objects :frames [(get objects board-id)]}
+                                               :file {:name "File" :data {:pages [page-id]
+                                                                          :pages-index {page-id {:name "Page"}}}}
+                                               :permissions permissions
+                                               :section :interactions
+                                               :onClose identity
+                                               :isCanvas true :hasCanvas true :isDocked true}))
+            (let [switch (.querySelector document "[role=switch]")
+                  shown  {:switch (some-> switch .-textContent)
+                          :menu?  (boolean (some #(= (tr "labels.comments") (.-textContent %))
+                                                 (.querySelectorAll document "button")))
+                          :hint?  (some? (.querySelector document "[class*=comments-hint]"))}]
+              (some->> switch (thd/click! window))
+              (assoc shown :emitted (mapv (fn [e] [(ptk/type e) (when (= ::dcm/update-options (ptk/type e))
+                                                                  (get-in (ptk/update e {}) [:comments-local :canvas-shown?]))])
+                                          @emitted)))))))))
 
 (t/deftest the-canvas-sheet-switches-its-comments
   (let [editor {:can-edit true :is-logged true :in-team true}]
