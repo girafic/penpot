@@ -269,8 +269,31 @@
   min-inline-size: 0;
 }
 
-// how the sheet opens, the first time: at the bottom, where it comes from,
-// legible over whatever the board shows there
+// the button of the options, for one who chose it: over the board at the
+// bottom right of the screen, clear of its home bar, legible over whatever
+// the board shows there
+.sheet-button {
+  position: fixed;
+  inset-inline-end: calc(env(safe-area-inset-right) + var(--sp-l));
+  inset-block-end: calc(env(safe-area-inset-bottom) + var(--sp-l));
+  z-index: deprecated.$z-index-4;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  inline-size: $sz-48;
+  block-size: $sz-48;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: rgb(0 0 0 / 0.6);
+  color: var(--color-static-white);
+  box-shadow: 0 0 px2rem(8) rgb(0 0 0 / 0.2);
+  backdrop-filter: blur(px2rem(8));
+  animation: fade-in 0.2s ease;
+}
+
+// how the sheet opens, each time the prototype shows: at the bottom, where
+// it comes from, legible over whatever the board shows there
 .hint {
   @include use-typography("body-medium");
 

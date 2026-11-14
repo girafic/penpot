@@ -24,6 +24,7 @@
    [app.main.store :as st]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.controls.switch :refer [switch*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
@@ -380,6 +381,24 @@
        [:span {:class (stl/css :grip)}]]
       [:div {:class (stl/css :body)} children]]]))
 
+(def button-key
+  "Where a phone keeps whether a button on the screen opens the options
+  of the prototype (see `sheet-button*`)."
+  ::sheet-button)
+
+(mf/defc sheet-button*
+  "On a phone, over the board at the bottom right of the screen, for one
+  who chose it in the options: a button that opens them, `on-click`,
+  instead of two fingers held."
+  [{:keys [on-click]}]
+  [:button {:type "button"
+            :class (stl/css :sheet-button)
+            :aria-label (tr "viewer.phone.options")
+            :on-click (fn [event]
+                        (dom/stop-propagation event)
+                        (on-click))}
+   [:> icon* {:icon-id i/menu :size "m"}]])
+
 (mf/defc hold-hint*
   "At the bottom of a phone, where the sheet comes from: how it opens.
   It calls `on-hide` after `hint-ms` and at a tap; when it shows is the
@@ -467,7 +486,7 @@
   moves the canvas there (see `dv/focus-canvas`) and lowers the sheet to
   where it starts."
   [{:keys [page file project frame index permissions section interactions-mode timeline on-close
-           is-canvas has-canvas is-docked on-switch]}]
+           is-canvas has-canvas is-docked on-switch show-button on-show-button]}]
   (let [frames     (:frames page)
         total      (count frames)
         flows      (not-empty (:flows page))
@@ -668,6 +687,15 @@
      ;; its animation
      (when (and (some? timeline) (not (true? is-canvas)))
        [:div {:class (stl/css :row)} timeline])
+
+     ;; a button on the screen for these options, instead of two fingers
+     ;; held (see `sheet-button*`)
+     (when (and (not (true? is-canvas)) (fn? on-show-button))
+       [:div {:class (stl/css :row)}
+        [:> checkbox* {:id "phone-sheet-button"
+                       :label (tr "viewer.phone.show-button")
+                       :checked (true? show-button)
+                       :on-change #(on-show-button (not (true? show-button)))}]])
 
      ;; the pages, the one shown in the mode it shows (see `dv/go-to-page`),
      ;; a lone one too: which page shows

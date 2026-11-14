@@ -439,3 +439,44 @@
           "on, which show, their list and how to add one: a tap hides them, an open thread closes")
     (t/is (nil? (:switch (canvas-comments-row {:in-team true :is-logged true :who-comment "team"} {})))
           "none for one who may not comment")))
+
+(defn- button-setting
+  "What the options of a phone over the prototype (or the canvas,
+  `canvas?`) offer of a button on the screen, shown or not (`shown?`):
+  whether its checkbox, ticked, and what a tap on it asks."
+  [canvas? shown?]
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [page-id (uuid/next)
+            frame   {:id (uuid/next) :name "Board"}
+            asked   (atom [])]
+        (thd/render! root (mf/element phone-sheet/phone-sheet*
+                                      #js {:page {:id page-id :frames [frame]}
+                                           :file {:name "File" :data {:pages [page-id]
+                                                                      :pages-index {page-id {:name "Page"}}}}
+                                           :frame frame :index 0
+                                           :permissions {:in-team true :is-logged true}
+                                           :section :interactions
+                                           :onClose identity
+                                           :isCanvas canvas? :hasCanvas true :isDocked canvas?
+                                           :showButton shown?
+                                           :onShowButton #(swap! asked conj %)}))
+        (let [box (.querySelector document "#phone-sheet-button")]
+          (some->> box (thd/click! window))
+          {:offered (some? box) :ticked (some-> box .-checked) :asked @asked})))))
+
+(t/deftest the-options-offer-a-button-on-the-screen
+  (t/is (= {:offered true :ticked false :asked [true]} (button-setting false false))
+        "over the prototype, off: a tap asks for it")
+  (t/is (= {:offered true :ticked true :asked [false]} (button-setting false true))
+        "on: a tap asks for none")
+  (t/is (= {:offered false :ticked nil :asked []} (button-setting true false))
+        "the canvas has its sheet docked"))
+
+(t/deftest the-button-on-the-screen-opens-the-options
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [opened (atom 0)]
+        (thd/render! root (mf/element phone-sheet/sheet-button* #js {:onClick #(swap! opened inc)}))
+        (thd/click! window (.querySelector document (str "button[aria-label=\"" (tr "viewer.phone.options") "\"]")))
+        (t/is (= 1 @opened))))))

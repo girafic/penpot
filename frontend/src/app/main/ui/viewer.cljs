@@ -715,6 +715,9 @@
         ;; it goes or two fingers open the sheet (see `phone-sheet/hold-hint*`)
         hint*       (mf/use-state true)
         hint?       (deref hint*)
+        ;; or a button on the screen opens it, as chosen in it
+        button*     (hooks/use-persisted-state phone-sheet/button-key false)
+        button?     (true? (deref button*))
         hide-hint   (mf/use-fn #(reset! hint* false))
         ;; the switch of the sheet went to the other mode, which keeps it
         switched-ref (mf/use-ref false)
@@ -1422,8 +1425,12 @@
      ;; on a phone the board alone: two fingers held open what the
      ;; bars hold elsewhere, which a note tells each time the prototype
      ;; shows, once its board does
-     (when (and phone? drawn? hint? (not sheet?) (not canvas?))
+     (when (and phone? drawn? hint? (not button?) (not sheet?) (not canvas?))
        [:> phone-sheet/hold-hint* {:on-hide hide-hint}])
+
+     ;; or the button that opens them, as chosen in them
+     (when (and phone? drawn? button? (not sheet?) (not canvas?))
+       [:> phone-sheet/sheet-button* {:on-click #(reset! sheet* true)}])
 
      ;; on the canvas it stays, docked at the bottom
      (when (and phone? (or sheet? canvas?))
@@ -1437,6 +1444,8 @@
          :index index
          :is-canvas canvas?
          :is-docked canvas?
+         :show-button button?
+         :on-show-button #(reset! button* %)
          :has-canvas (and wasm? (contains? cf/flags :phone-canvas))
          :permissions permissions
          :section section
