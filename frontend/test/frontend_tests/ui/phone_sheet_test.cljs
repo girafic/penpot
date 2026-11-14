@@ -16,6 +16,7 @@
    [app.main.store :as st]
    [app.main.ui.viewer.phone-sheet :as phone-sheet]
    [app.util.i18n :refer [tr]]
+   [app.util.storage :as storage]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [frontend-tests.helpers.mock :as mock]
@@ -506,3 +507,46 @@
             :emitted [::dv/select-prev-frame]}
            (screen-controls 2 3 true (tr "labels.previous")))
         "the last, animated: the one before, its animation too"))
+
+(t/deftest the-controls-on-the-screen-stay-whole-where-dragged
+  (let [screen {:width 375 :height 812}
+        rect   {:left 70 :top 700 :width 240 :height 40}]
+    (t/is (= {:x (/ 190 375) :y (/ 620 812)} (phone-sheet/controls-place rect 0 -100 screen))
+          "the middle of their box where the finger took it, as parts of the screen")
+    (t/is (= {:x (/ 128 375) :y (/ 28 812)} (phone-sheet/controls-place rect -500 -2000 screen))
+          "past the top left: whole, 8px in from the edges")
+    (t/is (= {:x (/ 247 375) :y (/ 784 812)} (phone-sheet/controls-place rect 500 500 screen))
+          "past the bottom right too")))
+
+(defn- pressed
+  "What the controls on the screen emit as a finger presses their button
+  to the next board, moves `dy` px and lets go, and where they stay."
+  [dy]
+  (swap! storage/user dissoc ::phone-sheet/controls-place)
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [emitted (atom [])
+            fire!   (fn [node type y]
+                      (thd/act #(.dispatchEvent node (new (.-MouseEvent window) type
+                                                          #js {:bubbles true :clientX 100 :clientY y}))))]
+        (with-redefs [st/emit! (mock/stub (fn [& events] (swap! emitted into events)))]
+          (thd/render! root (mf/element phone-sheet/screen-controls* #js {:index 0 :total 3}))
+          (let [bar  (.querySelector document "[role=toolbar]")
+                next (last (.querySelectorAll document "[role=toolbar] button"))]
+            ;; jsdom captures no pointer
+            (set! (.-setPointerCapture bar) (fn [_]))
+            (fire! next "pointerdown" 700)
+            (fire! next "pointermove" (+ 700 dy))
+            (fire! next "pointerup" (+ 700 dy))
+            (thd/click! window next)
+            (let [place (get @storage/user ::phone-sheet/controls-place)]
+              (swap! storage/user dissoc ::phone-sheet/controls-place)
+              {:emitted (mapv ptk/type @emitted)
+               :placed  (.getAttribute bar "data-placed")
+               :stays   (some? place)})))))))
+
+(t/deftest a-finger-drags-the-controls-on-the-screen
+  (t/is (= {:emitted [::dv/select-next-frame] :placed "false" :stays false} (pressed 3))
+        "a tap trembling a little: the next board")
+  (t/is (= {:emitted [] :placed "true" :stays true} (pressed -100))
+        "dragged: elsewhere, where they stay, and no board"))

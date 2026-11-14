@@ -29,6 +29,7 @@
    [app.main.ui.ds.controls.switch :refer [switch*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.ds.layout.menu :refer [menu* menu-item* menu-separator*]]
+   [app.main.ui.hooks :as hooks]
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.main.ui.viewer.header :as header]
@@ -408,22 +409,122 @@
                      :disabled (>= (inc index) total)
                      :on-click #(st/emit! dv/select-next-frame)}]])
 
+(def ^:private place-key
+  "Where a phone keeps where its controls on the screen were dragged to."
+  ::controls-place)
+
+(def ^:private drag-slop-px
+  "How far a finger on the controls on the screen moves before it drags
+  them: less, it taps the button under it."
+  8)
+
+(def ^:private screen-gap-px
+  "How far the controls on the screen keep from its edges."
+  8)
+
+(defn controls-place
+  "Where the controls on a `screen` (`{:width :height}`, px) go, dragged
+  `dx dy` px from the box `rect` (`{:left :top :width :height}`): the
+  middle of their box, as parts of the screen (`{:x :y}`, 0 to 1), so
+  that it holds as the phone turns, the box whole on the screen."
+  [rect dx dy screen]
+  (let [{:keys [left top width height]} rect
+        sw   (:width screen)
+        sh   (:height screen)
+        half-w (/ width 2)
+        half-h (/ height 2)
+        cx   (mth/clamp (+ left half-w dx) (+ half-w screen-gap-px) (- sw half-w screen-gap-px))
+        cy   (mth/clamp (+ top half-h dy) (+ half-h screen-gap-px) (- sh half-h screen-gap-px))]
+    {:x (/ cx (max 1 sw)) :y (/ cy (max 1 sh))}))
+
+(defn- place-style
+  [{:keys [x y]}]
+  #js {"--controls-x" x "--controls-y" y})
+
 (mf/defc screen-controls*
   "On a phone, over the board at the bottom of the screen, for one who
   chose them in the options: the controls of the prototype, which the
   options hold too, at hand. Where the `index`th of `total` boards is,
   the buttons to the first, the one before and the one after, and those
-  of its animation, `timeline`, when it has one."
+  of its animation, `timeline`, when it has one. A finger drags them
+  elsewhere (see `controls-place`), where they stay on this phone; one
+  that moves less taps the button under it."
   [{:keys [index total timeline]}]
-  [:div {:class (stl/css :screen-controls)
-         :role "toolbar"
-         :aria-label (tr "viewer.phone.controls")}
-   [:span {:class (stl/css :counter)} (dm/str (inc index) " / " total)]
-   [:> board-nav* {:index index :total total}]
-   (when (some? timeline)
-     [:*
-      [:span {:class (stl/css :divider)}]
-      timeline])])
+  (let [place*   (hooks/use-persisted-state place-key nil)
+        place    (deref place*)
+        node-ref (mf/use-ref nil)
+        ;; the finger down: where, the box then, whether it drags
+        drag-ref (mf/use-ref nil)
+        ;; a drag let go: the click it ends in taps nothing
+        dragged-ref (mf/use-ref false)
+
+        on-pointer-down
+        (mf/use-fn
+         (fn [^js event]
+           (let [^js node (mf/ref-val node-ref)
+                 rect     (.getBoundingClientRect node)]
+             (mf/set-ref-val! dragged-ref false)
+             (mf/set-ref-val! drag-ref {:id (.-pointerId event)
+                                        :x0 (.-clientX event)
+                                        :y0 (.-clientY event)
+                                        :rect {:left (.-left rect) :top (.-top rect)
+                                               :width (.-width rect) :height (.-height rect)}}))))
+
+        on-pointer-move
+        (mf/use-fn
+         (fn [^js event]
+           (when-let [{:keys [id x0 y0 rect dragging]} (mf/ref-val drag-ref)]
+             (when (= id (.-pointerId event))
+               (let [dx (- (.-clientX event) x0)
+                     dy (- (.-clientY event) y0)]
+                 (when (or dragging (> (mth/hypot dx dy) drag-slop-px))
+                   (let [^js node (mf/ref-val node-ref)
+                         to       (controls-place rect dx dy {:width (.-innerWidth g/window)
+                                                              :height (.-innerHeight g/window)})]
+                     (when-not dragging
+                       (.setPointerCapture node id)
+                       (mf/set-ref-val! drag-ref (assoc (mf/ref-val drag-ref) :dragging true)))
+                     ;; moved by its style, React not at all
+                     (.setAttribute node "data-placed" "true")
+                     (.setProperty (.-style node) "--controls-x" (:x to))
+                     (.setProperty (.-style node) "--controls-y" (:y to))
+                     (mf/set-ref-val! drag-ref (assoc (mf/ref-val drag-ref) :to to)))))))))
+
+        on-pointer-up
+        (mf/use-fn
+         (fn [^js event]
+           (when-let [{:keys [id dragging to]} (mf/ref-val drag-ref)]
+             (when (= id (.-pointerId event))
+               (mf/set-ref-val! drag-ref nil)
+               (when (and dragging (some? to))
+                 (mf/set-ref-val! dragged-ref true)
+                 (reset! place* to))))))
+
+        on-click-capture
+        (mf/use-fn
+         (fn [^js event]
+           (when (mf/ref-val dragged-ref)
+             (mf/set-ref-val! dragged-ref false)
+             (dom/stop-propagation event)
+             (dom/prevent-default event))))]
+
+    [:div {:ref node-ref
+           :class (stl/css :screen-controls)
+           :role "toolbar"
+           :aria-label (tr "viewer.phone.controls")
+           :data-placed (some? place)
+           :style (when (some? place) (place-style place))
+           :on-pointer-down on-pointer-down
+           :on-pointer-move on-pointer-move
+           :on-pointer-up on-pointer-up
+           :on-pointer-cancel on-pointer-up
+           :on-click-capture on-click-capture}
+     [:span {:class (stl/css :counter)} (dm/str (inc index) " / " total)]
+     [:> board-nav* {:index index :total total}]
+     (when (some? timeline)
+       [:*
+        [:span {:class (stl/css :divider)}]
+        timeline])]))
 
 (mf/defc hold-hint*
   "At the bottom of a phone, where the sheet comes from, `raised` above

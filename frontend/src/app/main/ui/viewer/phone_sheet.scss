@@ -271,7 +271,8 @@
 
 // the controls of the prototype on the screen, for one who chose them in
 // the sheet: over the board at the bottom of the screen, clear of its home
-// bar, as a sheet floats there
+// bar, as a sheet floats there. A finger drags them anywhere on the
+// screen, not the page under them
 .screen-controls {
   position: fixed;
   inset-inline: 0;
@@ -288,7 +289,20 @@
   background-color: var(--color-background-primary);
   color: var(--color-foreground-primary);
   box-shadow: 0 0 px2rem(16) rgb(0 0 0 / 0.2);
+  touch-action: none;
+  user-select: none;
   animation: fade-in 0.2s ease;
+}
+
+// dragged elsewhere: the middle of their box there, as parts of the screen
+// (see `controls-place`)
+.screen-controls[data-placed="true"] {
+  inset-inline: auto;
+  inset-block: auto;
+  inset-inline-start: calc(var(--controls-x) * 100%);
+  inset-block-start: calc(var(--controls-y) * 100%);
+  margin: 0;
+  transform: translate(-50%, -50%);
 }
 
 // between the boards and the animation
