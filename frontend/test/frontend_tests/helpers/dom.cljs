@@ -15,10 +15,26 @@
 
 (def ^:private dom-globals
   "What the page, React and react-aria (the menus of the design system)
-  reach the DOM by."
+  reach the DOM by. The events and the frames too, for an open menu: it
+  dispatches a `CustomEvent`, which a node of jsdom takes from its own
+  window only, not the one of Node, and waits for a frame."
   ["window" "document" "navigator" "Node" "Element" "SVGElement" "HTMLElement"
    "HTMLAnchorElement" "HTMLButtonElement" "HTMLInputElement" "HTMLSelectElement"
-   "HTMLTextAreaElement"])
+   "HTMLTextAreaElement" "Event" "CustomEvent" "FocusEvent" "KeyboardEvent"
+   "MouseEvent" "CSS" "requestAnimationFrame" "cancelAnimationFrame"])
+
+(def ^:private css
+  "The `CSS` of a browser, which jsdom has none of: react-aria escapes
+  by it the name of a meta tag it looks for as a menu opens."
+  #js {:escape (fn [value] (.replace (str value) (js/RegExp. "[^\\w-]" "g") "\\$&"))})
+
+(defn- dom-global
+  "What the global `k` is while a test has the DOM of jsdom `window`."
+  [window k]
+  (case k
+    "window" window
+    "CSS"    (or (unchecked-get window "CSS") css)
+    (unchecked-get window k)))
 
 (defn act
   "Call `f` and let React render what it changed before going on."
@@ -43,9 +59,12 @@
         app-win globals/window
         _       (set! globals/document (.-document window))
         _       (set! globals/window window)
+        ;; jsdom lays nothing out, so there is nothing to scroll: an
+        ;; open menu scrolls its focused item into view a frame later
+        _       (set! (.. window -Element -prototype -scrollTo) (fn []))
         _       (doseq [k dom-globals]
                   (js/Object.defineProperty js/globalThis k
-                                            #js {:value (if (= k "window") window (unchecked-get window k))
+                                            #js {:value (dom-global window k)
                                                  :configurable true
                                                  :writable true}))
         _       (unchecked-set js/globalThis "IS_REACT_ACT_ENVIRONMENT" true)
