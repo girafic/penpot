@@ -1254,6 +1254,21 @@
     IDeref
     (-deref [_] target)))
 
+(defn open-thread-moment
+  "The board `thread` is about in the prototype, its Comments section,
+  the thread open: there the view mode shows the board paused at the
+  moment of the animation the thread is about (see `comments-layer`).
+  From the canvas of a phone, which plays no animation, off it."
+  [{:keys [frame-id] :as thread}]
+  (ptk/reify ::open-thread-moment
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when-let [index (d/index-of-pred (:frames (shown-page state)) #(= frame-id (:id %)))]
+        (rx/of (rt/nav :viewer (-> (dvc/board-params (rt/get-params state) index)
+                                   (assoc :section :comments)))
+               (-> (dcmt/open-thread thread)
+                   (with-meta {::ev/origin "viewer"})))))))
+
 (declare pause-timeline)
 
 ;; --- Overlays

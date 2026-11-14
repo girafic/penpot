@@ -115,6 +115,15 @@
         expanded    (:expanded local)
         draft       (:draft local)
 
+        ;; the canvas plays no animation: the moment a thread is about
+        ;; shows in the prototype
+        on-show-time
+        (mf/use-fn
+         (mf/deps open-id threads-map)
+         (fn [_]
+           (when-let [thread (get threads-map open-id)]
+             (st/emit! (dv/open-thread-moment thread)))))
+
         on-draft-cancel
         (mf/use-fn #(st/emit! (dcm/close-thread)))
 
@@ -231,6 +240,7 @@
        [:> cmt/comment-floating-thread*
         {:thread open-thread
          :origin :viewer
+         :on-show-time on-show-time
          :viewport {:offset-x 0 :offset-y 0 :width (:width size) :height (:height size)}
          :zoom zoom
          :docked true}])]))

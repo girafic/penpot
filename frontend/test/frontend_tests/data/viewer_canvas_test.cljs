@@ -11,8 +11,10 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.math :as mth]
+   [app.common.time :as ct]
    [app.common.uuid :as uuid]
    [app.config :as cf]
+   [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.repo :as rp]
@@ -210,6 +212,21 @@
     (t/is (nil? (:app.main.router/replace (:options (navigation (dv/go-to-frame-by-index 1) state))))
           "a step in the history: the back gesture returns to the canvas")
     (t/is (not (dv/canvas-shown? (viewer-state (assoc page-query :canvas "false" :index "1")))))))
+
+(t/deftest the-moment-of-a-thread-opens-in-the-prototype
+  (let [state  (viewer-state (assoc page-query :canvas "true"))
+        thread {:id (uuid/custom 8 1) :seqn 1 :frame-id (second board-ids) :animation-time 1200
+                :page-id page-id :file-id file-id :project-id (uuid/custom 8 2) :file-name "File"
+                :owner-id (uuid/custom 8 3) :participants #{} :content ""
+                :created-at (ct/now) :modified-at (ct/now) :position (gpt/point 10 10)}
+        events (watch-events (dv/open-thread-moment thread) state)]
+    (t/is (= (assoc page-query :canvas "false" :index 1 :section :comments)
+             (:params (navigation (dv/open-thread-moment thread) state)))
+          "its board, off the canvas, in the Comments section")
+    (t/is (= [:app.main.router/navigate ::dcm/open-comment-thread] (map ptk/type events))
+          "the thread open there, which shows the board at its moment")
+    (t/is (empty? (watch-events (dv/open-thread-moment (assoc thread :frame-id (uuid/custom 9 9))) state))
+          "about no board of the page: nowhere")))
 
 (t/deftest the-canvas-comes-back-from-a-board
   (let [state (viewer-state (assoc page-query :canvas "false" :index "1" :frame-id "x"))
