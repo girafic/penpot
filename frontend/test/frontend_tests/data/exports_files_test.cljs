@@ -10,7 +10,9 @@
   (the pending changes are sent first, and the dialog is told when some are
   still not saved)."
   (:require
+   [app.common.uri :as u]
    [app.common.uuid :as uuid]
+   [app.config :as cf]
    [app.main.data.exports.files :as fexp]
    [app.main.data.modal :as modal]
    [app.main.data.persistence :as dps]
@@ -347,3 +349,14 @@
   (let [file-id (uuid/next)
         props   (await (dialog-props (with-queued-change {} (uuid/next)) file-id))]
     (t/is (false? (:unsaved props)))))
+
+(t/deftest a-download-comes-from-the-address-of-the-page
+  (with-redefs [cf/public-uri (u/uri "http://sbook.local:14179/")]
+    (t/is (= "http://sbook.local:14179/assets/by-id/f00?x=1"
+             (cf/served-here "https://localhost:3449/assets/by-id/f00?x=1"))
+          "a file Penpot serves, linked at the address of the backend: at the one of the page")
+    (t/is (= "http://assets/export" (cf/served-here "http://assets/export"))
+          "another link, as it is")
+    (t/is (= "blob:http://sbook.local:14179/1" (cf/served-here "blob:http://sbook.local:14179/1"))
+          "a file the page made itself, as it is")
+    (t/is (nil? (cf/served-here nil)))))

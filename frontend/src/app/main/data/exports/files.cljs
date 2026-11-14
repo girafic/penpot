@@ -9,6 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.schema :as sm]
+   [app.config :as cf]
    [app.main.data.event :as ev]
    [app.main.data.jobs :as dj]
    [app.main.data.modal :as modal]
@@ -104,7 +105,8 @@
                                       (cond
                                         (= "completed" status)
                                         (rx/of {:file-id  (:id file)
-                                                :uri      (:resource-uri result)
+                                                ;; at the address of this page
+                                                :uri      (cf/served-here (:resource-uri result))
                                                 :filename (:name file)
                                                 :size     (:size result)})
 

@@ -182,6 +182,24 @@
   (normalize-uri (or (obj/get global "penpotPublicURI")
                      (obj/get location "origin"))))
 
+(defn served-here
+  "The link `uri` of a file Penpot serves (`/assets/...`), at the address
+  this page was opened at (`public-uri`). The backend writes its own
+  public address into the links of what it exports, which another
+  address of the same Penpot does not reach (a phone on the local
+  network, where `localhost` is the phone), or reaches as another
+  origin, whose file the browser saves under the name of the link, not
+  under its own. Other links as they are."
+  [uri]
+  (let [{:keys [scheme path] :as parsed} (some-> uri u/uri)]
+    (if (and (contains? #{"http" "https"} scheme)
+             (str/starts-with? (str path) "/assets/"))
+      (str (assoc parsed
+                  :scheme (:scheme public-uri)
+                  :host (:host public-uri)
+                  :port (:port public-uri)))
+      uri)))
+
 (def mcp-ws-uri
   (or (some-> (obj/get global "penpotMcpServerURI") u/uri)
       (u/join public-uri "mcp/ws")))

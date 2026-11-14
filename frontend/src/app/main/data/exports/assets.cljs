@@ -9,6 +9,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.time :as ct]
    [app.common.uuid :as uuid]
+   [app.config :as cf]
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
    [app.main.data.modal :as modal]
@@ -271,7 +272,7 @@
     ptk/WatchEvent
     (watch [_ _ _]
       (when (= status "ended")
-        (dom/trigger-download-uri filename mtype resource-uri)))))
+        (dom/trigger-download-uri filename mtype (cf/served-here resource-uri))))))
 
 (def ^:private local-export-job-id*
   "Job id of the in-flight worker multi-export, if any."
@@ -383,7 +384,7 @@
 
              (->> (rp/cmd! :export params)
                   (rx/map (fn [{:keys [filename mtype uri]}]
-                            (dom/trigger-download-uri filename mtype uri)
+                            (dom/trigger-download-uri filename mtype (cf/served-here uri))
                             (clear-export-state uuid/zero)))
                   (rx/catch (fn [cause]
                               (rx/of (clear-export-state uuid/zero)
