@@ -409,7 +409,7 @@
 // takes all of the screen and scrolls, clear of the notch, the home
 // indicator and Safari's bar: centered, a box taller than the screen
 // loses its top
-.overlay[data-phone="true"] {
+.overlay[data-phone="true"]:has(> .dialog-login) {
   align-items: flex-start;
   overflow-y: auto;
   background-color: var(--color-background-primary);
@@ -425,4 +425,38 @@
 
 .overlay[data-phone="true"] .login {
   padding-block-end: 0;
+}
+
+// On a phone (a link of a team the user is not in, an SSO that failed)
+// asking for access is a sheet from the bottom, as the other sheets of a
+// phone (`viewer/phone_sheet.scss`): in from the edges of the screen and
+// above its home indicator, round all round, its buttons one above the
+// other as wide as it, the one that asks on top
+.overlay[data-phone="true"]:has(> .dialog) {
+  align-items: flex-end;
+}
+
+.overlay[data-phone="true"] .dialog {
+  flex-grow: 1;
+  inline-size: auto;
+  margin: 0 calc(env(safe-area-inset-right) + var(--phone-sheet-gap))
+    calc(env(safe-area-inset-bottom) + var(--phone-sheet-gap))
+    calc(env(safe-area-inset-left) + var(--phone-sheet-gap));
+  padding: var(--sp-xxl) var(--sp-xl) var(--sp-xl);
+  border-radius: var(--phone-sheet-radius);
+}
+
+.overlay[data-phone="true"] .dialog .sign-info {
+  flex-direction: column-reverse;
+  align-items: stretch;
+  gap: var(--sp-s);
+}
+
+.overlay[data-phone="true"] .sign-info .cancel-button,
+.overlay[data-phone="true"] .sign-info .sign-button {
+  --button-height: #{$sz-40};
+
+  justify-content: center;
+  min-block-size: $sz-40;
+  margin: 0;
 }

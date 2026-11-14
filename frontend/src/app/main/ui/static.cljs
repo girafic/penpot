@@ -241,8 +241,11 @@
 
 (mf/defc request-dialog*
   [{:keys [title content button-text on-button-click cancel-text on-close]}]
-  (let [on-click (or on-button-click on-close)]
-    [:div {:class (stl/css :overlay)}
+  (let [on-click (or on-button-click on-close)
+        ;; a phone shows it as a sheet from the bottom (see `static.scss`)
+        phone?   (use-phone-layout)]
+    [:div {:class (stl/css :overlay)
+           :data-phone (dm/str phone?)}
      [:div {:class (stl/css :dialog)}
       [:div {:class (stl/css :modal-close)}
        [:> icon-button* {:variant "ghost"
@@ -257,7 +260,10 @@
          [:button {:class (stl/css :cancel-button)
                    :on-click on-close}
           cancel-text])
-       [:> button* {:variant "primary" :on-click on-click} button-text]]]]))
+       [:> button* {:variant "primary"
+                    :class (stl/css :sign-button)
+                    :on-click on-click}
+        button-text]]]]))
 
 (mf/defc request-access*
   [{:keys [file-id team-id is-default is-workspace profile]}]
@@ -486,48 +492,52 @@
 
 (mf/defc context-wrapper*
   [{:keys [is-workspace is-dashboard is-viewer profile children]}]
-  [:*
-   (cond
-     is-workspace
-     [:div {:class (stl/css :workspace)}
-      [:div {:class (stl/css :workspace-left)}
-       [:> raw-svg* {:id "penpot-logo-icon"}]
-       [:div
-        [:div {:class (stl/css :project-name)} (tr "not-found.no-permission.project-name")]
-        [:div {:class (stl/css :file-name)} (tr "not-found.no-permission.penpot-file")]]]
-      [:div {:class (stl/css :workspace-right)}]]
+  ;; a phone shows what it asks or tells alone: the view mode of a phone
+  ;; has no bars, and a sidebar of a desktop has no room on it
+  (let [phone? (use-phone-layout)]
+    [:*
+     (when-not phone?
+       (cond
+         is-workspace
+         [:div {:class (stl/css :workspace)}
+          [:div {:class (stl/css :workspace-left)}
+           [:> raw-svg* {:id "penpot-logo-icon"}]
+           [:div
+            [:div {:class (stl/css :project-name)} (tr "not-found.no-permission.project-name")]
+            [:div {:class (stl/css :file-name)} (tr "not-found.no-permission.penpot-file")]]]
+          [:div {:class (stl/css :workspace-right)}]]
 
-     is-viewer
-     [:div {:class (stl/css :viewer)}
-      ;; FIXME: the viewer header was never designed to be reused
-      ;; from other parts of the application, and this code looks
-      ;; like a fast workaround reusing it as-is without a proper
-      ;; component adaptation for be able to use it easily it on
-      ;; viewer context or static error page context
-      [:& viewer.header/header {:project
-                                {:name (tr "not-found.no-permission.project-name")}
-                                :index 0
-                                :file {:name (tr "not-found.no-permission.penpot-file")}
-                                :page nil
-                                :frame nil
-                                :permissions {:is-logged true}
-                                :zoom 1
-                                :section :interactions
-                                :shown-thumbnails false
-                                :interactions-mode nil}]]
+         is-viewer
+         [:div {:class (stl/css :viewer)}
+          ;; FIXME: the viewer header was never designed to be reused
+          ;; from other parts of the application, and this code looks
+          ;; like a fast workaround reusing it as-is without a proper
+          ;; component adaptation for be able to use it easily it on
+          ;; viewer context or static error page context
+          [:& viewer.header/header {:project
+                                    {:name (tr "not-found.no-permission.project-name")}
+                                    :index 0
+                                    :file {:name (tr "not-found.no-permission.penpot-file")}
+                                    :page nil
+                                    :frame nil
+                                    :permissions {:is-logged true}
+                                    :zoom 1
+                                    :section :interactions
+                                    :shown-thumbnails false
+                                    :interactions-mode nil}]]
 
-     is-dashboard
-     [:div {:class (stl/css :dashboard)}
-      [:div {:class (stl/css :dashboard-sidebar)}
-       [:> sidebar*
-        {:team nil
-         :projects []
-         :project (:default-project-id profile)
-         :profile profile
-         :section :dashboard-projects
-         :search-term ""}]]])
+         is-dashboard
+         [:div {:class (stl/css :dashboard)}
+          [:div {:class (stl/css :dashboard-sidebar)}
+           [:> sidebar*
+            {:team nil
+             :projects []
+             :project (:default-project-id profile)
+             :profile profile
+             :section :dashboard-projects
+             :search-term ""}]]]))
 
-   children])
+     children]))
 
 (mf/defc sso-error-section*
   "Shown in place of the dashboard/workspace (same static skeleton and

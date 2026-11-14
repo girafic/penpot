@@ -116,3 +116,40 @@
              (await (rendered login-modal :viewer false login)))
           "a view mode link of a desktop")))
 
+
+(defn- overlay-phone
+  [document]
+  (phone-attr document "#root > [data-phone]"))
+
+(t/deftest ^:async request-dialog-on-a-phone
+  (let [dialog (mf/element static/request-dialog* #js {:title "No access"
+                                                       :buttonText "Ask"
+                                                       :cancelText "Back"
+                                                       :onClose (fn [])})]
+    (t/is (= "true" (await (rendered dialog :viewer true overlay-phone)))
+          "a view mode link of a phone: a sheet from the bottom")
+    (t/is (= "true" (await (rendered dialog :dashboard-recent true overlay-phone)))
+          "a dashboard link of a phone")
+    (t/is (= "false" (await (rendered dialog :workspace true overlay-phone)))
+          "a workspace link of a phone: the dialog of a desktop")
+    (t/is (= "false" (await (rendered dialog :viewer false overlay-phone)))
+          "a desktop")))
+
+(defn- drawn
+  "How many elements the context draws: the desktop page it fakes and
+  what it wraps, or what it wraps alone."
+  [document]
+  (.. (.querySelector document "#root") -children -length))
+
+(t/deftest ^:async context-on-a-phone
+  (let [context (fn [props]
+                  (mf/element static/context-wrapper*
+                              (js/Object.assign #js {:children (mf/html [:p "dialog"])} props)))]
+    (t/is (= 1 (await (rendered (context #js {:isViewer true}) :viewer true drawn)))
+          "a phone's view mode has no bars to fake")
+    (t/is (= 1 (await (rendered (context #js {:isDashboard true}) :dashboard-recent true drawn)))
+          "nor its dashboard a sidebar")
+    (t/is (= 2 (await (rendered (context #js {:isWorkspace true}) :workspace true drawn)))
+          "a phone keeps the workspace a desktop page")
+    (t/is (= 2 (await (rendered (context #js {:isWorkspace true}) :workspace false drawn)))
+          "a desktop")))
