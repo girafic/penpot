@@ -442,8 +442,13 @@
 }
 
 // as high as its teams: the floor of a computer left a phone with one team
-// a dropdown mostly empty
+// a dropdown mostly empty. Its height is `auto` (what it holds), not
+// `fit-content`: the switch it hangs from is lower than where it starts,
+// and Safari on iOS takes a fit-content height from the room left there
+// (none), which gave the smallest the dropdown can be, its teams scrolled
+// away to nothing and its actions cut off
 [data-phone="true"] .organization-team-dropdown {
   top: calc(var(--sp-s) + #{$sz-48} + var(--sp-xs));
+  block-size: auto;
   min-block-size: 0;
 }
