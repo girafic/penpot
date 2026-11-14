@@ -336,3 +336,58 @@
     (t/is (= [::dcm/update-filters] (events "yours" false)) "which comments show")
     (t/is (= [::dcm/update-filters] (events "resolved" true)) "the resolved ones or not")
     (t/is (= [::dcm/update-options] (events "list" false)) "their list, above the options")))
+
+(t/deftest the-canvas-lists-its-boards
+  (let [[page-id a b c] (repeatedly 4 uuid/next)
+        board   (fn [id name parent] {:id id :name name :type :frame :parent-id parent :frame-id parent})
+        objects {uuid/zero {:id uuid/zero :type :frame :shapes [a b]}
+                 a (assoc (board a "Start" uuid/zero) :shapes [c])
+                 b (board b "Lesson" uuid/zero)
+                 c (board c "Card" a)}
+        page    {:id page-id :objects objects :frames [(get objects b) (get objects c) (get objects a)]}
+        file    {:name "File" :data {:pages [page-id] :pages-index {page-id {:name "Page"}}}}
+        shown   (fn [canvas? pick]
+                  (thd/with-dom
+                    (fn [{:keys [root document window]}]
+                      (let [emitted (atom [])
+                            labels  #(mapv (fn [n] (.-textContent n))
+                                           (.querySelectorAll document "ul[aria-label] button"))]
+                        (with-redefs [st/emit! (mock/stub (fn [& events] (swap! emitted into events)))]
+                          (thd/render! root (mf/element phone-sheet/phone-sheet*
+                                                        #js {:page page :file file :frame (get objects a) :index 0
+                                                             :permissions {:in-team true :is-logged true}
+                                                             :section :interactions
+                                                             :onClose identity
+                                                             :isCanvas canvas? :hasCanvas true :isDocked canvas?}))
+                          (when-let [button (->> (.querySelectorAll document "ul[aria-label] button")
+                                                 (filter #(= pick (.-textContent %)))
+                                                 (first))]
+                            (thd/click! window button))
+                          {:labels (labels)
+                           :focus  (some->> @emitted
+                                            (filter #(= ::dv/focus-canvas (ptk/type %)))
+                                            (first)
+                                            (deref))})))))]
+    (t/is (= {:labels [(tr "viewer.phone.whole-page") "Lesson" "Start"] :focus {:board b}}
+             (shown true "Lesson"))
+          "the whole page and the top-level boards, in the order of the view mode: one goes there")
+    (t/is (= :page (:focus (shown true (tr "viewer.phone.whole-page")))) "the whole page too")
+    (t/is (= [] (:labels (shown false nil))) "the prototype goes board by board")))
+
+(t/deftest a-sheet-lowered-rests-where-it-starts
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (let [render! #(thd/render! root (mf/element phone-sheet/sheet* #js {:label "Options"
+                                                                           :docked true
+                                                                           :lowered %
+                                                                           :onClose identity}))
+            dialog  #(.querySelector document "[role=dialog]")
+            grip    #(.querySelector document "[class*=grip-zone]")]
+        (render! 0)
+        (t/is (re-find #"start" (.-className (dialog))) "docked, where it starts")
+        (thd/act #(do (touch! (grip) "touchstart" [[100 400]])
+                      (touch! (grip) "touchmove" [[100 200]])))
+        (thd/act #(touch! (grip) "touchend" []))
+        (t/is (not (re-find #"start" (.-className (dialog)))) "dragged elsewhere")
+        (render! 1)
+        (t/is (re-find #"start" (.-className (dialog))) "lowered, there again")))))

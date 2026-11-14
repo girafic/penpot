@@ -22,13 +22,17 @@
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
    [app.common.uuid :as uuid]
+   [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.render-viewer-wasm :as rwv]
+   [app.main.store :as st]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.render-wasm.api :as wasm.api]
    [app.util.dom :as dom]
    [app.util.timers :as ts]
    [app.util.touch :as touch]
+   [beicon.v2.core :as rx]
+   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
 (def ^:private tween-ms
@@ -79,8 +83,8 @@
   holds (`{:page :bounds :objects :render!}`): shown from the tiles in
   the cache while it moves (see `rwv/move-page-view`), rendered in full
   by `render!` once it rests. Two taps soon and near zoom to a board and
-  back (see `dvc/double-tap-view`). The names of the boards in
-  `names-ref` move with it."
+  back (see `dvc/double-tap-view`); `dv/focus-canvas` moves it there
+  too. The names of the boards in `names-ref` move with it."
   [canvas-ref names-ref view-ref live-ref]
   (mf/with-effect []
     (let [^js canvas (mf/ref-val canvas-ref)
@@ -177,6 +181,27 @@
                 (set-view! base))
               (vswap! state dissoc :anim)
               true))
+
+          ;; there smoothly, from the sheet or a comment (see
+          ;; `dv/focus-canvas`)
+          focus!
+          (fn [target]
+            (when-let [from (get-view)]
+              (let [{:keys [objects bounds]} (mf/ref-val live-ref)
+                    screen (get-screen)
+                    to     (cond
+                             (= :page target)
+                             (dvc/initial-view bounds screen)
+
+                             (some? (:point target))
+                             (dvc/bubble-view from bounds screen (:point target) (get objects (:board target)))
+
+                             :else
+                             (some-> (get objects (:board target)) (dvc/board-view bounds screen)))]
+                (when (some? to)
+                  (stop-anim!)
+                  (vswap! state assoc :anim {:kind :tween :from from :to to :t0 (js/performance.now)})
+                  (draw!)))))
 
           point
           (fn [^js event]
@@ -319,14 +344,19 @@
       (.addEventListener canvas "pointerup" on-up)
       (.addEventListener canvas "pointercancel" on-cancel)
       (.addEventListener canvas "wheel" on-wheel #js {:passive false})
-      (fn []
-        (.removeEventListener canvas "pointerdown" on-down)
-        (.removeEventListener canvas "pointermove" on-move)
-        (.removeEventListener canvas "pointerup" on-up)
-        (.removeEventListener canvas "pointercancel" on-cancel)
-        (.removeEventListener canvas "wheel" on-wheel #js {:passive false})
-        (some-> @raf ts/cancel-af!)
-        (some-> @rest-timer js/clearTimeout)))))
+      (let [focus-sub (->> st/stream
+                           (rx/filter (ptk/type? ::dv/focus-canvas))
+                           (rx/map deref)
+                           (rx/subs! focus!))]
+        (fn []
+          (rx/dispose! focus-sub)
+          (.removeEventListener canvas "pointerdown" on-down)
+          (.removeEventListener canvas "pointermove" on-move)
+          (.removeEventListener canvas "pointerup" on-up)
+          (.removeEventListener canvas "pointercancel" on-cancel)
+          (.removeEventListener canvas "wheel" on-wheel #js {:passive false})
+          (some-> @raf ts/cancel-af!)
+          (some-> @rest-timer js/clearTimeout))))))
 
 (mf/defc canvas-viewport*
   "The `page` as a whole on a screen of `size` (`{:width :height}`, CSS

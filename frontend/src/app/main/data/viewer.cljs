@@ -1240,6 +1240,17 @@
     (watch [_ state _]
       (rx/of (rt/nav :viewer (dvc/canvas-params (rt/get-params state)))))))
 
+(defn focus-canvas
+  "Move the canvas of a phone smoothly to `target` (see
+  `app.main.ui.viewer.canvas`): `:page`, its start view; `{:board id}`,
+  that board as wide as the screen; `{:point p :board id}`, a bubble at
+  the point `p` of the page above a thread docked at the bottom. It holds
+  the target and changes nothing: the canvas keeps its view to itself."
+  [target]
+  (ptk/reify ::focus-canvas
+    IDeref
+    (-deref [_] target)))
+
 (declare pause-timeline)
 
 ;; --- Overlays

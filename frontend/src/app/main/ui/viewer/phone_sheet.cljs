@@ -18,6 +18,7 @@
    [app.main.data.comments :as dcm]
    [app.main.data.modal :as modal]
    [app.main.data.viewer :as dv]
+   [app.main.data.viewer.canvas :as dvc]
    [app.main.data.viewer.shortcuts :as sc]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -271,8 +272,10 @@
   rests at a little of it instead of closing. `kept-height`, px, it
   keeps that height, whatever it holds, until its grip drags it, which
   calls `on-drag`. Down to a little of it, it shows its head, what it
-  marks `data-sheet-head` (see `head-height`)."
-  [{:keys [label height open-beside docked on-close children kept-height on-drag]}]
+  marks `data-sheet-head` (see `head-height`). Each time `lowered`, a
+  number, grows, it rests where it starts again, so that what it opened
+  shows above it."
+  [{:keys [label height open-beside docked on-close children kept-height on-drag lowered]}]
   (let [resting*   (mf/use-state (if (true? docked) :start :low))
         resting    (deref resting*)
         drag*      (mf/use-state nil)
@@ -329,6 +332,10 @@
         {:keys [block-size transform]}
         (when (some? drag)
           (drag-style drag (:heights (mf/ref-val gesture-ref))))]
+
+    (mf/with-effect [lowered]
+      (when (and (number? lowered) (pos? lowered))
+        (reset! resting* (if (true? docked) :start :low))))
 
     ;; what it holds changes its head: `.small` as high as it, on the
     ;; node, which React leaves be
@@ -447,7 +454,10 @@
   it leaves the view mode or opens what shows instead (log in).
   `is-docked`, it stays at the bottom of the
   canvas (see `sheet*`). The switch keeps it open, as high as it is: it
-  calls `on-switch` first, which keeps it shown in the other mode."
+  calls `on-switch` first, which keeps it shown in the other mode. On the
+  canvas, after the pages, the whole page and its top-level boards: a tap
+  moves the canvas there (see `dv/focus-canvas`) and lowers the sheet to
+  where it starts."
   [{:keys [page file project frame index permissions section interactions-mode timeline on-close
            is-canvas has-canvas is-docked on-switch]}]
   (let [frames     (:frames page)
@@ -480,6 +490,21 @@
         ;; the height the sheet keeps going to the other mode, px
         kept*      (mf/use-state nil)
 
+        ;; the top-level boards the canvas draws, in the order of the
+        ;; view mode
+        boards     (mf/with-memo [page is-canvas]
+                     (when (true? is-canvas)
+                       (dvc/top-boards (dvc/canvas-objects (:objects page)) frames)))
+
+        ;; how often a board of the list was tapped (see `sheet*`)
+        lowered*   (mf/use-state 0)
+
+        focus-canvas
+        (fn [target]
+          (reset! kept* nil)
+          (swap! lowered* inc)
+          (st/emit! (dv/focus-canvas target)))
+
         switch-mode
         (fn [value event]
           (reset! kept* (some-> (dom/get-target event) (.closest "[role=dialog]") (.-offsetHeight)))
@@ -505,6 +530,7 @@
                 :docked (true? is-docked)
                 :open-beside (true? is-docked)
                 :kept-height (deref kept*)
+                :lowered (deref lowered*)
                 :on-drag #(reset! kept* nil)
                 :on-close on-close}
      ;; the logo, back to the dashboard for the team, the project and the
@@ -621,6 +647,24 @@
             [:span {:class (stl/css :label)} (dm/get-in file [:data :pages-index id :name])]
             (when (= id (:id page))
               [:> icon* {:icon-id i/tick :size "s"}])]])])
+
+     ;; on the canvas, the whole page and its boards
+     (when (seq boards)
+       [:ul {:class (stl/css :list)
+             :aria-label (tr "viewer.phone.boards")}
+        [:li
+         [:button {:type "button"
+                   :class (stl/css :item)
+                   :on-click #(focus-canvas :page)}
+          [:> icon* {:icon-id i/fit-content :size "s"}]
+          [:span {:class (stl/css :label)} (tr "viewer.phone.whole-page")]]]
+        (for [{:keys [id name]} boards]
+          [:li {:key (dm/str id)}
+           [:button {:type "button"
+                     :class (stl/css :item)
+                     :on-click #(focus-canvas {:board id})}
+            [:> icon* {:icon-id i/board :size "s"}]
+            [:span {:class (stl/css :label)} name]]])])
 
      ;; the flows
      (when (and flows (= section :interactions))
