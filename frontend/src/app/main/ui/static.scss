@@ -460,3 +460,31 @@
   min-block-size: $sz-40;
   margin: 0;
 }
+
+// On a phone (a link that leads nowhere, an invitation no longer valid) the
+// error page keeps its header and its login clear of the notch, and leaves
+// out the pencil above: on a narrow screen the link of the header always
+// crosses it. Its messages keep off the edges and may grow taller than the
+// room the pencils leave them
+.exception-layout[data-phone="true"] .exception-header {
+  padding: calc(env(safe-area-inset-top) + var(--sp-xl)) calc(env(safe-area-inset-right) + var(--sp-xl))
+    var(--sp-xl) calc(env(safe-area-inset-left) + var(--sp-xl));
+}
+
+.exception-layout[data-phone="true"] .login-header {
+  margin: calc(env(safe-area-inset-top) + var(--sp-xl) + var(--sp-s))
+    calc(env(safe-area-inset-right) + var(--sp-xl)) 0 0;
+}
+
+.exception-layout[data-phone="true"] .deco-before {
+  display: none;
+}
+
+.exception-layout[data-phone="true"] .container {
+  align-self: flex-start;
+  inline-size: 100%;
+  block-size: auto;
+  min-block-size: 34vh;
+  padding-inline: calc(env(safe-area-inset-left) + var(--sp-xl))
+    calc(env(safe-area-inset-right) + var(--sp-xl));
+}

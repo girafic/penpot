@@ -153,3 +153,15 @@
           "a phone keeps the workspace a desktop page")
     (t/is (= 2 (await (rendered (context #js {:isWorkspace true}) :workspace false drawn)))
           "a desktop")))
+
+(t/deftest ^:async error-page-on-a-phone
+  (let [page  (mf/element static/error-container* #js {:children (mf/html [:p "invite invalid"])})
+        phone #(phone-attr % "#root > section[data-phone]")]
+    (t/is (= "true" (await (rendered page :auth-verify-token true phone)))
+          "an invitation no longer valid, on a phone: its header clear of the notch")
+    (t/is (= "true" (await (rendered page :dashboard-recent true phone)))
+          "a dashboard that does not exist")
+    (t/is (= "false" (await (rendered page :workspace true phone)))
+          "a phone keeps the workspace a desktop page")
+    (t/is (= "false" (await (rendered page :auth-verify-token false phone)))
+          "a desktop")))

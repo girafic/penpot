@@ -55,6 +55,8 @@
 (mf/defc error-container*
   [{:keys [children]}]
   (let [profile     (mf/deref refs/profile)
+        ;; a phone keeps its header clear of the notch (see `static.scss`)
+        phone?      (use-phone-layout)
         profile-id  (:id profile)
         on-nav-root (mf/use-fn
                      (mf/deps profile-id profile)
@@ -63,7 +65,8 @@
                          (st/emit! (dcm/go-to-dashboard-recent
                                     :team-id (:default-team-id profile)))
                          (st/emit! (rt/nav-root)))))]
-    [:section {:class (stl/css :exception-layout)}
+    [:section {:class (stl/css :exception-layout)
+               :data-phone (dm/str phone?)}
      [:button
       {:class (stl/css :exception-header)
        :on-click on-nav-root}
