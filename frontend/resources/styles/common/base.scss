@@ -148,8 +148,10 @@ select {
 }
 
 // iOS Safari zooms into a field under 16px when it gets the focus: the
-// fields of the pages a phone lays out for itself (the dashboard, the
-// settings and the view mode) are 16px there
+// fields of the pages a phone lays out for itself (`touch/phone-layout?`:
+// the dashboard, the settings, the view mode, login and sign-up, the
+// onboarding, and the login, request-access and error pages of a link)
+// are 16px there
 :root:has([data-phone="true"]) input,
 :root:has([data-phone="true"]) textarea,
 :root:has([data-phone="true"]) select,

@@ -12,7 +12,6 @@
   (:require
    [app.common.uuid :as uuid]
    [app.main.data.common :as dcm]
-   [app.main.data.event :as ev]
    [app.main.data.modal :as modal]
    [app.main.data.project :as dpj]
    [app.main.store :as st]
@@ -35,7 +34,8 @@
                              ([event & events] (swap! emitted into (cons event events))))]
       (import-template! {:id "wireframes" :name "Wireframes"} (uuid/next) project-id (uuid/next) "dashboard-project")
       (let [shown     (first (filter #(= ::modal/show-modal (ptk/type %)) @emitted))
-            on-finish (:on-finish-import (ev/-data shown))]
+            ;; the callback as the modal holds it, what the import calls
+            on-finish (get-in (ptk/update shown {}) [::modal/modal :props :on-finish-import])]
         (reset! emitted [])
         (on-finish)
         (set (map ptk/type @emitted))))))
