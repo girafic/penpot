@@ -5,11 +5,12 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.util.touch
-  "Phones, tablets and pens: what kind of screen Penpot runs on, its
-  viewport tag and its web app tags, whether a finger or a pen was used
-  yet (the `touch-ui` class on the document then, and `touch-ui?`), and
-  how two fingers pan and zoom a view. Never the user agent: Safari on an
-  iPad says it is a Mac."
+  "Phones, tablets and pens: what kind of screen Penpot runs on, the
+  pages a phone lays out at its own width, their viewport tag and the
+  web app tags, whether a finger or a pen was used yet (the `touch-ui`
+  class on the document then, and `touch-ui?`), and how two fingers pan
+  and zoom a view. Never the user agent: Safari on an iPad says it is a
+  Mac."
   (:require
    [app.common.geom.point :as gpt]
    [app.util.dom :as dom]
@@ -58,21 +59,30 @@
            (str/starts-with? (name screen) "settings")
            (str/starts-with? (name screen) "auth"))))
 
+(defn phone-layout?
+  "Whether a `phone?` lays the page of the route `screen` out at its own
+  width: the view mode and the pages of `phone-page?`, as its viewport
+  tag says (see `viewport-content`). Other routes, the workspace above
+  all, it keeps at the width of a desktop page. A component that lays
+  itself out for a phone asks this, never `phone?` alone, so its layout
+  and the viewport tag agree."
+  [screen phone?]
+  (boolean (and phone? (or (= screen :viewer) (phone-page? screen)))))
+
 (defn viewport-content
   "The content of the viewport tag for the `screen` (the name of the
   route) on a `phone?` or another `coarse?` device; nil for none. The
   view mode is as wide as the device and may reach under its notch, and
-  so are the dashboard, the settings and the pages of login and sign-up
-  on a phone, which lay themselves out for it;
+  so are the pages a phone lays out for itself (`phone-layout?`);
   elsewhere a tablet lays Penpot out at its own width, and a phone or a
   desktop keeps the width of a desktop page (no tag)."
   [screen phone? coarse?]
   (cond
-    (= screen :viewer)                "width=device-width, initial-scale=1, viewport-fit=cover"
-    (and phone? (phone-page? screen)) "width=device-width, initial-scale=1, viewport-fit=cover"
-    phone?                            nil
-    coarse?                           "width=device-width, initial-scale=1"
-    :else                             nil))
+    (= screen :viewer)              "width=device-width, initial-scale=1, viewport-fit=cover"
+    (phone-layout? screen phone?)   "width=device-width, initial-scale=1, viewport-fit=cover"
+    phone?                          nil
+    coarse?                         "width=device-width, initial-scale=1"
+    :else                           nil))
 
 (defn- head-tag!
   "The tag in the head of the document matching `selector`, made with

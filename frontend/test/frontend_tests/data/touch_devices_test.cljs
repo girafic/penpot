@@ -92,6 +92,17 @@
         "a tablet lays Penpot out at its own width")
   (t/is (nil? (touch/viewport-content :workspace false false)) "a desktop has no tag"))
 
+(t/deftest phone-layouts
+  (t/testing "a phone lays the view mode and the pages of its own out at its width"
+    (doseq [screen [:viewer :dashboard-recent :settings-profile :auth-login :auth-verify-token]]
+      (t/is (true? (touch/phone-layout? screen true)) (str "screen: " screen))))
+  (t/testing "it keeps the workspace and a route it does not know as wide as a desktop page"
+    (doseq [screen [:workspace :frame-preview nil]]
+      (t/is (false? (touch/phone-layout? screen true)) (str "screen: " screen))))
+  (t/testing "nothing is a phone's layout off a phone"
+    (doseq [screen [:viewer :dashboard-recent :auth-login :workspace]]
+      (t/is (false? (touch/phone-layout? screen false)) (str "screen: " screen)))))
+
 (t/deftest phone-links
   (let [file-id (uuid/next)
         url     (phone-link/link "https://pc.example:3449/" file-id page-id board-a)]
