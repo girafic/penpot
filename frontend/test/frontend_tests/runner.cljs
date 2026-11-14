@@ -156,6 +156,7 @@
    [frontend-tests.tokens.tokenscript-test]
    [frontend-tests.tokens.workspace-tokens-remap-test]
    [frontend-tests.ui.board-play-test]
+   [frontend-tests.ui.canvas-comments-test]
    [frontend-tests.ui.canvas-window-test]
    [frontend-tests.ui.check-menu-item-test]
    [frontend-tests.ui.check-updates-test]
@@ -415,6 +416,7 @@
    'frontend-tests.tokens.logic.tokens-status-test
    'frontend-tests.tokens.workspace-tokens-remap-test
    'frontend-tests.ui.board-play-test
+   'frontend-tests.ui.canvas-comments-test
    'frontend-tests.ui.canvas-window-test
    'frontend-tests.ui.check-menu-item-test
    'frontend-tests.ui.check-updates-test

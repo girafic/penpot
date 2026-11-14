@@ -27,8 +27,9 @@
 }
 
 // the names of the boards over their top left corners, as large at any
-// zoom (see `place-names!`), as the workspace draws them over its canvas,
-// whose color the canvas has (see `dvc/background`)
+// zoom, by the variables of the view on the root (see `place-view!`), as
+// the workspace draws them over its canvas, whose color the canvas has
+// (see `dvc/background`)
 .names {
   position: absolute;
   inset: 0;

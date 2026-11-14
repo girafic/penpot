@@ -216,6 +216,19 @@
   flex: 1;
 }
 
+// the switch of the comments of the canvas, its label beside it
+.comments-switch {
+  min-inline-size: 0;
+}
+
+// how to add a comment on the canvas
+.comments-hint {
+  @include use-typography("body-small");
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
+
 .list {
   display: flex;
   flex-direction: column;

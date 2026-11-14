@@ -25,6 +25,7 @@
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
+   [app.main.ui.ds.controls.switch :refer [switch*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.ds.layout.menu :refer [menu* menu-item* menu-separator*]]
    [app.main.ui.icons :as deprecated-icon]
@@ -407,6 +408,17 @@
     "list"     [(dcm/update-options {:show-sidebar? true})]
     [(dcm/update-filters {:mode (keyword id)})]))
 
+(defn- comments-items
+  "The entries of the menu of the comments of a phone: which show (`cmode`,
+  and the resolved ones unless `resolved?` is false), and their list."
+  [cmode resolved?]
+  [{:id "all" :label (tr "labels.show-all-comments") :ticked (= cmode :all)}
+   {:id "yours" :label (tr "labels.show-your-comments") :ticked (= cmode :yours)}
+   {:id "mentions" :label (tr "labels.show-mentions") :ticked (= cmode :mentions)}
+   :separator
+   {:id "resolved" :label (tr "labels.hide-resolved-comments") :ticked (not resolved?)}
+   {:id "list" :label (tr "labels.show-comments-list") :icon i/comments}])
+
 (mf/defc sheet-menu*
   "A menu of the options of a phone beside share, as the header holds it:
   a button (as a select of the design system) named `label` with an
@@ -490,11 +502,27 @@
         ;; the height the sheet keeps going to the other mode, px
         kept*      (mf/use-state nil)
 
-        ;; the top-level boards the canvas draws, in the order of the
-        ;; view mode
-        boards     (mf/with-memo [page is-canvas]
+        ;; what the canvas draws, its top-level boards in the order of
+        ;; the view mode, and the comment threads on it
+        cobjects   (mf/with-memo [page is-canvas]
                      (when (true? is-canvas)
-                       (dvc/top-boards (dvc/canvas-objects (:objects page)) frames)))
+                       (dvc/canvas-objects (:objects page))))
+        boards     (mf/with-memo [cobjects frames]
+                     (when (some? cobjects)
+                       (dvc/top-boards cobjects frames)))
+        threads    (mf/deref refs/comment-threads)
+        nthreads   (mf/with-memo [cobjects threads]
+                     (count (dvc/canvas-threads (vals threads) nil cobjects)))
+        comment?   (and (true? is-canvas) (dv/can-comment? permissions))
+        shown?     (true? (:canvas-shown? comments))
+
+        ;; the comments on the canvas, or none (see
+        ;; `app.main.ui.viewer.canvas-comments`)
+        show-comments
+        (fn [shown?]
+          (if shown?
+            (st/emit! (dcm/update-options {:canvas-shown? true}))
+            (st/emit! (dcm/close-thread) (dcm/update-options {:canvas-shown? false}))))
 
         ;; how often a board of the list was tapped (see `sheet*`)
         lowered*   (mf/use-state 0)
@@ -509,7 +537,9 @@
         (fn [value event]
           (reset! kept* (some-> (dom/get-target event) (.closest "[role=dialog]") (.-offsetHeight)))
           (when (fn? on-switch) (on-switch))
-          (st/emit! (if (= "canvas" value) dv/show-canvas (dv/go-to-frame-auto))))
+          ;; a thread open on the canvas stays there
+          (st/emit! (dcm/close-thread)
+                    (if (= "canvas" value) dv/show-canvas (dv/go-to-frame-auto))))
 
         ;; the page as a whole, or its boards one by one
         view-switch
@@ -554,6 +584,22 @@
      (when (some? view-switch)
        [:div {:data-sheet-head true} view-switch])
 
+     ;; the comments of the canvas, for one who may comment: shown or not,
+     ;; which, and their list; and how to add one
+     (when comment?
+       [:div {:class (stl/css :row)}
+        [:> switch* {:class (stl/css :comments-switch)
+                     :label (tr "viewer.phone.show-comments" nthreads)
+                     :default-checked shown?
+                     :on-change show-comments}]
+        [:span {:class (stl/css :gap)}]
+        (when shown?
+          [:> sheet-menu* {:label (tr "labels.comments")
+                           :on-action #(apply st/emit! (comments-events % resolved?))
+                           :items (comments-items cmode resolved?)}])])
+     (when (and comment? shown?)
+       [:p {:class (stl/css :comments-hint)} (tr "viewer.phone.comment-hint")])
+
      ;; the sections and share, of the prototype only: the canvas shows the
      ;; page as it is. A phone edits not: no button for the workspace
      (when-not (true? is-canvas)
@@ -593,12 +639,7 @@
         (when (= section :comments)
           [:> sheet-menu* {:label (tr "labels.comments")
                            :on-action #(apply st/emit! (comments-events % resolved?))
-                           :items [{:id "all" :label (tr "labels.show-all-comments") :ticked (= cmode :all)}
-                                   {:id "yours" :label (tr "labels.show-your-comments") :ticked (= cmode :yours)}
-                                   {:id "mentions" :label (tr "labels.show-mentions") :ticked (= cmode :mentions)}
-                                   :separator
-                                   {:id "resolved" :label (tr "labels.hide-resolved-comments") :ticked (not resolved?)}
-                                   {:id "list" :label (tr "labels.show-comments-list") :icon i/comments}]}])
+                           :items (comments-items cmode resolved?)}])
         (when (:in-team permissions)
           [:> button* {:variant "primary" :on-click open-share}
            (tr "labels.share")])

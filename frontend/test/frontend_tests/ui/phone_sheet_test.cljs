@@ -391,3 +391,56 @@
         (t/is (not (re-find #"start" (.-className (dialog)))) "dragged elsewhere")
         (render! 1)
         (t/is (re-find #"start" (.-className (dialog))) "lowered, there again")))))
+
+(defn- canvas-comments-row
+  "What the sheet of the canvas shows of its comments to a viewer with
+  `permissions`, the comments `local`, two threads on its board, and what
+  a tap on its switch emits."
+  [permissions local]
+  (let [before  @st/state
+        [page-id board-id] [(uuid/next) (uuid/next)]
+        threads (into {} (map (fn [n] [n {:id n :frame-id board-id}])) [(uuid/next) (uuid/next)])
+        objects {uuid/zero {:id uuid/zero :type :frame :shapes [board-id]}
+                 board-id  {:id board-id :name "Start" :type :frame :parent-id uuid/zero :frame-id uuid/zero}}]
+    (swap! st/state assoc :comment-threads threads :comments-local local)
+    (try
+      (thd/with-dom
+        (fn [{:keys [root document window]}]
+          (let [emitted (atom [])]
+            ;; in the shape of its arities: several events go to the variadic one
+            (with-redefs [st/emit! (fn
+                                     ([] nil)
+                                     ([event] (swap! emitted conj event))
+                                     ([event & events] (swap! emitted into (cons event events))))]
+              (thd/render! root (mf/element phone-sheet/phone-sheet*
+                                            #js {:page {:id page-id :objects objects :frames [(get objects board-id)]}
+                                                 :file {:name "File" :data {:pages [page-id]
+                                                                            :pages-index {page-id {:name "Page"}}}}
+                                                 :permissions permissions
+                                                 :section :interactions
+                                                 :onClose identity
+                                                 :isCanvas true :hasCanvas true :isDocked true}))
+              (let [switch (.querySelector document "[role=switch]")
+                    shown  {:switch (some-> switch .-textContent)
+                            :menu?  (boolean (some #(= (tr "labels.comments") (.-textContent %))
+                                                   (.querySelectorAll document "button")))
+                            :hint?  (some? (.querySelector document "[class*=comments-hint]"))}]
+                (some->> switch (thd/click! window))
+                (assoc shown :emitted (mapv (fn [e] [(ptk/type e) (when (= ::dcm/update-options (ptk/type e))
+                                                                    (get-in (ptk/update e {}) [:comments-local :canvas-shown?]))])
+                                            @emitted)))))))
+      (finally
+        (reset! st/state before)))))
+
+(t/deftest the-canvas-sheet-switches-its-comments
+  (let [editor {:can-edit true :is-logged true :in-team true}]
+    (t/is (= {:switch (tr "viewer.phone.show-comments" 2) :menu? false :hint? false
+              :emitted [[::dcm/update-options true]]}
+             (canvas-comments-row editor {}))
+          "off as the view mode starts, with how many there are: a tap shows them")
+    (t/is (= {:switch (tr "viewer.phone.show-comments" 2) :menu? true :hint? true
+              :emitted [[::dcm/close-comment-thread nil] [::dcm/update-options false]]}
+             (canvas-comments-row editor {:canvas-shown? true}))
+          "on, which show, their list and how to add one: a tap hides them, an open thread closes")
+    (t/is (nil? (:switch (canvas-comments-row {:in-team true :is-logged true :who-comment "team"} {})))
+          "none for one who may not comment")))

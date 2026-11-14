@@ -115,7 +115,10 @@
           ;; (see `phone?`)
           (assoc-in [:viewer-local :phone?] (touch/phone?))
           (assoc-in [:viewer-local :device] (initial-device (rt/get-params state) (touch/phone?)))
-          (update :comments-local dcmt/merge-persisted-filters)))
+          (update :comments-local dcmt/merge-persisted-filters)
+          ;; the canvas of a phone shows its comments once its sheet
+          ;; switches them on
+          (update :comments-local assoc :canvas-shown? false)))
 
     ptk/WatchEvent
     (watch [_ state _]

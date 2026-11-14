@@ -26,14 +26,21 @@
    [app.main.data.viewer.canvas :as dvc]
    [app.main.render-viewer-wasm :as rwv]
    [app.main.store :as st]
+   [app.main.ui.viewer.canvas-comments :as cvc]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.render-wasm.api :as wasm.api]
    [app.util.dom :as dom]
    [app.util.timers :as ts]
    [app.util.touch :as touch]
    [beicon.v2.core :as rx]
+   [okulary.core :as l]
    [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
+
+(def ^:private ref:comments-shown?
+  "Whether the sheet of the canvas shows the comments (see
+  `app.main.ui.viewer.phone-sheet`)."
+  (l/derived #(true? (dm/get-in % [:comments-local :canvas-shown?])) st/state))
 
 (def ^:private tween-ms
   "How long, ms, a double tap zooms."
@@ -67,12 +74,14 @@
   [e]
   (- 1 (mth/pow (- 1 e) 3)))
 
-(defn- place-names!
-  "Move the names of the boards in `names` (see `canvas-viewport*`) with
-  the `view`: they keep their size at any zoom."
-  [^js names {:keys [zoom x y]}]
-  (when (some? names)
-    (let [style (.-style names)]
+(defn- place-view!
+  "Move what shows over the canvas in `root` (see `canvas-viewport*`), the
+  names of the boards and the bubbles of the comments, with the `view`:
+  they keep their size at any zoom. Its CSS variables, which they place
+  themselves by, change at each step of a gesture, React not at all."
+  [^js root {:keys [zoom x y]}]
+  (when (some? root)
+    (let [style (.-style root)]
       (.setProperty style "--zoom" zoom)
       (.setProperty style "--view-x" x)
       (.setProperty style "--view-y" y))))
@@ -80,12 +89,14 @@
 (defn- use-gestures!
   "The fingers, a wheel and a trackpad on `canvas-ref` move and zoom the
   view of `view-ref` (`{:page-id :screen :view}`) about what `live-ref`
-  holds (`{:page :bounds :objects :render!}`): shown from the tiles in
-  the cache while it moves (see `rwv/move-page-view`), rendered in full
-  by `render!` once it rests. Two taps soon and near zoom to a board and
-  back (see `dvc/double-tap-view`); `dv/focus-canvas` moves it there
-  too. The names of the boards in `names-ref` move with it."
-  [canvas-ref names-ref view-ref live-ref]
+  holds (`{:page :bounds :objects :render! :on-rest :on-tap}`): shown
+  from the tiles in the cache while it moves (see `rwv/move-page-view`),
+  rendered in full by `render!` once it rests, which `on-rest` hears
+  with the view. Two taps soon and near zoom to a board and back (see
+  `dvc/double-tap-view`); a tap alone calls `on-tap`; `dv/focus-canvas`
+  moves it too. What shows over it in `root-ref` moves with it (see
+  `place-view!`)."
+  [canvas-ref root-ref view-ref live-ref]
   (mf/with-effect []
     (let [^js canvas (mf/ref-val canvas-ref)
           ;; the fingers down (`{id point}`), what they do (`:pan`,
@@ -101,15 +112,18 @@
 
           show!
           (fn [view]
-            (place-names! (mf/ref-val names-ref) view)
+            (place-view! (mf/ref-val root-ref) view)
             (rwv/move-page-view canvas (:zoom view) (dvc/view-box view (get-screen))))
 
           ;; at rest, within the edges, in full
           rest!
           (fn []
             (set-view! (dvc/clamp-view (get-view) (get-bounds) (get-screen)))
-            (place-names! (mf/ref-val names-ref) (get-view))
-            ((:render! (mf/ref-val live-ref))))
+            (place-view! (mf/ref-val root-ref) (get-view))
+            (let [{:keys [render! on-rest]} (mf/ref-val live-ref)]
+              (render!)
+              (when (fn? on-rest)
+                (on-rest (get-view)))))
 
           end-anim!
           (fn [view]
@@ -289,8 +303,10 @@
                                                         (get-screen) (gpt/point (:x tap) (:y tap)))]
                           (vswap! state assoc :last-tap nil :anim {:kind :tween :from from :to to :t0 now})
                           (draw!))
-                        ;; the first of a double tap, maybe: alone it does nothing
-                        (vswap! state assoc :last-tap tap)))
+                        ;; the first of a double tap, maybe: alone it only
+                        ;; closes what the comments opened (see `on-tap`)
+                        (do (vswap! state assoc :last-tap tap)
+                            (some-> (:on-tap (mf/ref-val live-ref)) (apply [])))))
 
                     :else
                     (let [view    (get-view)
@@ -363,10 +379,12 @@
   px: the section of the view mode), from its start view, about its
   middle as the phone turns, at its start view again on another page,
   on the color of its canvas in the workspace (`dvc/background`).
-  `on-drawn` once it shows (and `data-canvas-drawn` on the canvas)."
-  [{:keys [page size on-drawn]}]
+  `on-drawn` once it shows (and `data-canvas-drawn` on the canvas). Over
+  it the names of its boards, and its comments for a viewer who may
+  `comment`, once the sheet shows them (see `canvas-comments*`)."
+  [{:keys [page size on-drawn comment]}]
   (let [canvas-ref (mf/use-ref nil)
-        names-ref  (mf/use-ref nil)
+        root-ref   (mf/use-ref nil)
         page-id    (:id page)
         objects    (mf/with-memo [page] (dvc/canvas-objects (:objects page)))
         ;; the top-level boards it draws, named over them
@@ -386,6 +404,19 @@
         view-ref   (mf/use-ref nil)
         ;; what the gestures read as they come
         live-ref   (mf/use-ref nil)
+        ;; the zoom it rests at, which the bubbles of the comments group by
+        zoom*      (mf/use-state nil)
+        zoom       (deref zoom*)
+        comments?  (and (true? comment) (mf/deref ref:comments-shown?))
+
+        on-rest
+        (mf/use-fn
+         (fn [view]
+           (when-not (mth/close? (:zoom view) (deref zoom*) 1e-6)
+             (reset! zoom* (:zoom view)))))
+
+        view-of
+        (mf/use-fn #(mf/ref-val view-ref))
 
         render!
         (mf/use-fn
@@ -400,7 +431,9 @@
                                        (when (fn? on-drawn)
                                          (on-drawn))))))))]
 
-    (mf/set-ref-val! live-ref {:page page :bounds bounds :objects objects :render! render!})
+    (mf/set-ref-val! live-ref {:page page :bounds bounds :objects objects :render! render!
+                               :on-rest on-rest
+                               :on-tap cvc/close-on-tap!})
 
     (mf/with-effect [page-id objects bounds width height dpr]
       (when (and (some? (mf/ref-val canvas-ref)) (some? bounds) (pos? width) (pos? height))
@@ -410,23 +443,31 @@
                        (dvc/resize-view (:view prev) (:screen prev) screen bounds)
                        (dvc/initial-view bounds screen))]
           (mf/set-ref-val! view-ref {:page-id page-id :screen screen :view view})
-          (place-names! (mf/ref-val names-ref) view)
+          (place-view! (mf/ref-val root-ref) view)
+          (on-rest view)
           (render!))))
 
-    (use-gestures! canvas-ref names-ref view-ref live-ref)
+    (use-gestures! canvas-ref root-ref view-ref live-ref)
 
-    [:div {:class (stl/css :canvas-viewport)
+    [:div {:ref root-ref
+           :class (stl/css :canvas-viewport)
            :style #js {:backgroundColor (dvc/background page)}}
      [:canvas {:ref canvas-ref
                :class (stl/css :canvas)
                :data-dpr dpr
                :width (mth/round (* width dpr))
                :height (mth/round (* height dpr))}]
-     [:div {:ref names-ref :class (stl/css :names) :aria-hidden true}
+     [:div {:class (stl/css :names) :aria-hidden true}
       (for [{:keys [id name selrect]} boards]
         [:span {:key (dm/str id)
                 :class (stl/css :name)
                 :style #js {"--board-x" (:x selrect)
                             "--board-y" (:y selrect)
                             "--board-width" (:width selrect)}}
-         name])]]))
+         name])]
+     (when (and comments? (some? zoom))
+       [:> cvc/canvas-comments* {:page page
+                                 :objects objects
+                                 :zoom zoom
+                                 :size size
+                                 :view-of view-of}])]))

@@ -43,6 +43,7 @@
    [app.main.ui.modal :refer [modal-container*]]
    [app.main.ui.viewer.background :as vbg]
    [app.main.ui.viewer.canvas :refer [canvas-viewport*]]
+   [app.main.ui.viewer.canvas-comments :refer [canvas-comments-list*]]
    [app.main.ui.viewer.comments :refer [comments-layer comments-sidebar*]]
    [app.main.ui.viewer.container-scroll :as cscroll]
    [app.main.ui.viewer.device-frame :as dfr :refer [device-drawing*]]
@@ -1330,9 +1331,13 @@
 
          ;; the page as designed, its boards that scroll at their size
          canvas?
-         [:> canvas-viewport* {:page (get-in data [:pages page-id])
-                               :size (:viewport-size local)
-                               :on-drawn #(reset! drawn* true)}]
+         [:*
+          [:> canvas-viewport* {:page (get-in data [:pages page-id])
+                                :size (:viewport-size local)
+                                :comment (dv/can-comment? permissions)
+                                :on-drawn #(reset! drawn* true)}]
+          [:> canvas-comments-list* {:users users
+                                     :page (get-in data [:pages page-id])}]]
 
          (nil? frame)
          [:section {:class (stl/css :empty-state)}

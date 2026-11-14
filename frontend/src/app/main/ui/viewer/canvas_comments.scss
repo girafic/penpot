@@ -1,0 +1,21 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+// over the canvas, taking no taps but on its bubbles (see `comments.scss`)
+.comments {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+// at its point of the page, moving with the canvas by the variables of the
+// view on its root (see `place-view!`), its bubble drawn at its corner
+.anchor {
+  position: absolute;
+  inset-inline-start: calc((var(--anchor-x) - var(--view-x)) * var(--zoom) * 1px);
+  inset-block-start: calc((var(--anchor-y) - var(--view-y)) * var(--zoom) * 1px);
+}
