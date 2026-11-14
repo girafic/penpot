@@ -23,6 +23,7 @@
    [app.main.ui.auth.login :refer [login-dialog*]]
    [app.main.ui.auth.recovery-request :refer [recovery-request-page* recovery-sent-page*]]
    [app.main.ui.auth.register :as register]
+   [app.main.ui.context :as ctx]
    [app.main.ui.dashboard.sidebar :refer [sidebar*]]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
@@ -41,6 +42,15 @@
 
 ;; FIXME: this is a workaround until we export this class on beicon library
 (def TimeoutError rxjs/TimeoutError)
+
+(defn- use-phone-layout
+  "Whether the page shown lays itself out for a phone: a phone, on a
+  route it keeps at its own width (`touch/phone-layout?`); a workspace
+  link stays a desktop page there."
+  []
+  (let [screen (dm/get-in (mf/use-ctx ctx/current-route) [:data :name])]
+    (mf/with-memo [screen]
+      (touch/phone-layout? screen (touch/phone?)))))
 
 (mf/defc error-container*
   [{:keys [children]}]
@@ -156,7 +166,7 @@
 
         ;; a phone shows it over all of its screen (see `static.scss`)
         phone?
-        (mf/with-memo [] (touch/phone?))]
+        (use-phone-layout)]
 
     [:div {:class (stl/css :overlay)
            :data-phone (dm/str phone?)}
