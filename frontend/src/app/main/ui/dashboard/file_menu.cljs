@@ -102,6 +102,7 @@
         file             (first files)
         file-count       (count files)
         multi?           (> file-count 1)
+        phone?           (touch/phone?)
 
         current-team-id  (mf/use-ctx ctx/current-team-id)
         teams*           (mf/use-state nil)
@@ -118,10 +119,6 @@
           (st/emit! (dcm/go-to-workspace
                      {:file-id (:id file)
                       ::rt/new-window true})))
-
-        on-open-editor
-        (fn []
-          (st/emit! (dcm/go-to-workspace {:file-id (:id file)})))
 
         on-duplicate
         (fn []
@@ -295,10 +292,9 @@
 
       :else
       [:*
-       ;; a phone has no tabs, and a tap opens the view mode there
-       (if (touch/phone?)
-         [:> menu-item* {:id "file-open-editor" :on-action on-open-editor}
-          (tr "dashboard.open-in-editor")]
+       ;; a phone has no tabs, and a tap opens the view mode there: no
+       ;; way into the editor, which is no tool for a phone
+       (when-not phone?
          [:> menu-item* {:id "file-open-new-tab" :on-action on-new-tab}
           (tr "dashboard.open-in-new-tab")])
 
@@ -332,7 +328,9 @@
            [:> menu-item* {:id "file-shared-toggle" :on-action on-add-shared}
             (tr "dashboard.add-shared")]))
 
-       [:> menu-separator*]
+       ;; on a phone, nothing above it when the file is only to read
+       (when (or (not phone?) (and (not is-search-page?) can-edit))
+         [:> menu-separator*])
 
        [:> menu-item* {:id "download-binary-file" :on-action on-export-binary-files}
         (tr "dashboard.download-binary-file")]

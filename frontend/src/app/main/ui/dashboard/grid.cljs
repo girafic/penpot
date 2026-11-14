@@ -342,7 +342,7 @@
          (fn [event]
            (cond
              ;; a tap on a phone opens it in the view mode, made for it
-             ;; (`file-menu*` opens the editor)
+             ;; (the editor is no tool for a phone)
              (and (touch/phone?) (not can-restore) (not editing?))
              (do
                (dom/stop-propagation event)
