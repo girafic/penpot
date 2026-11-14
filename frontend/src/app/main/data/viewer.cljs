@@ -1602,6 +1602,16 @@
         page-id (some-> (:page-id params) uuid/parse)]
     (dm/get-in state [:viewer :pages page-id])))
 
+(defn animated-board?
+  "Whether the board `board-id` of `page` plays an animation: its own, or
+  the one of component copies in it (as the workspace marks its title,
+  see `dwa/animated-board-ids`). `files` holds the files of the
+  components, by id."
+  [page files board-id]
+  (let [own (dm/get-in page [:timelines board-id])]
+    (boolean (or (and (some? own) (not (cta/timeline-empty? own)))
+                 (seq (cltl/copy-timelines (:objects page) (:timelines page) files board-id))))))
+
 (defn board-clock
   "The timeline the board `board-id` of `page` plays on: its own, keeping
   time with the animations of the component copies in it while it has no

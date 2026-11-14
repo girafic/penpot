@@ -504,6 +504,15 @@
     (t/is (false? (dvc/holding? (assoc-in down [:pointers 2] (gpt/point 50 50)) 2000)) "two fingers pinch")
     (t/is (false? (dvc/holding? (assoc down :pointers {}) 2000)) "none down")))
 
+(t/deftest the-canvas-marks-the-boards-that-play-an-animation
+  (let [{:keys [strip screen tall]} ids
+        page {:objects page-objects
+              :timelines {strip  {:board-id strip :tracks [{:id (uuid/custom 9 1)}]}
+                          screen {:board-id screen :tracks [] :audio-clips []}}}]
+    (t/is (true? (dv/animated-board? page {} strip)) "its own timeline plays")
+    (t/is (false? (dv/animated-board? page {} screen)) "an empty timeline plays nothing")
+    (t/is (false? (dv/animated-board? page {} tall)) "no timeline")))
+
 ;; --- The color behind it
 
 (t/deftest the-canvas-has-the-color-of-the-canvas-of-the-workspace

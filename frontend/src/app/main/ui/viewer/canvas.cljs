@@ -26,6 +26,7 @@
    [app.main.data.viewer.canvas :as dvc]
    [app.main.render-viewer-wasm :as rwv]
    [app.main.store :as st]
+   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.viewer.canvas-comments :as cvc]
    [app.main.ui.viewer.drag-scroll :as dds]
    [app.render-wasm.api :as wasm.api]
@@ -407,10 +408,12 @@
   middle as the phone turns, at its start view again on another page,
   on the color of its canvas in the workspace (`dvc/background`).
   `on-drawn` once it shows (and `data-canvas-drawn` on the canvas). Over
-  it the names of its boards, and its comments for a viewer who may
+  it the names of its boards, a mark beside those that play an
+  animation (of `files`, the files of their components), and its
+  comments for a viewer who may
   `comment`, once the sheet shows them (see `canvas-comments*`): a finger
   held on a board begins one there, of the file `file-id`."
-  [{:keys [page file-id size on-drawn comment]}]
+  [{:keys [page file-id files size on-drawn comment]}]
   (let [canvas-ref (mf/use-ref nil)
         root-ref   (mf/use-ref nil)
         page-id    (:id page)
@@ -423,6 +426,12 @@
                                      (when (cfh/frame-shape? shape)
                                        shape))))
                            (dm/get-in objects [uuid/zero :shapes])))
+        ;; those that play an animation, which the canvas shows still
+        animated   (mf/with-memo [page files boards]
+                     (into #{}
+                           (comp (map :id)
+                                 (filter #(dv/animated-board? page files %)))
+                           boards))
         bounds     (mf/with-memo [objects] (dvc/content-bounds objects))
         width      (:width size 0)
         height     (:height size 0)
@@ -496,12 +505,19 @@
                :height (mth/round (* height dpr))}]
      [:div {:class (stl/css :names) :aria-hidden true}
       (for [{:keys [id name selrect]} boards]
-        [:span {:key (dm/str id)
-                :class (stl/css :name)
-                :style #js {"--board-x" (:x selrect)
+        (let [style    #js {"--board-x" (:x selrect)
                             "--board-y" (:y selrect)
-                            "--board-width" (:width selrect)}}
-         name])]
+                            "--board-width" (:width selrect)}
+              animated (contains? animated id)]
+          [:* {:key (dm/str id)}
+           [:span {:class (stl/css-case :name true :animated animated)
+                   :style style}
+            name]
+           ;; at the other end of its name, as the workspace marks it
+           (when animated
+             [:span {:class (stl/css :animated :motion)
+                     :style style}
+              [:> icon* {:icon-id i/motion :size "s"}]])]))]
      (when (and comments? (some? zoom))
        [:> cvc/canvas-comments* {:page page
                                  :objects objects

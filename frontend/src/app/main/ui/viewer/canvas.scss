@@ -46,7 +46,27 @@
   position: absolute;
   inset-inline-start: calc((var(--board-x) - var(--view-x)) * var(--zoom) * 1px);
   inset-block-start: calc((var(--board-y) - var(--view-y)) * var(--zoom) * 1px - #{px2rem(4)});
-  max-inline-size: calc(var(--board-width) * var(--zoom) * 1px);
+  max-inline-size: calc(var(--board-width) * var(--zoom) * 1px - var(--motion-room, 0px));
   color: #8f9da3; // the color of a board title in the workspace
   transform: translateY(-100%);
+}
+
+// a board that plays an animation: room for its mark at the end of its
+// name, as the workspace leaves it, once it shows 40px wide or more (the
+// steep clamp: none below, all of it above), none on a narrower board
+.animated {
+  --motion-room: clamp(0px, calc((var(--board-width) * var(--zoom) * 1px - 40px) * 100), #{px2rem(20)});
+}
+
+// its mark, above the top right corner of the board
+.motion {
+  position: absolute;
+  display: flex;
+  justify-content: flex-end;
+  inset-inline-start: calc((var(--board-x) + var(--board-width) - var(--view-x)) * var(--zoom) * 1px);
+  inset-block-start: calc((var(--board-y) - var(--view-y)) * var(--zoom) * 1px - #{px2rem(4)});
+  inline-size: var(--motion-room);
+  overflow: hidden;
+  color: #8f9da3;
+  transform: translate(-100%, -100%);
 }
