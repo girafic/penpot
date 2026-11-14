@@ -22,7 +22,9 @@
 
 // how a sheet of a phone rounds its corners, as round as the fields and
 // buttons it holds, and how far in from the edges of the screen it floats
-// below its full height, as on iOS 26. All the sheets of a phone: this
+// below its full height, as on iOS 26; at its full height it is square,
+// edge to edge (this one dragged up, the list of the comments). All the
+// sheets of a phone: this
 // one, a comment (`comments.scss`), the list of them
 // (`viewer/comments.scss`), sharing (`viewer/share_link.scss`, which
 // sits on the bottom edge, its corners round at the top only) and asking
@@ -35,7 +37,7 @@
 }
 
 // from the bottom, at most half as high as the screen: its grip stays,
-// what is under it scrolls
+// what is under it scrolls. Square at its full height (see `.floating`)
 .sheet {
   position: fixed;
   inset-inline: 0;
@@ -45,7 +47,7 @@
   flex-direction: column;
   max-block-size: 50dvh;
   overflow: hidden;
-  border-radius: var(--phone-sheet-radius) var(--phone-sheet-radius) 0 0;
+  border-radius: 0;
   background-color: var(--color-background-primary);
   color: var(--color-foreground-primary);
   transition:
