@@ -461,11 +461,34 @@
   margin: 0;
 }
 
-// On a phone (a link that leads nowhere, an invitation no longer valid) the
-// error page keeps its header and its login clear of the notch, and leaves
-// out the pencil above: on a narrow screen the link of the header always
-// crosses it. Its messages keep off the edges and may grow taller than the
-// room the pencils leave them
+// On a phone (a link that leads nowhere, an invitation no longer valid, an
+// error) the error page keeps its header and its login clear of the notch,
+// and leaves out the pencil above: on a narrow screen the link of the
+// header always crosses it. The page is one column that scrolls: the
+// messages, off the edges, then the pencil below with the copyright,
+// which longer messages push down instead of running under it (it took
+// the taps of their buttons)
+.exception-layout[data-phone="true"] {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.exception-layout[data-phone="true"] .exception-content {
+  flex: 1 0 auto;
+  block-size: auto;
+}
+
+.exception-layout[data-phone="true"] .deco-after2 {
+  position: static;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.exception-layout[data-phone="true"] .deco-after2 span {
+  padding-block-end: calc(env(safe-area-inset-bottom) + #{px2rem(28)});
+}
+
 .exception-layout[data-phone="true"] .exception-header {
   padding: calc(env(safe-area-inset-top) + var(--sp-xl)) calc(env(safe-area-inset-right) + var(--sp-xl))
     var(--sp-xl) calc(env(safe-area-inset-left) + var(--sp-xl));
@@ -480,11 +503,13 @@
   display: none;
 }
 
+// as high as the room the pencil leaves, the messages in its middle; as
+// high as they are when they need more, some room above the pencil
 .exception-layout[data-phone="true"] .container {
-  align-self: flex-start;
   inline-size: 100%;
   block-size: auto;
-  min-block-size: 34vh;
+  min-block-size: 0;
+  padding-block-end: var(--sp-xxl);
   padding-inline: calc(env(safe-area-inset-left) + var(--sp-xl))
     calc(env(safe-area-inset-right) + var(--sp-xl));
 }
