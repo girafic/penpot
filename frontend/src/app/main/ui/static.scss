@@ -429,9 +429,9 @@
 
 // On a phone (a link of a team the user is not in, an SSO that failed)
 // asking for access is a sheet from the bottom, as the other sheets of a
-// phone (`viewer/phone_sheet.scss`): in from the edges of the screen and
-// above its home indicator, round all round, its buttons one above the
-// other as wide as it, the one that asks on top
+// phone (`viewer/phone_sheet.scss`): in from the edges of the screen,
+// round all round, what it holds clear of the home indicator, its buttons
+// one above the other as wide as it, the one that asks on top
 .overlay[data-phone="true"]:has(> .dialog) {
   align-items: flex-end;
 }
@@ -439,10 +439,9 @@
 .overlay[data-phone="true"] .dialog {
   flex-grow: 1;
   inline-size: auto;
-  margin: 0 calc(env(safe-area-inset-right) + var(--phone-sheet-gap))
-    calc(env(safe-area-inset-bottom) + var(--phone-sheet-gap))
+  margin: 0 calc(env(safe-area-inset-right) + var(--phone-sheet-gap)) var(--phone-sheet-gap)
     calc(env(safe-area-inset-left) + var(--phone-sheet-gap));
-  padding: var(--sp-xxl) var(--sp-xl) var(--sp-xl);
+  padding: var(--sp-xxl) var(--sp-xl) calc(max(env(safe-area-inset-bottom), var(--sp-l)) + var(--sp-xs));
   border-radius: var(--phone-sheet-radius);
 }
 

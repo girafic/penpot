@@ -24,8 +24,11 @@
 // buttons it holds, and how far in from the edges of the screen it floats
 // below its full height, as on iOS 26. All the sheets of a phone: this
 // one, a comment (`comments.scss`), the list of them
-// (`viewer/comments.scss`) and sharing (`viewer/share_link.scss`, which
-// sits on the bottom edge, its corners round at the top only)
+// (`viewer/comments.scss`), sharing (`viewer/share_link.scss`, which
+// sits on the bottom edge, its corners round at the top only) and asking
+// for access to a file or a team (`static.scss`, outside the view mode:
+// these are global for it); the room inspect leaves below its end for
+// this one (`viewer/inspect.scss`) too
 :global(:root) {
   --phone-sheet-gap: var(--sp-s);
   --phone-sheet-radius: #{$br-8};
