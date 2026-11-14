@@ -1333,6 +1333,7 @@
          canvas?
          [:*
           [:> canvas-viewport* {:page (get-in data [:pages page-id])
+                                :file-id (:id file)
                                 :size (:viewport-size local)
                                 :comment (dv/can-comment? permissions)
                                 :on-drawn #(reset! drawn* true)}]

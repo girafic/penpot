@@ -9,9 +9,12 @@
 @use "ds/typography.scss" as *;
 
 // the whole section of the view mode, on the color of the canvas of the
-// page (its style, see `dvc/background`)
+// page (its style, see `dvc/background`); a finger held begins a comment
+// there: no callout, no selection
 .canvas-viewport {
   position: relative;
+  -webkit-touch-callout: none;
+  user-select: none;
   flex: 0 0 100%;
   inline-size: 100%;
   block-size: 100%;

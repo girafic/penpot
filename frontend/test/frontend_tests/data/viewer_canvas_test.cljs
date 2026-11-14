@@ -479,6 +479,14 @@
       (t/is (< y (:y (uvc/shown-view {:zoom 1 :x 100 :y -506} bounds phone-screen)))
             "and more the further"))))
 
+(t/deftest a-finger-held-still-begins-a-comment
+  (let [down {:pointers {1 (gpt/point 10 10)} :moved false :down-t 1000}]
+    (t/is (true? (dvc/holding? down (+ 1000 dvc/long-press-ms))) "alone, still, long enough")
+    (t/is (false? (dvc/holding? down (+ 999 dvc/long-press-ms))) "lifted or not yet")
+    (t/is (false? (dvc/holding? (assoc down :moved true) 2000)) "it moved the canvas")
+    (t/is (false? (dvc/holding? (assoc-in down [:pointers 2] (gpt/point 50 50)) 2000)) "two fingers pinch")
+    (t/is (false? (dvc/holding? (assoc down :pointers {}) 2000)) "none down")))
+
 ;; --- The color behind it
 
 (t/deftest the-canvas-has-the-color-of-the-canvas-of-the-workspace

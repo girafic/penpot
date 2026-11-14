@@ -45,6 +45,26 @@
       (or (some? (:open local)) (some? (:draft local)))
       (st/emit! (dcm/close-thread)))))
 
+(defn start-draft!
+  "Begin a comment at the `point` of the page `page-id` of the file
+  `file-id`, held on its canvas of `objects`, about the top-level board
+  there: the comments shown, the thread open closed. Nothing beside the
+  boards: the prototype shows a thread on its board only."
+  [objects page-id file-id point]
+  (when (some? (dvc/board-at objects point))
+    (st/emit! (dcm/update-options {:canvas-shown? true})
+              (dcm/close-thread)
+              (dcm/create-draft {:position point :page-id page-id :file-id file-id}))))
+
+(def ^:private draft-field
+  "[class*=floating-thread-draft-inner-wrapper] [contenteditable=true]")
+
+(defn focus-draft!
+  "Give the field of a comment begun the focus, in the gesture of the
+  finger that lifts: only then does iOS open its keyboard."
+  []
+  (some-> (.querySelector js/document draft-field) (.focus)))
+
 (defn- anchored
   "The modifier that draws a bubble at `point` of the page in its anchor
   there: at the corner of the anchor, which moves with the canvas."
@@ -93,6 +113,23 @@
 
         open-id     (:open local)
         expanded    (:expanded local)
+        draft       (:draft local)
+
+        on-draft-cancel
+        (mf/use-fn #(st/emit! (dcm/close-thread)))
+
+        ;; about the board under it, which the prototype shows it on
+        on-draft-submit
+        (mf/use-fn
+         (mf/deps objects)
+         (fn [{:keys [position] :as draft}]
+           (if-let [board (dvc/board-at objects position)]
+             (st/emit! (dcm/create-thread-on-viewer
+                        (-> draft
+                            (select-keys [:page-id :file-id :position :content])
+                            (assoc :frame-id (:id board))))
+                       (dcm/close-thread))
+             (st/emit! (dcm/close-thread)))))
         ;; open, it stays so as the filters change
         open-thread (some #(when (= open-id (:id %)) %) all)
 
@@ -176,6 +213,19 @@
                   :class (stl/css :anchor)
                   :style (anchor-style (:position thread))}
             (bubble thread)])))
+
+     ;; a comment begun, its bubble where the finger held, its field
+     ;; docked at the bottom
+     (when (some? draft)
+       [:div {:class (stl/css :anchor)
+              :style (anchor-style (:position draft))}
+        [:> cmt/comment-floating-thread-draft*
+         {:draft draft
+          :position-modifier (anchored (:position draft))
+          :on-cancel on-draft-cancel
+          :on-submit on-draft-submit
+          :zoom zoom
+          :docked true}]])
 
      (when (some? open-thread)
        [:> cmt/comment-floating-thread*

@@ -367,6 +367,21 @@
        (< (- (:t tap) (:t before)) double-tap-ms)
        (< (mth/hypot (- (:x tap) (:x before)) (- (:y tap) (:y before))) double-tap-px)))
 
+(def long-press-ms
+  "How long, ms, a finger rests on the canvas to begin a comment there:
+  as long as two fingers hold to open the sheet of the prototype."
+  500)
+
+(defn holding?
+  "Whether a finger on the canvas is a hold at `t` (ms) by the state of
+  its gesture (see `app.main.ui.viewer.canvas`): alone, it came down at
+  `down-t` at least `long-press-ms` before and moved not."
+  [{:keys [pointers moved down-t]} t]
+  (and (= 1 (count pointers))
+       (not moved)
+       (some? down-t)
+       (>= (- t down-t) long-press-ms)))
+
 ;; --- The color behind it
 
 (defn background

@@ -89,12 +89,14 @@
 (defn- use-gestures!
   "The fingers, a wheel and a trackpad on `canvas-ref` move and zoom the
   view of `view-ref` (`{:page-id :screen :view}`) about what `live-ref`
-  holds (`{:page :bounds :objects :render! :on-rest :on-tap}`): shown
-  from the tiles in the cache while it moves (see `rwv/move-page-view`),
-  rendered in full by `render!` once it rests, which `on-rest` hears
-  with the view. Two taps soon and near zoom to a board and back (see
-  `dvc/double-tap-view`); a tap alone calls `on-tap`; `dv/focus-canvas`
-  moves it too. What shows over it in `root-ref` moves with it (see
+  holds (`{:page :bounds :objects :render! :on-rest :on-tap :on-hold
+  :on-held}`): shown from the tiles in the cache while it moves (see
+  `rwv/move-page-view`), rendered in full by `render!` once it rests,
+  which `on-rest` hears with the view. Two taps soon and near zoom to a
+  board and back (see `dvc/double-tap-view`); a tap alone calls
+  `on-tap`; a finger held still (see `dvc/holding?`) calls `on-hold`
+  with the point of the page under it, and `on-held` as it lifts, in
+  that gesture; `dv/focus-canvas` moves it too. What shows over it in `root-ref` moves with it (see
   `place-view!`)."
   [canvas-ref root-ref view-ref live-ref]
   (mf/with-effect []
@@ -104,6 +106,10 @@
           state      (volatile! {:pointers {}})
           raf        (volatile! nil)
           rest-timer (volatile! nil)
+          hold-timer (volatile! nil)
+
+          stop-hold!
+          #(some-> @hold-timer js/clearTimeout)
 
           get-view   #(:view (mf/ref-val view-ref))
           get-screen #(:screen (mf/ref-val view-ref))
@@ -227,19 +233,29 @@
             (let [pointers (:pointers @state)]
               (mapv pointers (sort (keys pointers)))))
 
+          ;; a finger held still: a comment there, maybe
+          on-hold
+          (fn []
+            (when (dvc/holding? @state (js/performance.now))
+              (vswap! state assoc :held true)
+              (when-let [on-hold (:on-hold (mf/ref-val live-ref))]
+                (on-hold (dvc/page-point (get-view) (:start @state))))))
+
           on-down
           (fn [^js event]
             (when (some? (get-view))
               (.setPointerCapture canvas (.-pointerId event))
               (some-> @rest-timer js/clearTimeout)
+              (stop-hold!)
               (let [stopped (stop-anim!)
                     pt      (point event)
                     now     (.-timeStamp event)]
                 (vswap! state assoc-in [:pointers (.-pointerId event)] pt)
                 (case (count (:pointers @state))
                   ;; a finger that stops a coast taps nothing
-                  1 (vswap! state assoc :mode :pan :start pt :moved (true? stopped) :down-t now
-                            :samples [[now (:x pt) (:y pt)]])
+                  1 (do (vswap! state assoc :mode :pan :start pt :moved (true? stopped) :down-t now
+                                :held false :samples [[now (:x pt) (:y pt)]])
+                        (vreset! hold-timer (js/setTimeout on-hold dvc/long-press-ms)))
                   2 (vswap! state assoc :mode :pinch :moved true :before (fingers))
                   nil))))
 
@@ -259,6 +275,7 @@
                                           (update :samples #(conj (filterv (fn [[st]] (> st (- now 200))) %)
                                                                   [now (:x pt) (:y pt)])))))
                       (when moved
+                        (stop-hold!)
                         (set-view! (dvc/pan-view (get-view) (- (:x pt) (:x prev)) (- (:y pt) (:y prev))))
                         (draw!)))
 
@@ -277,12 +294,19 @@
           on-up
           (fn [^js event]
             (let [id (.-pointerId event)]
+              (stop-hold!)
               (when (some? (get-in @state [:pointers id]))
                 (let [now      (.-timeStamp event)
-                      {:keys [mode moved samples start down-t]} @state
+                      {:keys [mode moved samples start down-t held]} @state
                       pointers (dissoc (:pointers @state) id)]
                   (vswap! state assoc :pointers pointers)
                   (cond
+                    ;; a hold lifted: no tap, and in this gesture what it
+                    ;; began may take the keyboard (see `on-held`)
+                    (true? held)
+                    (do (vswap! state assoc :mode nil :held false :last-tap nil)
+                        (some-> (:on-held (mf/ref-val live-ref)) (apply [])))
+
                     ;; one finger of two lifts: the other moves on
                     (and (= mode :pinch) (= 1 (count pointers)))
                     (let [pt (first (vals pointers))]
@@ -360,6 +384,7 @@
       (.addEventListener canvas "pointerup" on-up)
       (.addEventListener canvas "pointercancel" on-cancel)
       (.addEventListener canvas "wheel" on-wheel #js {:passive false})
+      (.addEventListener canvas "contextmenu" dom/prevent-default)
       (let [focus-sub (->> st/stream
                            (rx/filter (ptk/type? ::dv/focus-canvas))
                            (rx/map deref)
@@ -371,6 +396,8 @@
           (.removeEventListener canvas "pointerup" on-up)
           (.removeEventListener canvas "pointercancel" on-cancel)
           (.removeEventListener canvas "wheel" on-wheel #js {:passive false})
+          (.removeEventListener canvas "contextmenu" dom/prevent-default)
+          (stop-hold!)
           (some-> @raf ts/cancel-af!)
           (some-> @rest-timer js/clearTimeout))))))
 
@@ -381,8 +408,9 @@
   on the color of its canvas in the workspace (`dvc/background`).
   `on-drawn` once it shows (and `data-canvas-drawn` on the canvas). Over
   it the names of its boards, and its comments for a viewer who may
-  `comment`, once the sheet shows them (see `canvas-comments*`)."
-  [{:keys [page size on-drawn comment]}]
+  `comment`, once the sheet shows them (see `canvas-comments*`): a finger
+  held on a board begins one there, of the file `file-id`."
+  [{:keys [page file-id size on-drawn comment]}]
   (let [canvas-ref (mf/use-ref nil)
         root-ref   (mf/use-ref nil)
         page-id    (:id page)
@@ -418,6 +446,13 @@
         view-of
         (mf/use-fn #(mf/ref-val view-ref))
 
+        on-hold
+        (mf/use-fn
+         (mf/deps comment objects page-id file-id)
+         (fn [point]
+           (when (true? comment)
+             (cvc/start-draft! objects page-id file-id point))))
+
         render!
         (mf/use-fn
          (mf/deps page-id objects on-drawn)
@@ -433,7 +468,9 @@
 
     (mf/set-ref-val! live-ref {:page page :bounds bounds :objects objects :render! render!
                                :on-rest on-rest
-                               :on-tap cvc/close-on-tap!})
+                               :on-tap cvc/close-on-tap!
+                               :on-hold on-hold
+                               :on-held cvc/focus-draft!})
 
     (mf/with-effect [page-id objects bounds width height dpr]
       (when (and (some? (mf/ref-val canvas-ref)) (some? bounds) (pos? width) (pos? height))
