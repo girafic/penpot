@@ -21,12 +21,15 @@
   behind it, which closes it."
   [{:keys [is-open on-open on-close]}]
   [:*
-   [:> icon-button* {:variant "ghost"
-                     :class (stl/css :drawer-button)
-                     :aria-label (tr "dashboard.phone.menu")
-                     :aria-expanded is-open
-                     :icon i/hamburger
-                     :on-click on-open}]
+   ;; at the top of the page as its header, not of the screen: the
+   ;; rubber of the page at its ends takes it along with the header
+   [:div {:class (stl/css :drawer-holder)}
+    [:> icon-button* {:variant "ghost"
+                      :class (stl/css :drawer-button)
+                      :aria-label (tr "dashboard.phone.menu")
+                      :aria-expanded is-open
+                      :icon i/hamburger
+                      :on-click on-open}]]
    (when is-open
      [:div {:class (stl/css :drawer-backdrop)
             :on-click on-close}])])

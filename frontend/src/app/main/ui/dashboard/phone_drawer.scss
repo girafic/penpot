@@ -4,12 +4,26 @@
 //
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
-// in the middle of the header, as high as its title (see `.dashboard-header`)
+// sticky as the header (see `.dashboard-header`), not fixed: when the
+// page gives as rubber at its ends, Safari moves the page with its header
+// and leaves what is fixed where it was on the screen. As high as nothing,
+// in the cell of the content of the page (the dashboard and the settings
+// alike), so that it sticks all the way down
+.drawer-holder {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-index-panels);
+  grid-row: 1;
+  grid-column: 1;
+  align-self: start;
+  block-size: 0;
+}
+
+// in the middle of the header, as high as its title
 .drawer-button {
-  position: fixed;
+  position: absolute;
   inset-block-start: calc(env(safe-area-inset-top) + var(--sp-s));
   inset-inline-start: calc(env(safe-area-inset-left) + var(--sp-s));
-  z-index: var(--z-index-panels);
 }
 
 .drawer-backdrop {
