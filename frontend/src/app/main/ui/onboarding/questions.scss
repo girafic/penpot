@@ -11,6 +11,7 @@
 @use "ds/_borders.scss" as *;
 @use "ds/_sizes.scss" as *;
 @use "ds/_utils.scss" as *;
+@use "ds/mixins.scss" as *;
 
 .modal-overlay {
   @extend %modal-overlay-base;
@@ -112,12 +113,12 @@
 // a phone shows the questions over all of its screen, as wide as it,
 // what they show wrapping (see `[data-phone]` in `dashboard.scss`)
 :global(body:has([data-phone="true"])) .modal-container {
+  @include phone-safe-padding(var(--sp-xxl), var(--sp-xl));
+
   inline-size: 100vw;
   max-inline-size: none;
   block-size: 100dvh;
   max-block-size: none;
-  padding: calc(env(safe-area-inset-top) + var(--sp-xxl)) calc(env(safe-area-inset-right) + var(--sp-xl))
-    calc(env(safe-area-inset-bottom) + var(--sp-xxl)) calc(env(safe-area-inset-left) + var(--sp-xl));
   overflow-y: auto;
   border: none;
   border-radius: 0;

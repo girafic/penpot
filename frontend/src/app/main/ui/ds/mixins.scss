@@ -7,6 +7,7 @@
 @use "ds/typography.scss" as t;
 @use "ds/_borders.scss" as *;
 @use "ds/_sizes.scss" as *;
+@use "ds/_utils.scss" as *;
 
 @mixin text-ellipsis {
   display: block;
@@ -89,4 +90,15 @@
       color: var(--color-foreground-secondary);
     }
   }
+}
+
+/// The padding of a page or a sheet of a phone that scrolls: clear of the
+/// notch, of the home indicator and, at its end, of the bar Safari floats
+/// over the bottom of the page on iOS 26 (as the dashboard, `dashboard.scss`)
+/// @param {Length} $block-start - Room above, below the notch
+/// @param {Length} $inline - Room on the sides
+/// @param {Length} $block-end - Room at the end, above the home indicator
+@mixin phone-safe-padding($block-start, $inline, $block-end: px2rem(96)) {
+  padding: calc(env(safe-area-inset-top) + #{$block-start}) calc(env(safe-area-inset-right) + #{$inline})
+    calc(env(safe-area-inset-bottom) + #{$block-end}) calc(env(safe-area-inset-left) + #{$inline});
 }

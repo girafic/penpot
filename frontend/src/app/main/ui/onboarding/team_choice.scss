@@ -9,6 +9,7 @@
 @use "ds/_borders.scss" as *;
 @use "ds/_sizes.scss" as *;
 @use "ds/_utils.scss" as *;
+@use "ds/mixins.scss" as *;
 
 .color-light {
   color: var(--color-foreground-primary);
@@ -142,10 +143,10 @@
 // a phone shows the team step over all of its screen, as wide as it, what
 // a team is above the form to make one (see `questions.scss`)
 :global(body:has([data-phone="true"])) .modal-container {
+  @include phone-safe-padding(var(--sp-xxl), var(--sp-xl));
+
   inline-size: 100vw;
   block-size: 100dvh;
-  padding: calc(env(safe-area-inset-top) + var(--sp-xxl)) calc(env(safe-area-inset-right) + var(--sp-xl))
-    calc(env(safe-area-inset-bottom) + var(--sp-xxl)) calc(env(safe-area-inset-left) + var(--sp-xl));
   overflow-y: auto;
   border: none;
   border-radius: 0;

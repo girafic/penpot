@@ -80,18 +80,19 @@
   inline-size: 100%;
 }
 
-// A phone lays the page out as one column it scrolls, clear of its notch
-// and its home indicator: the logo above, the form in the middle of what
-// is left while it fits (`margin-block: auto`), below the logo once it is
-// taller (centered, a box taller than the screen loses its top)
+// A phone lays the page out as one column it scrolls, clear of its notch,
+// its home indicator and Safari's bar: the logo above, the form in the
+// middle of what is left while it fits (`margin-block: auto`), below the
+// logo once it is taller (centered, a box taller than the screen loses its
+// top)
 .auth-section[data-phone="true"] {
+  @include phone-safe-padding(var(--sp-xl), var(--sp-xl));
+
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
   gap: var(--sp-xxl);
-  padding: calc(env(safe-area-inset-top) + var(--sp-xl)) calc(env(safe-area-inset-right) + var(--sp-xl))
-    calc(env(safe-area-inset-bottom) + var(--sp-xxl)) calc(env(safe-area-inset-left) + var(--sp-xl));
 }
 
 .auth-section[data-phone="true"] .logo-container {

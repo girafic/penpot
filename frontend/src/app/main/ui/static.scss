@@ -8,6 +8,7 @@
 @use "ds/_borders.scss" as *;
 @use "ds/_sizes.scss" as *;
 @use "./ds/typography.scss" as t;
+@use "./ds/mixins.scss" as *;
 
 .exception-layout {
   inline-size: 100%;
@@ -405,8 +406,9 @@
 }
 
 // On a phone (the link of a view mode opened without a session) the login
-// takes all of the screen and scrolls, clear of the notch and the home
-// indicator: centered, a box taller than the screen loses its top
+// takes all of the screen and scrolls, clear of the notch, the home
+// indicator and Safari's bar: centered, a box taller than the screen
+// loses its top
 .overlay[data-phone="true"] {
   align-items: flex-start;
   overflow-y: auto;
@@ -414,11 +416,11 @@
 }
 
 .overlay[data-phone="true"] .dialog-login {
+  @include phone-safe-padding(var(--sp-xxl), var(--sp-xs));
+
   inline-size: 100%;
   min-block-size: 100%;
   border-radius: 0;
-  padding: calc(env(safe-area-inset-top) + var(--sp-xxl)) calc(env(safe-area-inset-right) + var(--sp-xs))
-    calc(env(safe-area-inset-bottom) + var(--sp-xxl)) calc(env(safe-area-inset-left) + var(--sp-xs));
 }
 
 .overlay[data-phone="true"] .login {
