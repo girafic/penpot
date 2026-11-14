@@ -118,8 +118,10 @@
                  (bundle-fetched bundle)
                  (fetch-bundle (d/without-nils params))))
              update-device-querystring
-             ;; Only fetch threads for logged-in users
-             (when (some? (:profile state))
+             ;; Only fetch threads for logged-in users, of the page
+             ;; shown: a link without a page gets them once it has its
+             ;; first one (see `show-page`)
+             (when (and (some? (:profile state)) (some? (:page-id params)))
                (fetch-comment-threads params))
              (when (:share-id params)
                (rx/of (ev/event {::ev/name "shared-prototipe-visited"})))))
@@ -470,13 +472,27 @@
                          {::rt/replace true})))
         (page-start state)))))
 
+(defn- page-threads
+  "The comment threads of the page of the route in `state`, fetched for a
+  profile logged in: the view mode keeps those of the page it shows (see
+  `fetch-comment-threads`)."
+  [state]
+  (let [qparams (dm/get-in state [:route :query-params])
+        page-id (some-> (rt/get-query-param qparams :page-id) uuid/parse)]
+    (if (and (some? (:profile state)) (some? page-id))
+      (rx/of (fetch-comment-threads {:file-id (dm/get-in state [:viewer :file :id])
+                                     :page-id page-id
+                                     :share-id (dm/get-in state [:viewer-local :share-id])}))
+      (rx/empty))))
+
 (defn show-page
   "The view mode at the page of the route, another one of the file it
   shows (see `go-to-page`), or the first one of a link without a page:
   started as `bundle-fetched` starts it, without fetching the file
-  again, which holds all its pages. The bundle of a link without a page
-  is done with then (see `initialize`). Nothing while another file
-  loads, which `bundle-fetched` starts."
+  again, which holds all its pages, and with the comment threads of that
+  page. The bundle of a link without a page is done with then (see
+  `initialize`). Nothing while another file loads, which
+  `bundle-fetched` starts."
   []
   (ptk/reify ::show-page
     ptk/UpdateEvent
@@ -487,7 +503,8 @@
     (watch [_ state _]
       (when (= (some-> (dm/get-in state [:route :query-params :file-id]) uuid/parse)
                (dm/get-in state [:viewer :file :id]))
-        (page-start state)))))
+        (rx/merge (page-start state)
+                  (page-threads state))))))
 
 ;; --- The preview of a prototype in the workspace
 

@@ -15,9 +15,11 @@
    [app.config :as cf]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
+   [app.main.repo :as rp]
    [app.main.ui.viewer.canvas :as uvc]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]))
 
 (def ^:private file-params
@@ -142,6 +144,31 @@
           "in the prototype, its first board")
     (t/is (empty? (types (viewer-state page-query)))
           "nothing while another file loads, which its bundle starts")))
+
+(t/deftest the-comments-of-the-page-shown
+  (let [profile {:id (uuid/custom 9 1)}
+        loaded  (fn [query] (-> (viewer-state query)
+                                (assoc-in [:viewer :file :id] file-id)
+                                (assoc :profile profile)))
+        fetches (fn [event state]
+                  (filterv #(= ::dv/fetch-comment-threads (ptk/type %)) (watch-events event state)))
+        threads [{:id (uuid/custom 8 1) :page-id page-id}
+                 {:id (uuid/custom 8 2) :page-id other-page-id}]]
+    (t/testing "another page fetches its threads, and keeps them only"
+      (let [[fetch :as all] (fetches (dv/show-page) (loaded (assoc page-query :canvas "true")))
+            kept            (atom nil)]
+        (t/is (= 1 (count all)))
+        (with-redefs [rp/cmd! (mock/stub (fn [& _] (rx/of threads)))]
+          (some-> (ptk/watch fetch {} nil)
+                  (rx/subscribe #(reset! kept (% {})))))
+        (t/is (= #{(uuid/custom 8 1)} (set (keys (:comment-threads @kept))))
+              "those of the page shown")))
+    (t/is (empty? (fetches (dv/show-page) (dissoc (loaded page-query) :profile)))
+          "logged out, none")
+    (t/is (empty? (fetches (dv/initialize {:file-id file-id}) (loaded {:file-id (str file-id)})))
+          "a link without a page: once it has one, by `show-page`")
+    (t/is (= 1 (count (fetches (dv/initialize {:file-id file-id :page-id page-id}) (loaded page-query))))
+          "a link to a page, as it starts")))
 
 (t/deftest a-share-link-opens-the-canvas-of-a-phone
   (let [query  (assoc page-query :share-id "s" :index "0")
