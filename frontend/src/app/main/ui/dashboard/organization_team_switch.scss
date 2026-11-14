@@ -446,9 +446,30 @@
 // `fit-content`: the switch it hangs from is lower than where it starts,
 // and Safari on iOS takes a fit-content height from the room left there
 // (none), which gave the smallest the dropdown can be, its teams scrolled
-// away to nothing and its actions cut off
+// away to nothing and its actions cut off. A long one ends above the bar
+// Safari floats over the bottom of the screen on iOS 26: it starts 60px
+// below the notch, and leaves the 96px of the pages there (see
+// `phone-safe-padding`)
 [data-phone="true"] .organization-team-dropdown {
   top: calc(var(--sp-s) + #{$sz-48} + var(--sp-xs));
   block-size: auto;
   min-block-size: 0;
+  max-block-size: min(#{$sz-520}, calc(100dvh - env(safe-area-inset-top) - #{px2rem(156)}));
+}
+
+// with organizations (or a licence) the dropdown has two columns of 257px
+// side by side, wider than a phone: there the organizations stand above
+// the teams of the one chosen, as wide as the single column, and the
+// dropdown scrolls as a whole when they are more than it can show
+[data-phone="true"] .organization-team-dropdown:not(.single-column) {
+  grid-template-columns: px2rem(267);
+  grid-template-rows: auto auto;
+  overflow-y: auto;
+}
+
+[data-phone="true"] .organization-team-dropdown:not(.single-column) .teams-column {
+  border-inline-start: none;
+  padding-inline-start: 0;
+  border-block-start: $b-1 solid var(--color-background-quaternary);
+  padding-block-start: var(--sp-s);
 }
