@@ -163,6 +163,7 @@
    [frontend-tests.ui.color-token-position-test]
    [frontend-tests.ui.colorpicker-token-set-order-test]
    [frontend-tests.ui.comment-input-ime-test]
+   [frontend-tests.ui.comment-mentions-test]
    [frontend-tests.ui.comments-bubble-test]
    [frontend-tests.ui.comments-clustering-test]
    [frontend-tests.ui.comments-docked-test]
@@ -426,6 +427,7 @@
    'frontend-tests.ui.color-token-position-test
    'frontend-tests.ui.colorpicker-token-set-order-test
    'frontend-tests.ui.comment-input-ime-test
+   'frontend-tests.ui.comment-mentions-test
    'frontend-tests.ui.comments-bubble-test
    'frontend-tests.ui.comments-clustering-test
    'frontend-tests.ui.comments-docked-test

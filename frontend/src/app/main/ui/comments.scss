@@ -562,8 +562,11 @@
   inline-size: calc(100% + var(--sp-xs));
 }
 
+// a tap on an entry selects none of its text, which would take the caret
+// out of the input
 .comments-mentions-entry {
   cursor: pointer;
+  user-select: none;
   display: grid;
   grid-template-areas:
     "avatar name"

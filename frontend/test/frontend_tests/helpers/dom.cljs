@@ -18,7 +18,7 @@
   reach the DOM by. The events and the frames too, for an open menu: it
   dispatches a `CustomEvent`, which a node of jsdom takes from its own
   window only, not the one of Node, and waits for a frame."
-  ["window" "document" "navigator" "Node" "Element" "SVGElement" "HTMLElement"
+  ["window" "document" "navigator" "Node" "Text" "Element" "SVGElement" "HTMLElement"
    "HTMLAnchorElement" "HTMLButtonElement" "HTMLInputElement" "HTMLSelectElement"
    "HTMLTextAreaElement" "Event" "CustomEvent" "FocusEvent" "KeyboardEvent"
    "MouseEvent" "CSS" "requestAnimationFrame" "cancelAnimationFrame"])

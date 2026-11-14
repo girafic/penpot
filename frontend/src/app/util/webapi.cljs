@@ -297,7 +297,9 @@
   ([^js node offset]
    (when node
      (let [child-nodes (.-childNodes node)
-           sel         (get-selection)
+           ;; the selection of the document, empty too: a tap on a phone
+           ;; can leave none, which this sets again
+           sel         (.getSelection globals/document)
            r           (create-range)]
        (if (= (.-length child-nodes) 0)
          (do (.setStart r node offset)

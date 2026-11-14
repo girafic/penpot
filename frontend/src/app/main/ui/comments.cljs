@@ -473,12 +473,23 @@
            (when on-blur
              (on-blur event))))
 
+        ;; where the caret is, or was last in the input: a tap on a phone
+        ;; takes it out of the input before the click on what it tapped
+        ;; (an entry of the people to mention), where a mouse keeps it
+        caret
+        (mf/use-fn
+         (fn [node]
+           (or (current-text-node node)
+               (when-let [[span-node offset] (some-> (mf/ref-val prev-selection-ref) (array-seq))]
+                 (when (.contains node span-node)
+                   [span-node offset])))))
+
         handle-insert-mention
         (mf/use-fn
-         (mf/deps on-change)
+         (mf/deps on-change caret)
          (fn [data]
            (when-let [node (mf/ref-val local-ref)]
-             (when-let [[span-node offset] (current-text-node node)]
+             (when-let [[span-node offset] (caret node)]
                (let [node-text
                      (dom/get-text span-node)
 
@@ -496,14 +507,17 @@
                      (subs node-text (+ current-at-symbol (count mention)))
 
                      mention-span (create-mention-node (-> data :user :id) (-> data :user :fullname))
-                     after-span (create-text-node (dm/str " " suffix))
-                     sel (wapi/get-selection)]
+                     after-span (create-text-node (dm/str " " suffix))]
 
                  (dom/set-html! span-node (if (empty? prefix) zero-width-space (dom/escape-html prefix)))
                  (dom/insert-after! node span-node mention-span)
                  (dom/insert-after! node mention-span after-span)
+                 ;; the caret back after the mention, in the input again
+                 (when-not (dom/focus? node)
+                   (dom/focus! node))
                  (wapi/set-cursor-after! after-span)
-                 (wapi/collapse-end! sel)
+                 (some-> (wapi/get-selection) (wapi/collapse-end!))
+                 (rx/push! mentions-s {:type :hide-mentions})
 
                  (when (fn? on-change)
                    (on-change (parse-nodes node))))))))
