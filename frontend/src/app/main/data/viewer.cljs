@@ -75,6 +75,14 @@
    [:share-id {:optional true} [:maybe ::sm/uuid]]
    [:page-id {:optional true} ::sm/uuid]])
 
+(defn can-comment?
+  "Whether a viewer with `permissions` sees and writes comments: one who
+  edits the file, or one logged in where the link lets all comment."
+  [permissions]
+  (boolean (or (:can-edit permissions)
+               (and (true? (:is-logged permissions))
+                    (= (:who-comment permissions) "all")))))
+
 (defn name-window!
   "Name the window `viewer-<file-id>`, for inter-tab navigation: a tab
   opened with that name, when one is open already, is that one, focused,

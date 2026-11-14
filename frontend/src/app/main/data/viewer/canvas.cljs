@@ -14,6 +14,7 @@
   `app.main.data.viewer`."
   (:require
    [app.common.colors :as clr]
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
@@ -219,6 +220,81 @@
                         {:zoom (/ (:width screen) (max 1 width)) :x x :y y})
                       (zoom-about view point (* 2 (:zoom view))))
                     bounds screen)))))
+
+;; --- Its boards and its comments
+
+(defn top-boards
+  "The top-level boards of the canvas `objects` (see `canvas-objects`), in
+  the order of the boards of the view mode, `frames` (those of the page,
+  see `ctt/get-viewer-frames`): what the directory of its sheet lists."
+  [objects frames]
+  (into []
+        (keep (fn [{:keys [id]}]
+                (let [shape (get objects id)]
+                  (when (and (some? shape) (= uuid/zero (:parent-id shape)))
+                    shape))))
+        frames))
+
+(defn board-view
+  "The view of the canvas of `bounds` on a `screen` showing `board` as wide
+  as the screen, its top at the top, its name above it (as the start view
+  shows the names)."
+  [board bounds screen]
+  (let [{:keys [x y width]} (:selrect board)
+        zoom (/ (:width screen) (max 1 width))]
+    (clamp-view {:zoom zoom :x x :y (- y (/ names-inset zoom))} bounds screen)))
+
+(defn board-at
+  "The top-level board of `objects` under the `point` of the page, the
+  uppermost one, or nil: the board a comment there is about."
+  [objects point]
+  (->> (rseq (dm/get-in objects [uuid/zero :shapes] []))
+       (keep #(get objects %))
+       (filter cfh/frame-shape?)
+       (d/seek #(gsh/has-point? % point))))
+
+(defn canvas-threads
+  "The comment `threads` the canvas of `objects` shows: at their stored
+  `positions` (`{id {:position :frame-id}}`, where the view mode keeps
+  those moved), those about a board it draws or about none."
+  [threads positions objects]
+  (into []
+        (comp (map (fn [{:keys [id] :as thread}]
+                     (if-let [{:keys [position frame-id]} (get positions id)]
+                       (assoc thread :position position :frame-id frame-id)
+                       thread)))
+              (filter (fn [{:keys [frame-id]}]
+                        (or (nil? frame-id) (= uuid/zero frame-id) (contains? objects frame-id)))))
+        threads))
+
+(def ^:private bubble-room
+  "How much of a screen, from its top, shows a bubble beside an open
+  thread, which docks at its bottom."
+  0.4)
+
+(defn bubble-shown?
+  "Whether the `point` of the page shows at `view` on a `screen` above an
+  open thread docked at its bottom."
+  [view screen point]
+  (let [{:keys [zoom x y]} view
+        sx (* (- (:x point) x) zoom)
+        sy (* (- (:y point) y) zoom)]
+    (and (<= 0 sx (:width screen))
+         (<= 0 sy (* bubble-room (:height screen))))))
+
+(defn bubble-view
+  "The view of the canvas of `bounds` on a `screen` that shows the bubble
+  at the `point` of the page above a thread docked at the bottom: in the
+  middle, a quarter down, at least as close as its `board` (or nil) shows
+  as wide as the screen."
+  [view bounds screen point board]
+  (let [zoom (cond-> (:zoom view)
+               (some? board)
+               (max (/ (:width screen) (max 1 (dm/get-in board [:selrect :width])))))]
+    (clamp-view {:zoom zoom
+                 :x    (- (:x point) (/ (:width screen) zoom 2))
+                 :y    (- (:y point) (/ (:height screen) zoom 4))}
+                bounds screen)))
 
 ;; --- Gestures on the canvas
 

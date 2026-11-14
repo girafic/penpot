@@ -354,6 +354,74 @@
       (t/is (close-point? (gpt/point 2000 10000)
                           (dvc/page-point view (screen-point start 2000 10000)))))))
 
+;; --- Its boards and its comments
+
+(t/deftest the-directory-lists-the-top-level-boards
+  (let [{:keys [strip card screen tall hidden]} ids
+        frames (mapv #(hash-map :id %) [tall screen card strip hidden])]
+    (t/is (= [tall screen strip]
+             (mapv :id (dvc/top-boards (dvc/canvas-objects page-objects) frames)))
+          "in the order of the view mode, neither nested nor hidden")))
+
+(t/deftest a-board-of-the-directory-shows-as-wide-as-the-screen
+  (let [objects (dvc/canvas-objects page-objects)
+        bounds  (dvc/content-bounds objects)
+        {:keys [zoom x y]} (dvc/board-view (get objects (:screen ids)) bounds phone-screen)]
+    (t/is (mth/close? (/ 375 400) zoom 1e-9))
+    (t/is (= 0 x))
+    (t/is (mth/close? (- 1200 (/ 24 zoom)) y 1e-9) "its name above it")))
+
+(t/deftest a-comment-is-about-the-top-level-board-under-it
+  (let [{:keys [strip screen]} ids
+        objects (dvc/canvas-objects page-objects)]
+    (t/is (= strip (:id (dvc/board-at objects (gpt/point 300 250)))) "the strip, not its card")
+    (t/is (= screen (:id (dvc/board-at objects (gpt/point 200 1330)))))
+    (t/is (nil? (dvc/board-at objects (gpt/point 4600 100))) "beside the boards, none")
+    (t/is (nil? (dvc/board-at objects (gpt/point 5010 10))) "a board hidden in view mode, none")))
+
+(t/deftest the-canvas-shows-the-threads-of-its-boards
+  (let [{:keys [strip screen hidden]} ids
+        [a b c d] (map #(uuid/custom 7 %) (range 4))
+        threads   [{:id a :frame-id strip :position (gpt/point 10 10)}
+                   {:id b :frame-id hidden :position (gpt/point 5010 10)}
+                   {:id c :frame-id uuid/zero :position (gpt/point 4600 10)}
+                   {:id d :frame-id strip :position (gpt/point 20 20)}]
+        positions {d {:position (gpt/point 30 1300) :frame-id screen}}
+        shown     (dvc/canvas-threads threads positions (dvc/canvas-objects page-objects))]
+    (t/is (= [a c d] (mapv :id shown)) "but on a board hidden in view mode")
+    (t/is (= {:position (gpt/point 30 1300) :frame-id screen}
+             (select-keys (last shown) [:position :frame-id]))
+          "where it was moved to")))
+
+(t/deftest a-bubble-shows-above-its-open-thread
+  (let [view {:zoom 1 :x 0 :y 0}]
+    (t/is (dvc/bubble-shown? view phone-screen (gpt/point 100 100)))
+    (t/is (not (dvc/bubble-shown? view phone-screen (gpt/point 100 400)))
+          "under the thread docked at the bottom")
+    (t/is (not (dvc/bubble-shown? view phone-screen (gpt/point -5 10))) "beside the screen")))
+
+(t/deftest the-canvas-goes-to-a-bubble
+  (let [objects (dvc/canvas-objects page-objects)
+        bounds  (dvc/content-bounds objects)
+        start   (dvc/initial-view bounds phone-screen)
+        board   (get objects (:screen ids))
+        point   (gpt/point 200 1500)
+        view    (dvc/bubble-view start bounds phone-screen point board)]
+    (t/is (mth/close? (/ 375 400) (:zoom view) 1e-9) "as close as its board as wide as the screen")
+    (t/is (close-point? (gpt/point 187.5 203) (screen-point view 200 1500))
+          "in the middle, a quarter down")
+    (let [close {:zoom 3 :x 0 :y 1300}]
+      (t/is (= 3 (:zoom (dvc/bubble-view close bounds phone-screen point board)))
+            "closer already: as close"))
+    (t/is (= (:zoom start) (:zoom (dvc/bubble-view start bounds phone-screen point nil)))
+          "about no board: the zoom it has")))
+
+(t/deftest who-comments
+  (t/is (true? (dv/can-comment? {:can-edit true})))
+  (t/is (true? (dv/can-comment? {:is-logged true :who-comment "all"})))
+  (t/is (false? (dv/can-comment? {:is-logged true :who-comment "team"})))
+  (t/is (false? (dv/can-comment? {:is-logged false :who-comment "all"}))))
+
 ;; --- Gestures on the canvas
 
 (t/deftest fingers-move-the-page-with-them

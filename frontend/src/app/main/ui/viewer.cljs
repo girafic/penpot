@@ -566,9 +566,7 @@
         allowed (or
                  (= section :interactions)
                  (and (= section :comments)
-                      (or (:can-edit permissions)
-                          (and (true? (:is-logged permissions))
-                               (= (:who-comment permissions) "all"))))
+                      (dv/can-comment? permissions))
                  (and (= section :inspect)
                       (or (:can-edit permissions)
                           (and (true? (:is-logged permissions))
