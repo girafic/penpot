@@ -63,9 +63,10 @@
   "Whether a `phone?` lays the page of the route `screen` out at its own
   width: the view mode and the pages of `phone-page?`, as its viewport
   tag says (see `viewport-content`). Other routes, the workspace above
-  all, it keeps at the width of a desktop page. A component that lays
-  itself out for a phone asks this, never `phone?` alone, so its layout
-  and the viewport tag agree."
+  all, it keeps at the width of a desktop page. A component that can show
+  over any route (the exception page and its dialogs) asks this rather
+  than `phone?` alone, so that its layout and the viewport tag agree; the
+  pages of these routes themselves may ask `phone?`."
   [screen phone?]
   (boolean (and phone? (or (= screen :viewer) (phone-page? screen)))))
 

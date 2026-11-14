@@ -111,11 +111,6 @@
              (not= (:release-notes-viewed props) (:main cf/version))
              (not= "0.0" (:main cf/version)))]
 
-    ;; a phone shows the view mode as wide as it is, a tablet all of
-    ;; Penpot (see `touch/viewport-content`)
-    (mf/with-effect [section]
-      (touch/set-viewport! (touch/viewport-content section (touch/phone?) (touch/coarse?))))
-
     [:& (mf/provider ctx/current-route) {:value route}
      (case section
        (:auth-login
@@ -266,10 +261,18 @@
   []
   (let [route   (mf/deref refs/route)
         edata   (mf/deref refs/exception)
-        profile (mf/deref refs/profile)]
+        profile (mf/deref refs/profile)
+        section (get-in route [:data :name])]
 
     ;; initialize themes
     (theme/use-initialize profile)
+
+    ;; a phone shows the view mode as wide as it is, a tablet all of
+    ;; Penpot (see `touch/viewport-content`); set here, around the page and
+    ;; the exception page alike, so that an exception page shown in place
+    ;; of a page before it ever showed has the tag of its route too
+    (mf/with-effect [section]
+      (touch/set-viewport! (touch/viewport-content section (touch/phone?) (touch/coarse?))))
 
     (dom/prevent-browser-gesture-navigation!)
 
