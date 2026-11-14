@@ -381,34 +381,61 @@
        [:span {:class (stl/css :grip)}]]
       [:div {:class (stl/css :body)} children]]]))
 
-(def button-key
-  "Where a phone keeps whether a button on the screen opens the options
-  of the prototype (see `sheet-button*`)."
-  ::sheet-button)
+(def controls-key
+  "Where a phone keeps whether the controls of the prototype show on the
+  screen (see `screen-controls*`)."
+  ::screen-controls)
 
-(mf/defc sheet-button*
-  "On a phone, over the board at the bottom right of the screen, for one
-  who chose it in the options: a button that opens them, `on-click`,
-  instead of two fingers held."
-  [{:keys [on-click]}]
-  [:button {:type "button"
-            :class (stl/css :sheet-button)
-            :aria-label (tr "viewer.phone.options")
-            :on-click (fn [event]
-                        (dom/stop-propagation event)
-                        (on-click))}
-   [:> icon* {:icon-id i/menu :size "m"}]])
+(mf/defc board-nav*
+  "The buttons that go to the first board, the one before and the one
+  after the `index`th of `total`."
+  {::mf/private true}
+  [{:keys [index total]}]
+  [:*
+   [:> icon-button* {:variant "ghost"
+                     :aria-label (tr "viewer.go-to-first-board")
+                     :icon i/reload
+                     :disabled (zero? index)
+                     :on-click #(st/emit! dv/select-first-frame)}]
+   [:> icon-button* {:variant "ghost"
+                     :aria-label (tr "labels.previous")
+                     :icon i/arrow-left
+                     :disabled (zero? index)
+                     :on-click #(st/emit! dv/select-prev-frame)}]
+   [:> icon-button* {:variant "ghost"
+                     :aria-label (tr "labels.next")
+                     :icon i/arrow-right
+                     :disabled (>= (inc index) total)
+                     :on-click #(st/emit! dv/select-next-frame)}]])
+
+(mf/defc screen-controls*
+  "On a phone, over the board at the bottom of the screen, for one who
+  chose them in the options: the controls of the prototype, which the
+  options hold too, at hand. Where the `index`th of `total` boards is,
+  the buttons to the first, the one before and the one after, and those
+  of its animation, `timeline`, when it has one."
+  [{:keys [index total timeline]}]
+  [:div {:class (stl/css :screen-controls)
+         :role "toolbar"
+         :aria-label (tr "viewer.phone.controls")}
+   [:span {:class (stl/css :counter)} (dm/str (inc index) " / " total)]
+   [:> board-nav* {:index index :total total}]
+   (when (some? timeline)
+     [:*
+      [:span {:class (stl/css :divider)}]
+      timeline])])
 
 (mf/defc hold-hint*
-  "At the bottom of a phone, where the sheet comes from: how it opens.
-  It calls `on-hide` after `hint-ms` and at a tap; when it shows is the
-  view mode's (each time it shows the prototype, see `viewer-content*`)."
-  [{:keys [on-hide]}]
+  "At the bottom of a phone, where the sheet comes from, `raised` above
+  the controls on the screen: how it opens. It calls `on-hide` after
+  `hint-ms` and at a tap; when it shows is the view mode's (each time it
+  shows the prototype, see `viewer-content*`)."
+  [{:keys [on-hide raised]}]
   (mf/with-effect [on-hide]
     (let [timer (js/setTimeout on-hide hint-ms)]
       #(js/clearTimeout timer)))
 
-  [:div {:class (stl/css :hint)
+  [:div {:class (stl/css-case :hint true :raised (true? raised))
          :role "status"
          :on-click on-hide}
    (tr "viewer.phone.hold-hint")])
@@ -486,7 +513,7 @@
   moves the canvas there (see `dv/focus-canvas`) and lowers the sheet to
   where it starts."
   [{:keys [page file project frame index permissions section interactions-mode timeline on-close
-           is-canvas has-canvas is-docked on-switch show-button on-show-button]}]
+           is-canvas has-canvas is-docked on-switch show-controls on-show-controls]}]
   (let [frames     (:frames page)
         total      (count frames)
         flows      (not-empty (:flows page))
@@ -668,34 +695,20 @@
        [:div {:class (stl/css :row)}
         [:span {:class (stl/css :board-name)} (:name frame)]
         [:span {:class (stl/css :counter)} (dm/str (inc index) " / " total)]
-        [:> icon-button* {:variant "ghost"
-                          :aria-label (tr "viewer.go-to-first-board")
-                          :icon i/reload
-                          :disabled (zero? index)
-                          :on-click #(st/emit! dv/select-first-frame)}]
-        [:> icon-button* {:variant "ghost"
-                          :aria-label (tr "labels.previous")
-                          :icon i/arrow-left
-                          :disabled (zero? index)
-                          :on-click #(st/emit! dv/select-prev-frame)}]
-        [:> icon-button* {:variant "ghost"
-                          :aria-label (tr "labels.next")
-                          :icon i/arrow-right
-                          :disabled (>= (inc index) total)
-                          :on-click #(st/emit! dv/select-next-frame)}]])
+        [:> board-nav* {:index index :total total}]])
 
      ;; its animation
      (when (and (some? timeline) (not (true? is-canvas)))
        [:div {:class (stl/css :row)} timeline])
 
-     ;; a button on the screen for these options, instead of two fingers
-     ;; held (see `sheet-button*`)
-     (when (and (not (true? is-canvas)) (fn? on-show-button))
+     ;; the controls of the boards and of the animation on the screen
+     ;; too, at hand (see `screen-controls*`)
+     (when (and (not (true? is-canvas)) (fn? on-show-controls))
        [:div {:class (stl/css :row)}
-        [:> checkbox* {:id "phone-sheet-button"
-                       :label (tr "viewer.phone.show-button")
-                       :checked (true? show-button)
-                       :on-change #(on-show-button (not (true? show-button)))}]])
+        [:> checkbox* {:id "phone-screen-controls"
+                       :label (tr "viewer.phone.show-controls")
+                       :checked (true? show-controls)
+                       :on-change #(on-show-controls (not (true? show-controls)))}]])
 
      ;; the pages, the one shown in the mode it shows (see `dv/go-to-page`),
      ;; a lone one too: which page shows

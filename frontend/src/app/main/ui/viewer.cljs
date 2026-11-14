@@ -715,10 +715,15 @@
         ;; it goes or two fingers open the sheet (see `phone-sheet/hold-hint*`)
         hint*       (mf/use-state true)
         hint?       (deref hint*)
-        ;; or a button on the screen opens it, as chosen in it
-        button*     (hooks/use-persisted-state phone-sheet/button-key false)
-        button?     (true? (deref button*))
+        ;; the controls of the prototype on the screen too, as chosen in
+        ;; the sheet (see `phone-sheet/screen-controls*`)
+        controls*   (hooks/use-persisted-state phone-sheet/controls-key false)
+        controls?   (true? (deref controls*))
         hide-hint   (mf/use-fn #(reset! hint* false))
+        ;; the controls of the animation of the board, on a phone in the
+        ;; sheet and on the screen
+        timeline    (when (some? clock)
+                      (mf/html [:> timeline-controls* {:board-id (:id frame) :sound? board-sound?}]))
         ;; the switch of the sheet went to the other mode, which keeps it
         switched-ref (mf/use-ref false)
         overlays    (mf/deref current-overlays-ref)
@@ -1424,13 +1429,16 @@
 
      ;; on a phone the board alone: two fingers held open what the
      ;; bars hold elsewhere, which a note tells each time the prototype
-     ;; shows, once its board does
-     (when (and phone? drawn? hint? (not button?) (not sheet?) (not canvas?))
-       [:> phone-sheet/hold-hint* {:on-hide hide-hint}])
+     ;; shows, once its board does, above its controls when they show
+     (when (and phone? drawn? hint? (not sheet?) (not canvas?))
+       [:> phone-sheet/hold-hint* {:on-hide hide-hint :raised controls?}])
 
-     ;; or the button that opens them, as chosen in them
-     (when (and phone? drawn? button? (not sheet?) (not canvas?))
-       [:> phone-sheet/sheet-button* {:on-click #(reset! sheet* true)}])
+     ;; the controls of its boards and its animation at hand, as chosen
+     ;; in the sheet
+     (when (and phone? drawn? controls? (not sheet?) (not canvas?))
+       [:> phone-sheet/screen-controls* {:index index
+                                         :total (count (:frames page))
+                                         :timeline timeline}])
 
      ;; on the canvas it stays, docked at the bottom
      (when (and phone? (or sheet? canvas?))
@@ -1444,14 +1452,13 @@
          :index index
          :is-canvas canvas?
          :is-docked canvas?
-         :show-button button?
-         :on-show-button #(reset! button* %)
+         :show-controls controls?
+         :on-show-controls #(reset! controls* %)
          :has-canvas (and wasm? (contains? cf/flags :phone-canvas))
          :permissions permissions
          :section section
          :interactions-mode interactions-mode
-         :timeline (when (some? clock)
-                     (mf/html [:> timeline-controls* {:board-id (:id frame) :sound? board-sound?}]))
+         :timeline timeline
          :on-close #(reset! sheet* false)}])
 
      (when-not preview

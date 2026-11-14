@@ -440,10 +440,10 @@
     (t/is (nil? (:switch (canvas-comments-row {:in-team true :is-logged true :who-comment "team"} {})))
           "none for one who may not comment")))
 
-(defn- button-setting
+(defn- controls-setting
   "What the options of a phone over the prototype (or the canvas,
-  `canvas?`) offer of a button on the screen, shown or not (`shown?`):
-  whether its checkbox, ticked, and what a tap on it asks."
+  `canvas?`) offer of the controls on the screen, shown or not
+  (`shown?`): whether its checkbox, ticked, and what a tap on it asks."
   [canvas? shown?]
   (thd/with-dom
     (fn [{:keys [root document window]}]
@@ -459,24 +459,50 @@
                                            :section :interactions
                                            :onClose identity
                                            :isCanvas canvas? :hasCanvas true :isDocked canvas?
-                                           :showButton shown?
-                                           :onShowButton #(swap! asked conj %)}))
-        (let [box (.querySelector document "#phone-sheet-button")]
+                                           :showControls shown?
+                                           :onShowControls #(swap! asked conj %)}))
+        (let [box (.querySelector document "#phone-screen-controls")]
           (some->> box (thd/click! window))
           {:offered (some? box) :ticked (some-> box .-checked) :asked @asked})))))
 
-(t/deftest the-options-offer-a-button-on-the-screen
-  (t/is (= {:offered true :ticked false :asked [true]} (button-setting false false))
-        "over the prototype, off: a tap asks for it")
-  (t/is (= {:offered true :ticked true :asked [false]} (button-setting false true))
+(t/deftest the-options-offer-their-controls-on-the-screen
+  (t/is (= {:offered true :ticked false :asked [true]} (controls-setting false false))
+        "over the prototype, off: a tap asks for them")
+  (t/is (= {:offered true :ticked true :asked [false]} (controls-setting false true))
         "on: a tap asks for none")
-  (t/is (= {:offered false :ticked nil :asked []} (button-setting true false))
+  (t/is (= {:offered false :ticked nil :asked []} (controls-setting true false))
         "the canvas has its sheet docked"))
 
-(t/deftest the-button-on-the-screen-opens-the-options
+(defn- screen-controls
+  "What the controls on the screen show at the `index`th of `total`
+  boards, with the controls of an animation or not (`animated?`), and
+  what a tap on the button labelled `pick` emits."
+  [index total animated? pick]
   (thd/with-dom
     (fn [{:keys [root document window]}]
-      (let [opened (atom 0)]
-        (thd/render! root (mf/element phone-sheet/sheet-button* #js {:onClick #(swap! opened inc)}))
-        (thd/click! window (.querySelector document (str "button[aria-label=\"" (tr "viewer.phone.options") "\"]")))
-        (t/is (= 1 @opened))))))
+      (let [emitted (atom [])
+            ;; by the tooltip that names it (see `icon-button*`)
+            labelled (fn [^js node]
+                       (some-> (.getAttribute node "aria-labelledby")
+                               (as-> id (.getElementById document id))
+                               (.getAttribute "aria-label")))]
+        (with-redefs [st/emit! (mock/stub (fn [& events] (swap! emitted into events)))]
+          (thd/render! root (mf/element phone-sheet/screen-controls*
+                                        #js {:index index :total total
+                                             :timeline (when animated? (mf/html [:p "play"]))}))
+          (let [buttons (vec (.querySelectorAll document "[role=toolbar] button"))]
+            (some->> buttons (filter #(= pick (labelled %))) (first) (thd/click! window))
+            {:counter  (some-> (.querySelector document "[role=toolbar] [class*=counter]") .-textContent)
+             :disabled (into #{} (comp (filter #(.-disabled %)) (map labelled)) buttons)
+             :timeline (some? (.querySelector document "[role=toolbar] p"))
+             :emitted  (mapv ptk/type @emitted)}))))))
+
+(t/deftest the-controls-on-the-screen-go-from-board-to-board
+  (t/is (= {:counter "1 / 3" :disabled #{(tr "viewer.go-to-first-board") (tr "labels.previous")}
+            :timeline false :emitted [::dv/select-next-frame]}
+           (screen-controls 0 3 false (tr "labels.next")))
+        "the first board: the next one")
+  (t/is (= {:counter "3 / 3" :disabled #{(tr "labels.next")} :timeline true
+            :emitted [::dv/select-prev-frame]}
+           (screen-controls 2 3 true (tr "labels.previous")))
+        "the last, animated: the one before, its animation too"))
