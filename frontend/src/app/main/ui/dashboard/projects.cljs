@@ -169,9 +169,8 @@
 
         on-file-created
         (mf/use-fn
-         (fn [{:keys [id data]}]
-           (let [page-id (get-in data [:pages 0])]
-             (st/emit! (dcm/go-to-workspace :file-id id :page-id page-id)))))
+         (fn [file]
+           (some-> (dd/open-created-file file) st/emit!)))
 
         create-file
         (mf/use-fn

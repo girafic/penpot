@@ -15,6 +15,7 @@
    [app.main.repo :as rp]
    [app.main.router :as rt]
    [app.util.i18n :as i18n]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.async :as async]
@@ -190,3 +191,15 @@
              (await (async/observe (ptk/watch (dd/initialize team-id) state stream)
                                    :on-next #(swap! processed conj (ptk/type %))))))
     (t/is (= 1 (count (filter #{::dcm/handle-organization-change-sso} @processed))))))
+
+(t/deftest a-new-file-opens-in-the-editor-but-on-a-phone
+  (let [file-id (uuid/next)
+        page-id (uuid/next)
+        file    {:id file-id :data {:pages [page-id]}}]
+    (with-redefs [touch/phone? (constantly false)]
+      (let [event (dd/open-created-file file)]
+        (t/is (= ::dcm/go-to-workspace (ptk/type event))
+              "a desktop opens the editor")))
+    (with-redefs [touch/phone? (constantly true)]
+      (t/is (nil? (dd/open-created-file file))
+            "a phone only shows the file among the others"))))

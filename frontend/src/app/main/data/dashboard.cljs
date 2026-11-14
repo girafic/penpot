@@ -29,6 +29,7 @@
    [app.main.store :as st]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.sse :as sse]
+   [app.util.touch :as touch]
    [beicon.v2.core :as rx]
    [clojure.set :as set]
    [cuerdas.core :as str]
@@ -503,6 +504,14 @@
             (assoc-in [:files id] file)
             (assoc-in [:recent-files id] file)
             (d/update-in-when [:projects project-id :count] inc))))))
+
+(defn open-created-file
+  "Where a file just created on the dashboard opens: in the editor, at
+  its first page. On a phone, which has no use for the editor, nowhere
+  (nil): the new file only shows among the others."
+  [{:keys [id data]}]
+  (when-not (touch/phone?)
+    (dcm/go-to-workspace :file-id id :page-id (get-in data [:pages 0]))))
 
 (defn create-file
   [{:keys [project-id name] :as params}]

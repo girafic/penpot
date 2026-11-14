@@ -7,7 +7,6 @@
 (ns app.main.ui.dashboard.files
   (:require-macros [app.main.style :as stl])
   (:require
-   [app.main.data.common :as dcm]
    [app.main.data.dashboard :as dd]
    [app.main.data.dashboard.shortcuts :as sc]
    [app.main.data.event :as ev]
@@ -197,10 +196,8 @@
 
         on-file-created
         (mf/use-fn
-         (fn [file-data]
-           (let [file-id (:id file-data)
-                 page-id (get-in file-data [:pages 0])]
-             (st/emit! (dcm/go-to-workspace :file-id file-id :page-id page-id)))))
+         (fn [file]
+           (some-> (dd/open-created-file file) st/emit!)))
 
         create-file
         (mf/use-fn
