@@ -240,9 +240,11 @@
 
 (defn use-keyboard-inset!
   "Keeps on the page, while `enabled?`, how high the keyboard of a phone
-  covers its bottom, as `--keyboard-inset`: what docks at the bottom of
-  the screen stays above it. The page keeps its height as the keyboard
-  comes, the part of it that shows shrinks (`visualViewport`)."
+  covers its bottom, as `--keyboard-inset`, and how high the part of the
+  screen above it is, as `--keyboard-room`: what docks at the bottom of
+  the screen stays above it, and no higher than that part. The page keeps
+  its height as the keyboard comes, the part of it that shows shrinks
+  (`visualViewport`)."
   [enabled?]
   (mf/with-effect [enabled?]
     (when-let [^js view (when enabled? (unchecked-get g/window "visualViewport"))]
@@ -251,7 +253,8 @@
             update!
             (fn []
               (let [inset (max 0 (- (.-clientHeight root) (.-height view) (.-offsetTop view)))]
-                (.setProperty (.-style root) "--keyboard-inset" (dm/str inset "px"))))]
+                (.setProperty (.-style root) "--keyboard-inset" (dm/str inset "px"))
+                (.setProperty (.-style root) "--keyboard-room" (dm/str (.-height view) "px"))))]
 
         (update!)
         (.addEventListener view "resize" update!)
@@ -259,7 +262,8 @@
         (fn []
           (.removeEventListener view "resize" update!)
           (.removeEventListener view "scroll" update!)
-          (.removeProperty (.-style root) "--keyboard-inset"))))))
+          (.removeProperty (.-style root) "--keyboard-inset")
+          (.removeProperty (.-style root) "--keyboard-room"))))))
 
 (mf/defc sheet*
   "A sheet from the bottom of a phone named `label`: `children` scroll

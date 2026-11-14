@@ -308,8 +308,9 @@
 }
 
 // a phone shows an open thread and a new one at the bottom of its screen,
-// as wide as it, above its keyboard (see `phone-sheet/use-keyboard-inset!`):
-// a sheet floating in from its edges, as its others
+// as wide as it, above its keyboard (see `phone-sheet/use-keyboard-inset!`)
+// and no higher than the screen it leaves: a sheet floating in from its
+// edges, as its others
 .floating-thread-wrapper.docked,
 .floating-thread-draft-inner-wrapper.docked {
   position: fixed;
@@ -318,7 +319,10 @@
   margin: 0 var(--phone-sheet-gap) var(--phone-sheet-gap);
   z-index: var(--z-index-panels);
   inline-size: auto;
-  max-block-size: 60dvh;
+  max-block-size: min(
+    60dvh,
+    calc(var(--keyboard-room, 100dvh) - env(safe-area-inset-top) - 2 * var(--phone-sheet-gap))
+  );
   padding: var(--sp-xl) calc(env(safe-area-inset-right) + var(--sp-m))
     calc(env(safe-area-inset-bottom) + var(--sp-xl)) calc(env(safe-area-inset-left) + var(--sp-m));
   border: none;
@@ -327,14 +331,28 @@
   transform: none;
 }
 
-// the people to mention open above the sheet, not below the screen
+// the people to mention show in the sheet, just above its field, as a
+// phone suggests words: above the sheet there is no room once the keyboard
+// is up. The comments give way to them; past a third of the screen left
+// they scroll
 .docked .comments-mentions-choice {
-  inset-block: auto 100%;
-  margin-block: 0 var(--sp-s);
+  position: static;
+  order: 1;
+  flex: 0 0 auto;
+  inline-size: auto;
+  max-block-size: calc(var(--keyboard-room, 100dvh) / 3);
+  margin: 0;
+  overflow-y: auto;
 }
 
+.docked .form {
+  order: 2;
+}
+
+// as high as its comments, less where the sheet has no room: a basis of
+// its content, as the sheet's height is no fixed one
 .docked .floating-thread-main {
-  flex: 1;
+  flex: 1 1 auto;
   min-block-size: 0;
   max-block-size: none;
 }
