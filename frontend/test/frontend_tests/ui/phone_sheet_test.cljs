@@ -16,7 +16,6 @@
    [app.main.store :as st]
    [app.main.ui.viewer.phone-sheet :as phone-sheet]
    [app.util.i18n :refer [tr]]
-   [app.util.storage :as storage]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [frontend-tests.helpers.mock :as mock]
@@ -84,19 +83,15 @@
         (.catch (fn [cause] (t/is false (ex-message cause))))
         (.finally (fn [] (done) nil)))))
 
-(t/deftest the-hint-shows-once
-  (swap! storage/user dissoc ::phone-sheet/hold-hint)
+(t/deftest the-hint-goes-at-a-tap
   (thd/with-dom
     (fn [{:keys [root document window]}]
-      (thd/render! root (mf/element phone-sheet/hold-hint* #js {}))
-      (let [hint (.querySelector document "[role=status]")]
-        (t/is (some? hint) "the first time")
-        (thd/click! window hint)
-        (t/is (nil? (.querySelector document "[role=status]")) "gone at a tap"))))
-  (thd/with-dom
-    (fn [{:keys [root document]}]
-      (thd/render! root (mf/element phone-sheet/hold-hint* #js {}))
-      (t/is (nil? (.querySelector document "[role=status]")) "not again"))))
+      (let [hidden (atom 0)]
+        (thd/render! root (mf/element phone-sheet/hold-hint* #js {:onHide #(swap! hidden inc)}))
+        (let [hint (.querySelector document "[role=status]")]
+          (t/is (some? hint) "each time the view mode shows it")
+          (thd/click! window hint)
+          (t/is (= 1 @hidden) "gone at a tap"))))))
 
 (defn- sheet
   "How a sheet `props` renders: `[dialog? backdrop?]`, and whether a tap

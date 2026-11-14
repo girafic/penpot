@@ -711,6 +711,11 @@
         ;; the sheet of a phone, open (see `phone-sheet/phone-sheet*`)
         sheet*      (mf/use-state false)
         sheet?      (deref sheet*)
+        ;; how the sheet opens, told each time the prototype shows, until
+        ;; it goes or two fingers open the sheet (see `phone-sheet/hold-hint*`)
+        hint*       (mf/use-state true)
+        hint?       (deref hint*)
+        hide-hint   (mf/use-fn #(reset! hint* false))
         ;; the switch of the sheet went to the other mode, which keeps it
         switched-ref (mf/use-ref false)
         overlays    (mf/deref current-overlays-ref)
@@ -1067,7 +1072,12 @@
     ;; two fingers held on a phone open its sheet, and on a desktop that
     ;; plays one Alt+O opens and closes it; what docks at its bottom, a
     ;; comment, stays above its keyboard
-    (phone-sheet/use-two-finger-hold! (and phone? (not canvas?)) #(reset! sheet* true))
+    (phone-sheet/use-two-finger-hold! (and phone? (not canvas?)) #(do (reset! hint* false)
+                                                                      (reset! sheet* true)))
+    ;; the prototype again, after the canvas: the note again
+    (mf/with-effect [canvas?]
+      (when-not canvas?
+        (reset! hint* true)))
     (phone-sheet/use-sheet-key! (and phone? (not canvas?)) #(swap! sheet* not))
     (phone-sheet/use-keyboard-inset! phone?)
 
@@ -1410,10 +1420,10 @@
                               :cutouts true}]])]
 
      ;; on a phone the board alone: two fingers held open what the
-     ;; bars hold elsewhere, which a note tells the first time, once the
-     ;; board shows
-     (when (and phone? drawn? (not sheet?) (not canvas?))
-       [:> phone-sheet/hold-hint*])
+     ;; bars hold elsewhere, which a note tells each time the prototype
+     ;; shows, once its board does
+     (when (and phone? drawn? hint? (not sheet?) (not canvas?))
+       [:> phone-sheet/hold-hint* {:on-hide hide-hint}])
 
      ;; on the canvas it stays, docked at the bottom
      (when (and phone? (or sheet? canvas?))

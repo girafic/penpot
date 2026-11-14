@@ -34,7 +34,6 @@
    [app.util.dom :as dom]
    [app.util.globals :as g]
    [app.util.i18n :refer [tr]]
-   [app.util.storage :as storage]
    [app.util.timers :as ts]
    [rumext.v2 :as mf]))
 
@@ -382,25 +381,18 @@
       [:div {:class (stl/css :body)} children]]]))
 
 (mf/defc hold-hint*
-  "At the bottom of a phone, where the sheet comes from: how it opens,
-  the first time the view mode shows there. It goes after `hint-ms`, at
-  a tap and as the sheet opens."
-  []
-  (let [shown* (mf/use-state #(not (get storage/user ::hold-hint)))
-        shown? (deref shown*)
-        hide!  (mf/use-fn #(reset! shown* false))]
+  "At the bottom of a phone, where the sheet comes from: how it opens.
+  It calls `on-hide` after `hint-ms` and at a tap; when it shows is the
+  view mode's (each time it shows the prototype, see `viewer-content*`)."
+  [{:keys [on-hide]}]
+  (mf/with-effect [on-hide]
+    (let [timer (js/setTimeout on-hide hint-ms)]
+      #(js/clearTimeout timer)))
 
-    (mf/with-effect []
-      (when shown?
-        (swap! storage/user assoc ::hold-hint true)
-        (let [timer (js/setTimeout hide! hint-ms)]
-          #(js/clearTimeout timer))))
-
-    (when shown?
-      [:div {:class (stl/css :hint)
-             :role "status"
-             :on-click hide!}
-       (tr "viewer.phone.hold-hint")])))
+  [:div {:class (stl/css :hint)
+         :role "status"
+         :on-click on-hide}
+   (tr "viewer.phone.hold-hint")])
 
 (defn- comments-events
   "The events of the entry `id` of the menu of the comments of the
