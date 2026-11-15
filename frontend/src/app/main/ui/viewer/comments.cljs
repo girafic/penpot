@@ -14,7 +14,6 @@
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.main.data.comments :as dcm]
-   [app.main.data.event :as ev]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.data.workspace.comments :as dwcm]
@@ -145,10 +144,6 @@
 (def ^:private ref:phone?
   (l/derived #(true? (dm/get-in % [:viewer-local :phone?])) st/state))
 
-;; who may move the bubbles of the others too
-(def ^:private ref:can-edit?
-  (l/derived #(true? (dm/get-in % [:viewer :permissions :can-edit])) st/state))
-
 (mf/defc comments-layer
   {::mf/props :obj}
   [{:keys [zoom file frame page]}]
@@ -163,7 +158,7 @@
         frame-id       (:id frame)
         vsize          (mf/deref ref:viewport-size)
         phone?         (mf/deref ref:phone?)
-        can-edit?      (mf/deref ref:can-edit?)
+        can-edit?      (mf/deref refs/viewer-can-edit?)
 
         tpos-ref     (mf/with-memo [page-id]
                        (-> (l/in [:pages page-id :comment-thread-positions])
@@ -193,11 +188,8 @@
         on-bubble-click
         (mf/use-fn
          (mf/deps open-thread-id)
-         (fn [{:keys [id] :as thread}]
-           (st/emit! (if (= open-thread-id id)
-                       (dcm/close-thread)
-                       (-> (dcm/open-thread thread)
-                           (with-meta {::ev/origin "viewer"}))))))
+         (fn [thread]
+           (st/emit! (dcm/toggle-thread-on-viewer open-thread-id thread))))
 
         ;; a bubble dropped stays in the board: out of it, the view mode
         ;; would show it no more
@@ -209,9 +201,7 @@
                                (dvc/clamp-to-board frame))]
              (st/emit! (dcm/update-comment-thread-position-on-viewer thread position)))))
 
-        ;; one's own threads, and all those of a file one edits
-        movable?     (fn [thread]
-                       (or can-edit? (= (:owner-id thread) (:id profile))))
+        movable?     (partial dcm/thread-movable? can-edit? profile)
 
         ;; the screen of a device a mouse drags leaves a press here alone
         on-threads-pointer-down

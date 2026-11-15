@@ -16,6 +16,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
+   [app.main.data.workspace.comments :as dwcm]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.viewer.canvas-comments :as cvc]
@@ -60,7 +61,8 @@
                       refs/profile         (l/atom {:id me})
                       refs/comment-threads (l/atom (into {} (map (juxt :id identity)) threads))
                       refs/comments-local  local*
-                      refs/viewer-data     (l/atom {:pages {page-id {:comment-thread-positions {}}}})]
+                      refs/viewer-data     (l/atom {:pages {page-id {:comment-thread-positions {}}}})
+                      refs/viewer-can-edit? (l/atom false)]
           (thd/render! root (mf/element cvc/canvas-comments*
                                         #js {:page {:id page-id}
                                              :objects objects
@@ -94,6 +96,44 @@
     (t/is (= [::dcm/close-comment-thread]
              (map ptk/type (:emitted (rendered [(thread 1 10 20)] {:open (uuid/custom 4 1)} 1 tap!))))
           "open, it closes")))
+
+(t/deftest ^:async a-keystroke-in-a-draft-gathers-no-bubbles
+  (let [group   dwcm/group-bubbles
+        calls   (atom 0)
+        local*  (l/atom {:draft {:position (gpt/point 50 50) :page-id page-id :content ""}})
+        counted (atom nil)]
+    (await
+     (mock/with-mocks*
+       {dwcm/group-bubbles     (fn [zoom threads]
+                                 (swap! calls inc)
+                                 (group zoom threads))
+        st/emit!               (mock/stub (fn [& _]))
+        refs/profile           (l/atom {:id me})
+        refs/team              (l/atom {:members []})
+        refs/comment-threads   (l/atom {(uuid/custom 4 1) (thread 1 10 20)})
+        refs/comments-local    local*
+        refs/viewer-data       (l/atom {:pages {page-id {:comment-thread-positions {}}}})
+        refs/viewer-can-edit?  (l/atom false)}
+       (await
+        (thd/with-dom
+          (fn [{:keys [root]}]
+            (thd/render! root (mf/element cvc/canvas-comments*
+                                          #js {:page {:id page-id}
+                                               :objects objects
+                                               :zoom 1
+                                               :size {:width 375 :height 812}
+                                               :viewOf (constantly {})}))
+            (let [before @calls]
+              (thd/act #(swap! local* assoc-in [:draft :content] "a"))
+              (-> (thd/settle)
+                  (.then (fn []
+                           (reset! counted {:draft (- @calls before)})
+                           (thd/act #(swap! local* assoc :mode :yours))
+                           (thd/settle)))
+                  (.then (fn [] (swap! counted assoc :filter (- @calls before)))))))))))
+    (t/is (pos? @calls) "the bubbles were gathered as the canvas showed")
+    (t/is (= 0 (:draft @counted)) "not again as the draft changed")
+    (t/is (pos? (:filter @counted)) "again as a filter changed")))
 
 (defn- focused-on-open?
   "Whether the canvas moves as the thread at `x y` of the page opens, the

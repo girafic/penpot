@@ -573,6 +573,21 @@
     (update [_ state]
       (update state :comments-local dissoc :expanded))))
 
+(defn thread-movable?
+  "Whether `profile` may move the bubble of `thread` in the view mode:
+  one's own threads, and all those of a file one edits (`can-edit?`)."
+  [can-edit? profile thread]
+  (or (true? can-edit?) (= (:owner-id thread) (:id profile))))
+
+(defn toggle-thread-on-viewer
+  "What a click on the bubble of `thread` in the view mode does, the
+  thread of `open-id` open: it closes that thread, else opens this one."
+  [open-id {:keys [id] :as thread}]
+  (if (= open-id id)
+    (close-thread)
+    (-> (open-thread thread)
+        (with-meta {::ev/origin "viewer"}))))
+
 (def ^:private hide-resolved-comments-storage-key
   :app.main.data.comments/hide-resolved-comments?)
 

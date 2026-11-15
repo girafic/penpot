@@ -12,11 +12,9 @@
   open docked at the bottom, as in the prototype."
   (:require-macros [app.main.style :as stl])
   (:require
-   [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.main.data.comments :as dcm]
-   [app.main.data.event :as ev]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.data.workspace.comments :as dwcm]
@@ -26,10 +24,6 @@
    [app.main.ui.viewer.comments :as vcm]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
-
-;; who may move the bubbles of the others too
-(def ^:private ref:can-edit?
-  (l/derived #(true? (dm/get-in % [:viewer :permissions :can-edit])) st/state))
 
 (defn close-on-tap!
   "What a tap on the canvas does to the comments: it collapses a group
@@ -73,6 +67,35 @@
   [point]
   #js {"--anchor-x" (:x point) "--anchor-y" (:y point)})
 
+(mf/defc canvas-bubble*
+  "The bubble of `thread` on the canvas of `objects` at `zoom`, in its
+  anchor at `anchor` (the middle of its group spread out, else its
+  point). One may move it (`movable`): it drops within its board."
+  {::mf/wrap [mf/memo]}
+  [{:keys [thread anchor objects zoom offset ring is-open movable on-click]}]
+  (let [anchor   (or anchor (:position thread))
+        modifier (mf/with-memo [anchor]
+                   (anchored anchor))
+
+        ;; it drops where it is in its anchor
+        on-move
+        (mf/use-fn
+         (mf/deps anchor objects)
+         (fn [thread [x y]]
+           (let [position (-> (dvc/thread-board objects (:frame-id thread))
+                              (dvc/clamp-to-board (gpt/add anchor (gpt/point x y))))]
+             (st/emit! (dcm/update-comment-thread-position-on-viewer thread position)))))]
+    [:> cmt/comment-floating-bubble*
+     {:thread thread
+      :position-modifier modifier
+      :zoom zoom
+      :offset offset
+      :ring ring
+      :on-click on-click
+      :on-move (when movable on-move)
+      :is-open is-open
+      :origin :viewer}]))
+
 (mf/defc canvas-comments*
   "The comments of `page` of `file` on its canvas drawn of `objects` (see
   `dvc/canvas-objects`), at the `zoom` it rests at (see
@@ -83,7 +106,7 @@
   (let [profile     (mf/deref refs/profile)
         local       (mf/deref refs/comments-local)
         threads-map (mf/deref refs/comment-threads)
-        can-edit?   (mf/deref ref:can-edit?)
+        can-edit?   (mf/deref refs/viewer-can-edit?)
         page-id     (:id page)
 
         positions-ref (mf/with-memo [page-id]
@@ -91,10 +114,14 @@
                             (l/derived refs/viewer-data)))
         positions     (mf/deref positions-ref)
 
+        ;; only the filters of the comments, not a keystroke in a draft,
+        ;; gather the bubbles again
+        mode        (:mode local)
+        show        (:show local)
         all         (mf/with-memo [threads-map positions objects]
                       (dvc/canvas-threads (vals threads-map) positions objects))
-        threads     (mf/with-memo [all local profile]
-                      (dcm/apply-filters local profile all))
+        threads     (mf/with-memo [all mode show profile]
+                      (dcm/apply-filters {:mode mode :show show} profile all))
         groups      (mf/with-memo [threads zoom]
                       (dwcm/group-bubbles zoom threads))
 
@@ -132,39 +159,11 @@
         on-bubble-click
         (mf/use-fn
          (mf/deps open-id)
-         (fn [{:keys [id] :as thread}]
-           (st/emit! (if (= open-id id)
-                       (dcm/close-thread)
-                       (-> (dcm/open-thread thread)
-                           (with-meta {::ev/origin "viewer"}))))))
+         (fn [thread]
+           (st/emit! (dcm/toggle-thread-on-viewer open-id thread))))
 
-        ;; one's own threads, and all those of a file one edits
-        movable?    (fn [thread]
-                      (or can-edit? (= (:owner-id thread) (:id profile))))
-
-        ;; a bubble drops where it is in its anchor at `anchor`
-        on-move-from
-        (fn [anchor]
-          (fn [thread [x y]]
-            (let [position (-> (dvc/thread-board objects (:frame-id thread))
-                               (dvc/clamp-to-board (gpt/add anchor (gpt/point x y))))]
-              (st/emit! (dcm/update-comment-thread-position-on-viewer thread position)))))
-
-        bubble
-        (fn [thread & {:keys [anchor offset ring]}]
-          (let [anchor (or anchor (:position thread))]
-            (mf/html
-             [:> cmt/comment-floating-bubble*
-              {:thread thread
-               :position-modifier (anchored anchor)
-               :zoom zoom
-               :offset offset
-               :ring ring
-               :on-click on-bubble-click
-               :on-move (when (movable? thread) (on-move-from anchor))
-               :is-open (and (nil? offset) (= (:id thread) open-id))
-               :origin :viewer
-               :key (:seqn thread)}])))]
+        movable?
+        (partial dcm/thread-movable? can-edit? profile)]
 
     ;; another zoom gathers the bubbles again, as the prototype does
     (mf/with-effect [zoom]
@@ -195,7 +194,16 @@
                                              :zoom zoom
                                              :position-modifier (anchored center)}]
             (for [[thread offset ring] (cmt/expanded-group-offsets zoom group)]
-              (bubble thread :anchor center :offset offset :ring ring))]
+              [:> canvas-bubble* {:key (:seqn thread)
+                                  :thread thread
+                                  :anchor center
+                                  :objects objects
+                                  :zoom zoom
+                                  :offset offset
+                                  :ring ring
+                                  :on-click on-bubble-click
+                                  :movable (movable? thread)
+                                  :is-open false}])]
 
            (> (count group) 1)
            [:div {:key (:seqn thread)
@@ -209,7 +217,12 @@
            [:div {:key (:seqn thread)
                   :class (stl/css :anchor)
                   :style (anchor-style (:position thread))}
-            (bubble thread)])))
+            [:> canvas-bubble* {:thread thread
+                                :objects objects
+                                :zoom zoom
+                                :on-click on-bubble-click
+                                :movable (movable? thread)
+                                :is-open (= (:id thread) open-id)}]])))
 
      ;; a comment begun, its bubble where the finger held, its field
      ;; docked at the bottom

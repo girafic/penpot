@@ -616,6 +616,11 @@
 (def viewer-overlays
   (l/derived :viewer-overlays st/state))
 
+(def viewer-can-edit?
+  "Whether one edits the file the view mode shows: one moves the bubbles
+  of the comments of the others too."
+  (l/derived #(true? (dm/get-in % [:viewer :permissions :can-edit])) st/state))
+
 (def comment-threads
   (l/derived :comment-threads st/state))
 
