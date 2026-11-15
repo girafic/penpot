@@ -58,16 +58,6 @@
           :count-unread-comments 0 :is-resolved false}
          attrs))
 
-(defn- emit-into
-  "A stand-in for `st/emit!` that collects what it emits in the atom
-  `out`, at each arity the code calls it with (`mock/stub` forwards no
-  variadic call)."
-  [out]
-  (fn
-    ([] nil)
-    ([event] (swap! out conj event) nil)
-    ([event & events] (swap! out into (cons event events)) nil)))
-
 (defn- rendered
   "What the comments on the canvas show of `threads` at `zoom`, the
   comments state `local`, and what `act` (given the document, the window
@@ -79,7 +69,7 @@
     (fn [{:keys [root document window]}]
       (let [emitted (atom [])
             local*  (l/atom local)]
-        (with-redefs [st/emit!             (emit-into emitted)
+        (with-redefs [st/emit!             (mock/emit-into emitted)
                       refs/profile         (l/atom {:id me})
                       refs/comment-threads (l/atom (into {} (map (juxt :id identity)) threads))
                       refs/comments-local  local*
@@ -129,7 +119,7 @@
        {dwcm/group-bubbles     (fn [zoom threads]
                                  (swap! calls inc)
                                  (group zoom threads))
-        st/emit!               (emit-into (atom []))
+        st/emit!               (mock/emit-into (atom []))
         refs/profile           (l/atom {:id me})
         refs/team              (l/atom {:members []})
         refs/comment-threads   (l/atom {(uuid/custom 4 1) (thread 1 10 20)})
@@ -232,7 +222,7 @@
   "What a finger held at `x y` of the canvas emits."
   [x y]
   (let [out (atom [])]
-    (with-redefs [st/emit! (emit-into out)]
+    (with-redefs [st/emit! (mock/emit-into out)]
       (cvc/start-draft! objects page-id (uuid/custom 5 1) (gpt/point x y)))
     @out))
 
@@ -252,7 +242,7 @@
   (thd/with-dom
     (fn [{:keys [root document window]}]
       (let [emitted (atom [])]
-        (with-redefs [st/emit!             (emit-into emitted)
+        (with-redefs [st/emit!             (mock/emit-into emitted)
                       refs/profile         (l/atom {:id me})
                       refs/profiles        (l/atom {})
                       refs/comment-threads (l/atom (into {} (map (juxt :id identity)) threads))

@@ -641,21 +641,12 @@
   (t/is (= {:emitted [] :placed "true" :stays true} (pressed -100))
         "dragged: elsewhere, where they stay, and no board"))
 
-(defn- emit-into
-  "A stand-in for `st/emit!` that collects what it emits in the atom
-  `out`, at each arity the code calls it with."
-  [out]
-  (fn
-    ([] nil)
-    ([event] (swap! out conj event) nil)
-    ([event & events] (swap! out into (cons event events)) nil)))
-
 (t/deftest ^:async a-click-after-a-drag-cancelled-taps
   (swap! storage/user dissoc ::phone-sheet/controls-place)
   (let [emitted (atom [])]
     (await
      (mock/with-mocks*
-       {st/emit! (emit-into emitted)}
+       {st/emit! (mock/emit-into emitted)}
        (await
         (thd/with-dom
           (fn [{:keys [root document window]}]

@@ -278,6 +278,17 @@
          ([a b c d e] (f a b c d e))
          ([a b c d e g] (f a b c d e g))))
 
+     (defn emit-into
+       "A stand-in for `app.main.store/emit!` that collects the events it is
+       given into the atom `out`, at each of its arities: `[]`, `[event]`
+       and `[event & events]`. A call with several events goes to the
+       variadic arity, which `stub` does not forward."
+       [out]
+       (fn
+         ([] nil)
+         ([event] (swap! out conj event) nil)
+         ([event & events] (swap! out into (cons event events)) nil)))
+
      ;; Scheduling
      ;; ═══════════════════════════════════════════════════════════════
 
