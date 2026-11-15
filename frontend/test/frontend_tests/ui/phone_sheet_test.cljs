@@ -518,6 +518,60 @@
     (t/is (= {:x (/ 247 375) :y (/ 784 812)} (phone-sheet/controls-place rect 500 500 screen))
           "past the bottom right too")))
 
+(t/deftest the-controls-on-the-screen-keep-where-they-were-dropped
+  (let [portrait  {:width 375 :height 812}
+        landscape {:width 812 :height 375}
+        right     {:x (/ 287 375) :y 0.5}
+        bottom    {:x 0.5 :y (/ 784 812)}]
+    (t/is (= right (phone-sheet/kept-place right 160 40 portrait {}))
+          "as dropped while they fit")
+    (t/is (= {:x (/ 247 375) :y 0.5} (phone-sheet/kept-place right 240 40 portrait {}))
+          "wider, as an animation adds its buttons: whole, 8px in from the right edge")
+    (t/is (= {:x 0.5 :y (/ 347 375)} (phone-sheet/kept-place bottom 240 40 landscape {}))
+          "turned: whole above the bottom edge")
+    (t/is (= bottom (phone-sheet/kept-place bottom 240 40 portrait {}))
+          "turned back: where they were dropped")
+    (t/is (= {:x (/ 172 812) :y (/ 347 375)}
+             (phone-sheet/kept-place {:x 0 :y 1} 240 40 landscape {:left 44 :bottom 0}))
+          "clear of the sensor housing too")
+    (t/is (= {:x (/ 128 375) :y (/ 62 812)}
+             (phone-sheet/controls-place {:left 0 :top 0 :width 240 :height 40} -100 -100 portrait
+                                         {:top 34}))
+          "a drag keeps clear of the insets")))
+
+(t/deftest the-controls-on-the-screen-go-back-as-they-narrow
+  (swap! storage/user assoc ::phone-sheet/controls-place {:x 0.9 :y 0.5})
+  (let [result
+        (thd/with-dom
+          (fn [{:keys [root document window]}]
+            (let [observed (atom [])
+                  width    (atom 160)]
+              ;; jsdom has no ResizeObserver: one that calls back when told
+              (set! (.-ResizeObserver window)
+                    (fn [callback]
+                      (swap! observed conj callback)
+                      #js {:observe (fn [_]) :disconnect (fn [])}))
+              (with-redefs [st/emit! (mock/stub (fn [& _]))]
+                (thd/render! root (mf/element phone-sheet/screen-controls* #js {:index 0 :total 3}))
+                (let [bar     (.querySelector document "[role=group]")
+                      x       #(js/parseFloat (.getPropertyValue (.-style bar) "--controls-x"))
+                      resized (fn [w]
+                                (reset! width w)
+                                (thd/act #(doseq [callback @observed] (callback)))
+                                (x))]
+                  (set! (.-getBoundingClientRect bar)
+                        (fn [] #js {:left 0 :top 0 :width @width :height 40}))
+                  ;; jsdom: a screen of 1024 by 768
+                  {:fits     (resized 160)
+                   :wider    (resized 240)
+                   :narrower (resized 160)
+                   :stored   (get @storage/user ::phone-sheet/controls-place)})))))]
+    (swap! storage/user dissoc ::phone-sheet/controls-place)
+    (t/is (= 0.9 (:fits result)) "where they were dropped")
+    (t/is (= (/ (- 1024 120 8) 1024) (:wider result)) "wider: left, whole on the screen")
+    (t/is (= 0.9 (:narrower result)) "narrower again: back where they were dropped")
+    (t/is (= {:x 0.9 :y 0.5} (:stored result)) "the place dropped stays as it was")))
+
 (defn- pressed
   "What the controls on the screen emit as a finger presses their button
   to the next board, moves `dy` px and lets go, and where they stay."

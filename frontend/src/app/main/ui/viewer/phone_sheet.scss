@@ -305,6 +305,19 @@
   transform: translate(-50%, -50%);
 }
 
+// the room the screen keeps at its edges, for its sensor housing and its
+// home bar: its padding, which the controls read to keep clear of it (see
+// `screen-controls*`)
+.safe-area-probe {
+  position: absolute;
+  inline-size: 0;
+  block-size: 0;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+  visibility: hidden;
+  pointer-events: none;
+}
+
 // between the boards and the animation
 .divider {
   align-self: stretch;

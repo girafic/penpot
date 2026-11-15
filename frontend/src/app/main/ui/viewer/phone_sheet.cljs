@@ -426,16 +426,59 @@
   "Where the controls on a `screen` (`{:width :height}`, px) go, dragged
   `dx dy` px from the box `rect` (`{:left :top :width :height}`): the
   middle of their box, as parts of the screen (`{:x :y}`, 0 to 1), so
-  that it holds as the phone turns, the box whole on the screen."
-  [rect dx dy screen]
-  (let [{:keys [left top width height]} rect
-        sw     (:width screen)
-        sh     (:height screen)
-        half-w (/ width 2)
-        half-h (/ height 2)
-        cx     (mth/clamp (+ left half-w dx) (+ half-w screen-gap-px) (- sw half-w screen-gap-px))
-        cy     (mth/clamp (+ top half-h dy) (+ half-h screen-gap-px) (- sh half-h screen-gap-px))]
-    {:x (/ cx (max 1 sw)) :y (/ cy (max 1 sh))}))
+  that it holds as the phone turns, the box whole on the screen, clear of
+  its `insets` too (`{:top :right :bottom :left}`, px: the room it keeps
+  for its sensor housing and its home bar)."
+  ([rect dx dy screen]
+   (controls-place rect dx dy screen nil))
+  ([rect dx dy screen insets]
+   (let [{:keys [left top width height]} rect
+         sw     (:width screen)
+         sh     (:height screen)
+         half-w (/ width 2)
+         half-h (/ height 2)
+         gap    #(+ screen-gap-px (get insets % 0))
+         cx     (mth/clamp (+ left half-w dx) (+ half-w (gap :left)) (- sw half-w (gap :right)))
+         cy     (mth/clamp (+ top half-h dy) (+ half-h (gap :top)) (- sh half-h (gap :bottom)))]
+     {:x (/ cx (max 1 sw)) :y (/ cy (max 1 sh))})))
+
+(defn kept-place
+  "Where the controls dropped at `place` (see `controls-place`) show,
+  `width` by `height` px now, on a `screen` with `insets`: from there,
+  whole on it. Turned back, or narrower again, they show where they were
+  dropped."
+  [place width height screen insets]
+  (controls-place {:left   (- (* (:x place) (:width screen)) (/ width 2))
+                   :top    (- (* (:y place) (:height screen)) (/ height 2))
+                   :width  width
+                   :height height}
+                  0 0 screen insets))
+
+(defn- screen-of
+  "The size of the screen the `node` shows on, px."
+  [^js node]
+  (let [^js window (.. node -ownerDocument -defaultView)]
+    {:width (.-innerWidth window) :height (.-innerHeight window)}))
+
+(defn- probe-insets
+  "The room the screen keeps at its edges (`env(safe-area-inset-*)`), px,
+  as the padding of the `probe` resolves it (see `.safe-area-probe`)."
+  [^js probe]
+  (if (some? probe)
+    (let [^js style (.getComputedStyle (.. probe -ownerDocument -defaultView) probe)
+          px        #(let [v (js/parseFloat %)] (if (js/isNaN v) 0 v))]
+      {:top    (px (.-paddingTop style))
+       :right  (px (.-paddingRight style))
+       :bottom (px (.-paddingBottom style))
+       :left   (px (.-paddingLeft style))})
+    {}))
+
+(defn- show-place!
+  "Show the controls `node` at `to` (see `controls-place`), by its style:
+  React not at all."
+  [^js node to]
+  (.setProperty (.-style node) "--controls-x" (:x to))
+  (.setProperty (.-style node) "--controls-y" (:y to)))
 
 (defn- place-style
   [{:keys [x y]}]
@@ -450,11 +493,12 @@
   elsewhere (see `controls-place`), where they stay on this phone; one
   that moves less taps the button under it."
   [{:keys [index total timeline]}]
-  (let [place*   (hooks/use-persisted-state place-key nil)
-        place    (deref place*)
-        node-ref (mf/use-ref nil)
+  (let [place*    (hooks/use-persisted-state place-key nil)
+        place     (deref place*)
+        node-ref  (mf/use-ref nil)
+        probe-ref (mf/use-ref nil)
         ;; the finger down: where, the box then, whether it drags
-        drag-ref (mf/use-ref nil)
+        drag-ref  (mf/use-ref nil)
 
         on-pointer-down
         (mf/use-fn
@@ -476,15 +520,13 @@
                      dy (- (.-clientY event) y0)]
                  (when (or dragging (> (mth/hypot dx dy) drag-slop-px))
                    (let [^js node (mf/ref-val node-ref)
-                         to       (controls-place rect dx dy {:width (.-innerWidth g/window)
-                                                              :height (.-innerHeight g/window)})]
+                         to       (controls-place rect dx dy (screen-of node)
+                                                  (probe-insets (mf/ref-val probe-ref)))]
                      (when-not dragging
                        (.setPointerCapture node id)
                        (mf/set-ref-val! drag-ref (assoc (mf/ref-val drag-ref) :dragging true)))
-                     ;; moved by its style, React not at all
                      (.setAttribute node "data-placed" "true")
-                     (.setProperty (.-style node) "--controls-x" (:x to))
-                     (.setProperty (.-style node) "--controls-y" (:y to))
+                     (show-place! node to)
                      (mf/set-ref-val! drag-ref (assoc (mf/ref-val drag-ref) :to to)))))))))
 
         on-pointer-up
@@ -498,6 +540,27 @@
                  (dds/swallow-click!)
                  (reset! place* to))))))]
 
+    ;; whole on the screen as they grow (the buttons of an animation) or
+    ;; the screen turns: from where they were dropped, which stays the
+    ;; choice, so that they go back there
+    (mf/with-layout-effect [place]
+      (when-let [^js node (when (some? place) (mf/ref-val node-ref))]
+        (let [^js window (.. node -ownerDocument -defaultView)
+              keep!      (fn []
+                           (when-not (:dragging (mf/ref-val drag-ref))
+                             (let [rect (.getBoundingClientRect node)]
+                               (show-place! node (kept-place place (.-width rect) (.-height rect)
+                                                             (screen-of node)
+                                                             (probe-insets (mf/ref-val probe-ref)))))))
+              observer   (when-let [observer-class (.-ResizeObserver window)]
+                           (new observer-class keep!))]
+          (keep!)
+          (some-> observer (.observe node))
+          (.addEventListener window "resize" keep!)
+          (fn []
+            (some-> observer (.disconnect))
+            (.removeEventListener window "resize" keep!)))))
+
     [:div {:ref node-ref
            :class (stl/css :screen-controls)
            :role "group"
@@ -508,6 +571,9 @@
            :on-pointer-move on-pointer-move
            :on-pointer-up on-pointer-up
            :on-pointer-cancel on-pointer-up}
+     [:span {:ref probe-ref
+             :class (stl/css :safe-area-probe)
+             :aria-hidden true}]
      [:span {:class (stl/css :counter)} (dm/str (inc index) " / " total)]
      [:> board-nav* {:index index :total total}]
      (when (some? timeline)
