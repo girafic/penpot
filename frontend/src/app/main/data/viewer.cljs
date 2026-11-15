@@ -483,13 +483,17 @@
                          {::rt/replace true})))
         (page-start state)))))
 
+(defn- route-page-id
+  "The id of the page of the route in `state`, or nil."
+  [state]
+  (some-> (rt/get-query-param (dm/get-in state [:route :query-params]) :page-id) uuid/parse))
+
 (defn- page-threads
   "The comment threads of the page of the route in `state`, fetched for a
   profile logged in: the view mode keeps those of the page it shows (see
   `fetch-comment-threads`)."
   [state]
-  (let [qparams (dm/get-in state [:route :query-params])
-        page-id (some-> (rt/get-query-param qparams :page-id) uuid/parse)]
+  (let [page-id (route-page-id state)]
     (if (and (some? (:profile state)) (some? page-id))
       (rx/of (fetch-comment-threads {:file-id (dm/get-in state [:viewer :file :id])
                                      :page-id page-id
@@ -501,7 +505,8 @@
   shows (see `go-to-page`), or the first one of a link without a page:
   started as `bundle-fetched` starts it, without fetching the file
   again, which holds all its pages, and with the comment threads of that
-  page. The bundle of a link without a page is done with then (see
+  page; the thread open, or one begun, closes, as it was about the page
+  left. The bundle of a link without a page is done with then (see
   `initialize`). Nothing while another file loads, which
   `bundle-fetched` starts."
   []
@@ -514,7 +519,8 @@
     (watch [_ state _]
       (when (= (some-> (dm/get-in state [:route :query-params :file-id]) uuid/parse)
                (dm/get-in state [:viewer :file :id]))
-        (rx/merge (page-start state)
+        (rx/merge (rx/of (dcmt/close-thread))
+                  (page-start state)
                   (page-threads state))))))
 
 ;; --- The preview of a prototype in the workspace
@@ -556,12 +562,17 @@
           (rx/empty))))))
 
 (defn fetch-comment-threads
+  "The comment threads of the page `page-id` of the file `file-id`. An
+  answer is kept only while the view mode shows that page: one that comes
+  after another page showed, and fetched its own, is dropped."
   [{:keys [file-id page-id share-id] :as params}]
   (letfn [(fetched [data state]
-            (->> data
-                 (filter #(= page-id (:page-id %)))
-                 (d/index-by :id)
-                 (assoc state :comment-threads)))
+            (if (= page-id (route-page-id state))
+              (->> data
+                   (filter #(= page-id (:page-id %)))
+                   (d/index-by :id)
+                   (assoc state :comment-threads))
+              state))
           (on-error [cause]
             (let [{:keys [type]} (ex-data cause)]
               (if (or (= :authentication type)

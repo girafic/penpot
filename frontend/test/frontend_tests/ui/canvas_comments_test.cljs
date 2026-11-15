@@ -20,6 +20,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.viewer.canvas-comments :as cvc]
+   [app.util.i18n :refer [tr]]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [frontend-tests.helpers.mock :as mock]
@@ -35,6 +36,7 @@
   (let [rect (grc/make-rect 0 0 100 100)]
     {uuid/zero {:id uuid/zero :type :frame :shapes [board-id]}
      board-id  {:id board-id :type :frame :parent-id uuid/zero :frame-id uuid/zero
+                :x 0 :y 0 :width 100 :height 100
                 :selrect rect :points (grc/rect->points rect)}}))
 
 (defn- thread
@@ -45,6 +47,16 @@
           :content "" :created-at (ct/now) :modified-at (ct/now)
           :count-unread-comments 0}
          attrs))
+
+(defn- emit-into
+  "A stand-in for `st/emit!` that collects what it emits in the atom
+  `out`, at each arity the code calls it with (`mock/stub` forwards no
+  variadic call)."
+  [out]
+  (fn
+    ([] nil)
+    ([event] (swap! out conj event) nil)
+    ([event & events] (swap! out into (cons event events)) nil)))
 
 (defn- rendered
   "What the comments on the canvas show of `threads` at `zoom`, the
@@ -57,7 +69,7 @@
     (fn [{:keys [root document window]}]
       (let [emitted (atom [])
             local*  (l/atom local)]
-        (with-redefs [st/emit!             (mock/stub (fn [& events] (swap! emitted into events)))
+        (with-redefs [st/emit!             (emit-into emitted)
                       refs/profile         (l/atom {:id me})
                       refs/comment-threads (l/atom (into {} (map (juxt :id identity)) threads))
                       refs/comments-local  local*
@@ -107,7 +119,7 @@
        {dwcm/group-bubbles     (fn [zoom threads]
                                  (swap! calls inc)
                                  (group zoom threads))
-        st/emit!               (mock/stub (fn [& _]))
+        st/emit!               (emit-into (atom []))
         refs/profile           (l/atom {:id me})
         refs/team              (l/atom {:members []})
         refs/comment-threads   (l/atom {(uuid/custom 4 1) (thread 1 10 20)})
@@ -173,3 +185,21 @@
   (t/is (= (gpt/point 100 40) (dropped 400 40)) "out of its board, at its edge")
   (t/is (= (gpt/point 210 40) (dropped 400 40 :frame-id uuid/zero))
         "about no board, where it went"))
+
+(defn- posted
+  "What a tap on Post of a comment begun at 50 50, on the board, of the
+  page `draft-page` emits on the canvas of the page `page-id`."
+  [draft-page]
+  (let [post! (fn [document window _]
+                (some->> (js/Array.from (.querySelectorAll document "button"))
+                         (some #(when (= (tr "labels.post") (.-textContent %)) %))
+                         (thd/click! window)))
+        draft {:position (gpt/point 50 50) :page-id draft-page :file-id (uuid/custom 5 1)
+               :content "Hi"}]
+    (mapv ptk/type (:emitted (rendered [] {:draft draft} 1 post!)))))
+
+(t/deftest a-comment-begun-on-another-page-goes
+  (t/is (= [::dcm/create-thread-on-viewer ::dcm/close-comment-thread] (posted page-id))
+        "about the board under it")
+  (t/is (= [::dcm/close-comment-thread] (posted (uuid/custom 1 2)))
+        "begun on another page: it goes, posted nowhere"))

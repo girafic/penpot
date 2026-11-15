@@ -141,12 +141,14 @@
         on-draft-cancel
         (mf/use-fn #(st/emit! (dcm/close-thread)))
 
-        ;; about the board under it, which the prototype shows it on
+        ;; about the board under it, which the prototype shows it on;
+        ;; begun on another page, it goes
         on-draft-submit
         (mf/use-fn
-         (mf/deps objects)
+         (mf/deps objects page-id)
          (fn [{:keys [position] :as draft}]
-           (if-let [board (dvc/board-at objects position)]
+           (if-let [board (when (= page-id (:page-id draft))
+                            (dvc/board-at objects position))]
              (st/emit! (dcm/create-thread-on-viewer
                         (-> draft
                             (select-keys [:page-id :file-id :position :content])

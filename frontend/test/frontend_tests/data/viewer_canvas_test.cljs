@@ -21,6 +21,7 @@
    [app.main.ui.viewer.canvas :as uvc]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.async :as async]
    [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]))
 
@@ -147,7 +148,13 @@
     (t/is (empty? (types (viewer-state page-query)))
           "nothing while another file loads, which its bundle starts")))
 
-(t/deftest the-comments-of-the-page-shown
+(t/deftest a-page-change-closes-the-thread
+  (let [state (-> (viewer-state (assoc page-query :canvas "true"))
+                  (assoc-in [:viewer :file :id] file-id))]
+    (t/is (= ::dcm/close-comment-thread (ptk/type (first (watch-events (dv/show-page) state))))
+          "the thread open, or begun, first of all")))
+
+(t/deftest ^:async the-comments-of-the-page-shown
   (let [profile {:id (uuid/custom 9 1)}
         loaded  (fn [query] (-> (viewer-state query)
                                 (assoc-in [:viewer :file :id] file-id)
@@ -155,22 +162,49 @@
         fetches (fn [event state]
                   (filterv #(= ::dv/fetch-comment-threads (ptk/type %)) (watch-events event state)))
         threads [{:id (uuid/custom 8 1) :page-id page-id}
-                 {:id (uuid/custom 8 2) :page-id other-page-id}]]
-    (t/testing "another page fetches its threads, and keeps them only"
-      (let [[fetch :as all] (fetches (dv/show-page) (loaded (assoc page-query :canvas "true")))
-            kept            (atom nil)]
-        (t/is (= 1 (count all)))
-        (with-redefs [rp/cmd! (mock/stub (fn [& _] (rx/of threads)))]
-          (some-> (ptk/watch fetch {} nil)
-                  (rx/subscribe #(reset! kept (% {})))))
-        (t/is (= #{(uuid/custom 8 1)} (set (keys (:comment-threads @kept))))
-              "those of the page shown")))
+                 {:id (uuid/custom 8 2) :page-id other-page-id}]
+        state   (loaded (assoc page-query :canvas "true"))
+        [fetch :as all] (fetches (dv/show-page) state)
+        kept    (atom state)]
+    (t/is (= 1 (count all)) "another page fetches its threads")
+    (await
+     (mock/with-mocks*
+       {rp/cmd! (mock/stub (fn [& _] (->> (rx/of threads) (rx/observe-on :async))))}
+       (await (async/observe (ptk/watch fetch state nil) :on-next #(swap! kept %)))))
+    (t/is (= #{(uuid/custom 8 1)} (set (keys (:comment-threads @kept))))
+          "and keeps those of the page shown only")
     (t/is (empty? (fetches (dv/show-page) (dissoc (loaded page-query) :profile)))
           "logged out, none")
     (t/is (empty? (fetches (dv/initialize {:file-id file-id}) (loaded {:file-id (str file-id)})))
           "a link without a page: once it has one, by `show-page`")
     (t/is (= 1 (count (fetches (dv/initialize {:file-id file-id :page-id page-id}) (loaded page-query))))
           "a link to a page, as it starts")))
+
+(t/deftest ^:async a-late-answer-for-a-page-left-is-dropped
+  (let [state    (-> (viewer-state (assoc page-query :page-id (str other-page-id)))
+                     (assoc-in [:viewer :file :id] file-id))
+        threads  [{:id (uuid/custom 8 1) :page-id page-id}
+                  {:id (uuid/custom 8 2) :page-id other-page-id}]
+        answers  [(rx/subject) (rx/subject)]
+        asked    (atom -1)
+        state*   (atom state)]
+    (await
+     (mock/with-mocks*
+       {rp/cmd! (mock/stub (fn [& _] (->> (nth answers (swap! asked inc)) (rx/observe-on :async))))}
+       (let [left  (async/observe (ptk/watch (dv/fetch-comment-threads {:file-id file-id :page-id page-id}) state nil)
+                                  :on-next #(swap! state* %))
+             shown (async/observe (ptk/watch (dv/fetch-comment-threads {:file-id file-id :page-id other-page-id}) state nil)
+                                  :on-next #(swap! state* %))
+             [left-answer shown-answer] answers]
+         ;; the page shown answers first, the page left last
+         (rx/push! shown-answer threads)
+         (rx/end! shown-answer)
+         (await shown)
+         (rx/push! left-answer threads)
+         (rx/end! left-answer)
+         (await left))))
+    (t/is (= #{(uuid/custom 8 2)} (set (keys (:comment-threads @state*))))
+          "the threads of the page shown stay")))
 
 (t/deftest a-share-link-opens-the-canvas-of-a-phone
   (let [query  (assoc page-query :share-id "s" :index "0")
