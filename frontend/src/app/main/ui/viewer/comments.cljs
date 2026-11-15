@@ -337,12 +337,13 @@
 
 (mf/defc comments-sidebar*
   "The list of the comment threads of `frame`, or of all those of the
-  page without one (the canvas of a phone)."
-  [{:keys [profiles frame page]}]
+  page without one, or of `threads` (the canvas of a phone, those it
+  shows)."
+  [{:keys [profiles frame page threads]}]
   (let [profile     (mf/deref refs/profile)
         local       (mf/deref refs/comments-local)
         threads-map (mf/deref refs/comment-threads)
-        threads     (cond->> (dcm/apply-filters local profile (vals threads-map))
+        threads     (cond->> (dcm/apply-filters local profile (or threads (vals threads-map)))
                       (some? frame)
                       (filter (fn [{:keys [position]}]
                                 (gsh/has-point? frame position))))]

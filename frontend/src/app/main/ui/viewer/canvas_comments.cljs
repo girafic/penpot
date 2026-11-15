@@ -67,6 +67,20 @@
   [point]
   #js {"--anchor-x" (:x point) "--anchor-y" (:y point)})
 
+(defn- use-canvas-threads
+  "The comment threads of `page` the canvas of `objects` (see
+  `dvc/canvas-objects`) shows, at their stored positions (see
+  `dvc/canvas-threads`)."
+  [page objects]
+  (let [page-id       (:id page)
+        positions-ref (mf/with-memo [page-id]
+                        (-> (l/in [:pages page-id :comment-thread-positions])
+                            (l/derived refs/viewer-data)))
+        positions     (mf/deref positions-ref)
+        threads-map   (mf/deref refs/comment-threads)]
+    (mf/with-memo [threads-map positions objects]
+      (dvc/canvas-threads (vals threads-map) positions objects))))
+
 (mf/defc canvas-bubble*
   "The bubble of `thread` on the canvas of `objects` at `zoom`, in its
   anchor at `anchor` (the middle of its group spread out, else its
@@ -105,21 +119,14 @@
   [{:keys [page objects zoom size view-of]}]
   (let [profile     (mf/deref refs/profile)
         local       (mf/deref refs/comments-local)
-        threads-map (mf/deref refs/comment-threads)
         can-edit?   (mf/deref refs/viewer-can-edit?)
         page-id     (:id page)
-
-        positions-ref (mf/with-memo [page-id]
-                        (-> (l/in [:pages page-id :comment-thread-positions])
-                            (l/derived refs/viewer-data)))
-        positions     (mf/deref positions-ref)
 
         ;; only the filters of the comments, not a keystroke in a draft,
         ;; gather the bubbles again
         mode        (:mode local)
         show        (:show local)
-        all         (mf/with-memo [threads-map positions objects]
-                      (dvc/canvas-threads (vals threads-map) positions objects))
+        all         (use-canvas-threads page objects)
         threads     (mf/with-memo [all mode show profile]
                       (dcm/apply-filters {:mode mode :show show} profile all))
         groups      (mf/with-memo [threads zoom]
@@ -252,9 +259,13 @@
 
 (mf/defc canvas-comments-list*
   "The list of the comment threads of `page` on its canvas, once its sheet
-  opens it (see `app.main.ui.viewer.phone-sheet`), as a sheet: a tap on
-  one closes it and opens the thread (see `canvas-comments*`)."
+  opens it (see `app.main.ui.viewer.phone-sheet`), as a sheet: those the
+  canvas shows (none on a board hidden in view mode); a tap on one closes
+  it and opens the thread (see `canvas-comments*`)."
   [{:keys [users page]}]
-  (let [local (mf/deref refs/comments-local)]
+  (let [local   (mf/deref refs/comments-local)
+        objects (mf/with-memo [page]
+                  (dvc/canvas-objects (:objects page)))
+        threads (use-canvas-threads page objects)]
     (when (and (true? (:canvas-shown? local)) (true? (:show-sidebar? local)))
-      [:> vcm/comments-sidebar* {:profiles users :page page}])))
+      [:> vcm/comments-sidebar* {:profiles users :page page :threads threads}])))

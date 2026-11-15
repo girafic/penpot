@@ -33,12 +33,21 @@
 (def ^:private board-id (uuid/custom 2 1))
 (def ^:private me (uuid/custom 3 1))
 
+(def ^:private hidden-id (uuid/custom 2 2))
+
+(defn- board
+  [id x & {:as attrs}]
+  (let [rect (grc/make-rect x 0 100 100)]
+    (merge {:id id :type :frame :parent-id uuid/zero :frame-id uuid/zero
+            :x x :y 0 :width 100 :height 100
+            :selrect rect :points (grc/rect->points rect)}
+           attrs)))
+
 (def ^:private objects
-  (let [rect (grc/make-rect 0 0 100 100)]
-    {uuid/zero {:id uuid/zero :type :frame :shapes [board-id]}
-     board-id  {:id board-id :type :frame :parent-id uuid/zero :frame-id uuid/zero
-                :x 0 :y 0 :width 100 :height 100
-                :selrect rect :points (grc/rect->points rect)}}))
+  "A board at 0 0, and one beside it hidden in view mode, both 100 px."
+  {uuid/zero {:id uuid/zero :type :frame :shapes [board-id hidden-id]}
+   board-id  (board board-id 0)
+   hidden-id (board hidden-id 300 :hide-in-viewer true)})
 
 (defn- thread
   [n x y & {:as attrs}]
@@ -188,22 +197,86 @@
         "about no board, where it went"))
 
 (defn- posted
-  "What a tap on Post of a comment begun at 50 50, on the board, of the
-  page `draft-page` emits on the canvas of the page `page-id`."
-  [draft-page]
+  "What a tap on Post of a comment begun at `x y` of the page `draft-page`
+  emits on the canvas of the page `page-id`: `{:types [...] :created
+  params}`, the params of the thread it creates."
+  [draft-page x y]
   (let [post! (fn [document window _]
                 (some->> (js/Array.from (.querySelectorAll document "button"))
                          (some #(when (= (tr "labels.post") (.-textContent %)) %))
                          (thd/click! window)))
-        draft {:position (gpt/point 50 50) :page-id draft-page :file-id (uuid/custom 5 1)
+        draft {:position (gpt/point x y) :page-id draft-page :file-id (uuid/custom 5 1)
                :content "Hi"}]
-    (mapv ptk/type (:emitted (rendered [] {:draft draft} 1 post!)))))
+    (with-redefs [dcm/create-thread-on-viewer
+                  (fn [params]
+                    (ptk/reify ::dcm/create-thread-on-viewer
+                      IDeref
+                      (-deref [_] params)))]
+      (let [emitted (:emitted (rendered [] {:draft draft} 1 post!))]
+        {:types   (mapv ptk/type emitted)
+         :created (some #(when (= ::dcm/create-thread-on-viewer (ptk/type %)) @%) emitted)}))))
 
-(t/deftest a-comment-begun-on-another-page-goes
-  (t/is (= [::dcm/create-thread-on-viewer ::dcm/close-comment-thread] (posted page-id))
-        "about the board under it")
-  (t/is (= [::dcm/close-comment-thread] (posted (uuid/custom 1 2)))
+(t/deftest a-comment-begun-goes-to-the-board-under-it
+  (let [{:keys [types created]} (posted page-id 50 50)]
+    (t/is (= [::dcm/create-thread-on-viewer ::dcm/close-comment-thread] types))
+    (t/is (= {:page-id page-id :file-id (uuid/custom 5 1) :position (gpt/point 50 50)
+              :content "Hi" :frame-id board-id}
+             created)
+          "about the board under it, on the page it was begun on"))
+  (t/is (= [::dcm/close-comment-thread] (:types (posted page-id 150 50)))
+        "beside the boards: it goes, posted nowhere")
+  (t/is (= [::dcm/close-comment-thread] (:types (posted (uuid/custom 1 2) 50 50)))
         "begun on another page: it goes, posted nowhere"))
+
+(defn- held
+  "What a finger held at `x y` of the canvas emits."
+  [x y]
+  (let [out (atom [])]
+    (with-redefs [st/emit! (emit-into out)]
+      (cvc/start-draft! objects page-id (uuid/custom 5 1) (gpt/point x y)))
+    @out))
+
+(t/deftest a-finger-held-on-a-board-begins-a-comment
+  (let [[shown closed draft :as events] (held 50 50)]
+    (t/is (= [::dcm/update-options ::dcm/close-comment-thread ::dcm/create-draft] (map ptk/type events)))
+    (t/is (= {:canvas-shown? true} (:comments-local (ptk/update shown {}))) "the comments shown")
+    (t/is (= ::dcm/close-comment-thread (ptk/type closed)) "the thread open closed")
+    (t/is (= (gpt/point 50 50) (get-in (ptk/update draft {}) [:comments-local :draft :position]))
+          "where the finger held"))
+  (t/is (empty? (held 150 50)) "beside the boards, none"))
+
+(defn- listed
+  "The threads of `threads` the list of the canvas shows (`#seqn`), and
+  what a tap on the first one emits."
+  [threads]
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [emitted (atom [])]
+        (with-redefs [st/emit!             (emit-into emitted)
+                      refs/profile         (l/atom {:id me})
+                      refs/profiles        (l/atom {})
+                      refs/comment-threads (l/atom (into {} (map (juxt :id identity)) threads))
+                      refs/comments-local  (l/atom {:canvas-shown? true :show-sidebar? true})
+                      refs/viewer-data     (l/atom {:pages {page-id {:comment-thread-positions {}}}})]
+          (thd/render! root (mf/element cvc/canvas-comments-list*
+                                        #js {:users {} :page {:id page-id :objects objects}}))
+          (let [items (js/Array.from (.querySelectorAll document "[class*=location-text]"))
+                shown (mapv #(re-find #"#\d+" (.-textContent %)) items)]
+            (some->> (first items) (thd/click! window))
+            {:shown shown :emitted (mapv ptk/type @emitted)}))))))
+
+(t/deftest the-list-shows-what-the-canvas-shows
+  (let [{:keys [shown emitted]} (listed [(thread 1 10 20) (thread 2 310 20 :frame-id hidden-id)])]
+    (t/is (= ["#1"] shown) "none on a board hidden in view mode")
+    (t/is (= [::dcm/open-comment-thread] emitted) "a tap opens the thread")))
+
+(t/deftest a-thread-opened-from-the-list-closes-it
+  (let [open!  (fn [_ _ local*]
+                 (thd/act #(swap! local* assoc :open (uuid/custom 4 1))))
+        closes (->> (:emitted (rendered [(thread 1 10 20)] {:canvas-shown? true :show-sidebar? true} 1 open!))
+                    (filter #(= ::dcm/update-options (ptk/type %)))
+                    (map #(:comments-local (ptk/update % {}))))]
+    (t/is (= [{:show-sidebar? false}] closes))))
 
 (defn- tapped-time
   "What opens as the timestamp of 2.5 s in the text of the open thread at
