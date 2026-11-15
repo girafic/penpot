@@ -19,6 +19,7 @@
    [app.main.data.workspace.comments :as dwcm]
    [app.main.refs :as refs]
    [app.main.store :as st]
+   [app.main.ui.comments :as cmt]
    [app.main.ui.viewer.canvas-comments :as cvc]
    [app.util.i18n :refer [tr]]
    [cljs.test :as t :include-macros true]
@@ -45,7 +46,7 @@
           :file-id (uuid/custom 5 1) :project-id (uuid/custom 5 2) :file-name "File"
           :owner-id me :participants #{me} :position (gpt/point x y)
           :content "" :created-at (ct/now) :modified-at (ct/now)
-          :count-unread-comments 0}
+          :count-unread-comments 0 :is-resolved false}
          attrs))
 
 (defn- emit-into
@@ -76,7 +77,7 @@
                       refs/viewer-data     (l/atom {:pages {page-id {:comment-thread-positions {}}}})
                       refs/viewer-can-edit? (l/atom false)]
           (thd/render! root (mf/element cvc/canvas-comments*
-                                        #js {:page {:id page-id}
+                                        #js {:page {:id page-id :frames [{:id board-id}]}
                                              :objects objects
                                              :zoom zoom
                                              :size {:width 375 :height 812}
@@ -203,3 +204,25 @@
         "about the board under it")
   (t/is (= [::dcm/close-comment-thread] (posted (uuid/custom 1 2)))
         "begun on another page: it goes, posted nowhere"))
+
+(defn- tapped-time
+  "What opens as the timestamp of 2.5 s in the text of the open thread at
+  10 20 about `frame-id` is tapped (the deref of `dv/open-thread-moment`),
+  or nil: no timestamp to tap."
+  [frame-id]
+  (let [cid     (uuid/custom 6 1)
+        comment {:id cid :thread-id (uuid/custom 4 1) :owner-id me
+                 :content (str "See " (dcm/timestamp-token 2500 "0:02.5"))
+                 :created-at (ct/now) :modified-at (ct/now)}
+        tap!    (fn [document window _]
+                  (some->> (.querySelector document "[class*=comment-timestamp-button]")
+                           (thd/click! window)))]
+    (with-redefs [cmt/make-comments-ref (fn [_] (l/atom {cid comment}))]
+      (some->> (:emitted (rendered [(thread 1 10 20 :frame-id frame-id)] {:open (uuid/custom 4 1)} 1 tap!))
+               (filter #(= ::dv/open-thread-moment (ptk/type %)))
+               (first)
+               (deref)))))
+
+(t/deftest a-timestamp-in-a-comment-opens-the-prototype-at-it
+  (t/is (= {:thread-id (uuid/custom 4 1) :time 2500} (tapped-time board-id)))
+  (t/is (nil? (tapped-time uuid/zero)) "about no board: a timestamp to read, not to tap"))

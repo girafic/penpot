@@ -129,14 +129,6 @@
         expanded    (:expanded local)
         draft       (:draft local)
 
-        ;; the canvas plays no animation: the moment a thread is about
-        ;; shows in the prototype
-        on-show-time
-        (mf/use-fn
-         (mf/deps open-id threads-map)
-         (fn [_]
-           (when-let [thread (get threads-map open-id)]
-             (st/emit! (dv/open-thread-moment thread)))))
 
         on-draft-cancel
         (mf/use-fn #(st/emit! (dcm/close-thread)))
@@ -157,6 +149,16 @@
              (st/emit! (dcm/close-thread)))))
         ;; open, it stays so as the filters change
         open-thread (some #(when (= open-id (:id %)) %) all)
+
+        ;; the canvas plays no animation: the moment a thread is about,
+        ;; or a timestamp in its text, shows in the prototype, on a board
+        ;; it lists
+        shows-time? (some? (some #(when (= (:frame-id open-thread) (:id %)) %) (:frames page)))
+        on-show-time
+        (mf/use-fn
+         (mf/deps open-thread)
+         (fn [time]
+           (st/emit! (dv/open-thread-moment open-thread time))))
 
         on-bubble-click
         (mf/use-fn
@@ -243,7 +245,7 @@
        [:> cmt/comment-floating-thread*
         {:thread open-thread
          :origin :viewer
-         :on-show-time on-show-time
+         :on-show-time (when shows-time? on-show-time)
          :viewport {:offset-x 0 :offset-y 0 :width (:width size) :height (:height size)}
          :zoom zoom
          :docked true}])]))

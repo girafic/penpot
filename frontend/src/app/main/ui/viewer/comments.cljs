@@ -242,7 +242,9 @@
            (st/emit! (dv/show-moment frame-id time))))
 
         open-thread  (get threads-map open-thread-id)
-        open-time    (:animation-time open-thread)
+        ;; a timestamp in its text tapped on the canvas of a phone, else
+        ;; the moment it is about
+        moment       (or (:moment local) (:animation-time open-thread))
 
         on-draft-cancel
         (mf/use-fn #(st/emit! (dcm/close-thread)))
@@ -261,9 +263,9 @@
 
     ;; Opening a thread about a moment of the animation shows the board at
     ;; that moment.
-    (mf/with-effect [open-thread-id open-time]
-      (when (and (some? open-time) (= (:frame-id open-thread) frame-id))
-        (st/emit! (dv/show-moment frame-id open-time))))
+    (mf/with-effect [open-thread-id moment]
+      (when (and (some? moment) (= (:frame-id open-thread) frame-id))
+        (st/emit! (dv/show-moment frame-id moment))))
 
     [:div {:class (stl/css :comments-section)
            :on-click on-click}

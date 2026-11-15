@@ -1268,17 +1268,28 @@
 (defn open-thread-moment
   "The board `thread` is about in the prototype, its Comments section,
   the thread open: there the view mode shows the board paused at the
-  moment of the animation the thread is about (see `comments-layer`).
-  From the canvas of a phone, which plays no animation, off it."
-  [{:keys [frame-id] :as thread}]
-  (ptk/reify ::open-thread-moment
-    ptk/WatchEvent
-    (watch [_ state _]
-      (when-let [index (d/index-of-pred (:frames (shown-page state)) #(= frame-id (:id %)))]
-        (rx/of (rt/nav :viewer (-> (dvc/board-params (rt/get-params state) index)
-                                   (assoc :section :comments)))
-               (-> (dcmt/open-thread thread)
-                   (with-meta {::ev/origin "viewer"})))))))
+  moment of the animation the thread is about (see `comments-layer`), or
+  at `time` (ms), a timestamp in its text, which the thread keeps while
+  it is open (`:moment` of the comments). From the canvas of a phone,
+  which plays no animation, off it. It holds `{:thread-id :time}`."
+  ([thread]
+   (open-thread-moment thread nil))
+  ([{:keys [id frame-id] :as thread} time]
+   (ptk/reify ::open-thread-moment
+     IDeref
+     (-deref [_] {:thread-id id :time time})
+
+     ptk/WatchEvent
+     (watch [_ state _]
+       (when-let [index (d/index-of-pred (:frames (shown-page state)) #(= frame-id (:id %)))]
+         (rx/from
+          (cond-> [(rt/nav :viewer (-> (dvc/board-params (rt/get-params state) index)
+                                       (assoc :section :comments)))
+                   (-> (dcmt/open-thread thread)
+                       (with-meta {::ev/origin "viewer"}))]
+            ;; after the thread opens, which clears it
+            (some? time)
+            (conj (dcmt/update-options {:moment time})))))))))
 
 (declare pause-timeline)
 

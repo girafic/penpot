@@ -260,7 +260,19 @@
     (t/is (= [:app.main.router/navigate ::dcm/open-comment-thread] (map ptk/type events))
           "the thread open there, which shows the board at its moment")
     (t/is (empty? (watch-events (dv/open-thread-moment (assoc thread :frame-id (uuid/custom 9 9))) state))
-          "about no board of the page: nowhere")))
+          "about no board of the page: nowhere")
+    (t/is (= {:thread-id (:id thread) :time nil} @(dv/open-thread-moment thread)))
+    (t/testing "at a timestamp in its text"
+      (let [at                (dv/open-thread-moment thread 2500)
+            [_ _ moment :as all] (watch-events at state)]
+        (t/is (= [:app.main.router/navigate ::dcm/open-comment-thread ::dcm/update-options] (map ptk/type all))
+              "the thread open there keeps that moment")
+        (t/is (= {:comments-local {:moment 2500}} (ptk/update moment {})))
+        (t/is (= {:thread-id (:id thread) :time 2500} @at))))
+    (t/testing "the moment goes with the thread"
+      (let [local {:comments-local {:open (:id thread) :moment 2500}}]
+        (t/is (not (contains? (:comments-local (ptk/update (dcm/close-thread) local)) :moment)))
+        (t/is (not (contains? (:comments-local (ptk/update (dcm/open-thread thread) local)) :moment)))))))
 
 (t/deftest the-canvas-comes-back-from-a-board
   (let [state (viewer-state (assoc page-query :canvas "false" :index "1" :frame-id "x"))

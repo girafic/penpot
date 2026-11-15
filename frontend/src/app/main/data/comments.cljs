@@ -545,7 +545,9 @@
       (-> state
           (update :comments-local assoc :open id)
           (update :comments-local assoc :options nil)
-          (update :comments-local dissoc :draft :expanded)))))
+          ;; the moment of another thread shown (see
+          ;; `app.main.data.viewer/open-thread-moment`) goes too
+          (update :comments-local dissoc :draft :expanded :moment)))))
 
 (defn close-thread
   []
@@ -553,7 +555,7 @@
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (update :comments-local dissoc :open :draft :options :expanded)))))
+          (update :comments-local dissoc :open :draft :options :expanded :moment)))))
 
 (defn expand-comment-group
   "Temporarily mark a proximity cluster of threads as expanded so its bubbles
