@@ -581,6 +581,36 @@
         [:span {:class (stl/css :divider)}]
         timeline])]))
 
+(defn use-hold-hint
+  "The note of how the sheet of a phone opens (see `hold-hint*`): whether
+  it shows, `[hint? hide! open-sheet! toggle-sheet!]`. It shows each time
+  the prototype shows, again after the canvas (`canvas?`), until it goes
+  (`hide!`) or the sheet `sheet*` opens: by two fingers (`open-sheet!`)
+  or by its key (`toggle-sheet!`, Alt+O on a desktop, which closes it
+  too), both alike. The fns stay the same from render to render."
+  [canvas? sheet*]
+  (let [hint* (mf/use-state true)
+        ;; no deps: a state given before swaps as the one of now does
+        hide!
+        (mf/use-fn #(reset! hint* false))
+
+        open-sheet!
+        (mf/use-fn (fn []
+                     (reset! hint* false)
+                     (reset! sheet* true)))
+
+        toggle-sheet!
+        (mf/use-fn (fn []
+                     (reset! hint* false)
+                     (swap! sheet* not)))]
+
+    ;; the prototype again, after the canvas: the note again
+    (mf/with-effect [canvas?]
+      (when-not canvas?
+        (reset! hint* true)))
+
+    [(deref hint*) hide! open-sheet! toggle-sheet!]))
+
 (mf/defc hold-hint*
   "At the bottom of a phone, where the sheet comes from, `raised` above
   the controls on the screen: how it opens. It calls `on-hide` after

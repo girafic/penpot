@@ -269,19 +269,24 @@
   min-inline-size: 0;
 }
 
+// how high the controls on the screen are: their 32px buttons and the room
+// above and below them
+$screen-controls-block-size: $sz-40;
+
 // the controls of the prototype on the screen, for one who chose them in
 // the sheet: over the board at the bottom of the screen, clear of its home
-// bar, as a sheet floats there. A finger drags them anywhere on the
-// screen, not the page under them
+// bar, as a sheet floats there, under any sheet that opens (inspect too).
+// A finger drags them anywhere on the screen, not the page under them
 .screen-controls {
   position: fixed;
   inset-inline: 0;
   inset-block-end: calc(env(safe-area-inset-bottom) + var(--sp-l));
-  z-index: deprecated.$z-index-4;
+  z-index: deprecated.$z-index-3;
   display: flex;
   align-items: center;
   gap: var(--sp-xs);
   inline-size: fit-content;
+  min-block-size: $screen-controls-block-size;
   max-inline-size: calc(100% - 2 * var(--sp-l));
   margin-inline: auto;
   padding: var(--sp-xs) var(--sp-xs) var(--sp-xs) var(--sp-m);
@@ -346,10 +351,11 @@
   animation: fade-in 0.2s ease;
 }
 
-// above the controls on the screen, as high as their buttons and the room
-// round them
+// above the controls on the screen
 .raised {
-  inset-block-end: calc(env(safe-area-inset-bottom) + var(--sp-l) + #{px2rem(40)} + var(--sp-s));
+  inset-block-end: calc(
+    env(safe-area-inset-bottom) + var(--sp-l) + #{$screen-controls-block-size} + var(--sp-s)
+  );
 }
 
 @keyframes slide-up {

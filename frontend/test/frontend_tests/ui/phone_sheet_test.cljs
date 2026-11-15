@@ -37,6 +37,42 @@
   (phone-sheet/use-two-finger-hold! true on-hold)
   [:div])
 
+(mf/defc hint-holder*
+  "What `use-hold-hint` gives at `canvas?`, kept in `seen` at each render
+  with the sheet open or not."
+  {::mf/private true}
+  [{:keys [canvas seen]}]
+  (let [sheet* (mf/use-state false)
+        [hint? hide! open-sheet! toggle-sheet!] (phone-sheet/use-hold-hint canvas sheet*)]
+    (swap! seen conj {:hint? hint? :sheet? @sheet* :fns [hide! open-sheet! toggle-sheet!]})
+    [:div]))
+
+(t/deftest the-note-of-the-sheet-shows-each-time-the-prototype-does
+  (thd/with-dom
+    (fn [{:keys [root]}]
+      (let [seen    (atom [])
+            render! #(thd/render! root (mf/element hint-holder* #js {:canvas % :seen seen}))
+            now     #(select-keys (peek @seen) [:hint? :sheet?])
+            call!   (fn [i] (thd/act #((get-in (peek @seen) [:fns i]))))]
+        (render! false)
+        (t/is (= {:hint? true :sheet? false} (now)) "as the prototype shows")
+        (call! 0)
+        (t/is (= {:hint? false :sheet? false} (now)) "gone at a tap or after a while")
+        (render! true)
+        (render! false)
+        (t/is (= {:hint? true :sheet? false} (now)) "the prototype again, after the canvas: again")
+        (call! 1)
+        (t/is (= {:hint? false :sheet? true} (now)) "two fingers open the sheet: it goes")
+        (call! 2)
+        (t/is (= {:hint? false :sheet? false} (now)) "its key closes it: it does not come back")
+        (call! 2)
+        (t/is (= {:hint? false :sheet? true} (now)) "and opens it, as two fingers do")
+        (render! true)
+        (render! false)
+        (call! 2)
+        (t/is (= {:hint? false :sheet? false} (now)) "the note shown, its key hides it too")
+        (t/is (apply = (map :fns @seen)) "the same fns at every render")))))
+
 (defn- touch!
   "The fingers `points` (`[[x y]...]`) `type` on `target`, the window of
   jsdom or a node of it."

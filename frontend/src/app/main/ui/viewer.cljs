@@ -712,14 +712,13 @@
         sheet*      (mf/use-state false)
         sheet?      (deref sheet*)
         ;; how the sheet opens, told each time the prototype shows, until
-        ;; it goes or two fingers open the sheet (see `phone-sheet/hold-hint*`)
-        hint*       (mf/use-state true)
-        hint?       (deref hint*)
+        ;; it goes or the sheet opens (see `phone-sheet/use-hold-hint`)
+        [hint? hide-hint open-sheet! toggle-sheet!]
+        (phone-sheet/use-hold-hint canvas? sheet*)
         ;; the controls of the prototype on the screen too, as chosen in
         ;; the sheet (see `phone-sheet/screen-controls*`)
         controls*   (hooks/use-persisted-state phone-sheet/controls-key false)
         controls?   (true? (deref controls*))
-        hide-hint   (mf/use-fn #(reset! hint* false))
         ;; the controls of the animation of the board, on a phone in the
         ;; sheet and on the screen
         timeline    (when (some? clock)
@@ -1080,13 +1079,8 @@
     ;; two fingers held on a phone open its sheet, and on a desktop that
     ;; plays one Alt+O opens and closes it; what docks at its bottom, a
     ;; comment, stays above its keyboard
-    (phone-sheet/use-two-finger-hold! (and phone? (not canvas?)) #(do (reset! hint* false)
-                                                                      (reset! sheet* true)))
-    ;; the prototype again, after the canvas: the note again
-    (mf/with-effect [canvas?]
-      (when-not canvas?
-        (reset! hint* true)))
-    (phone-sheet/use-sheet-key! (and phone? (not canvas?)) #(swap! sheet* not))
+    (phone-sheet/use-two-finger-hold! (and phone? (not canvas?)) open-sheet!)
+    (phone-sheet/use-sheet-key! (and phone? (not canvas?)) toggle-sheet!)
     (phone-sheet/use-keyboard-inset! phone?)
 
     ;; the canvas has its sheet docked: going to a board or back, none
