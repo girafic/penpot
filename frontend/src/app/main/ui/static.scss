@@ -488,9 +488,25 @@
   padding-block-end: calc(env(safe-area-inset-bottom) + #{px2rem(28)});
 }
 
+// how high the header of the error page of a phone is: its padding and its
+// logo
+$phone-exception-header-block-size: calc(env(safe-area-inset-top) + 2 * var(--sp-xl) + #{$sz-48});
+
 .exception-layout[data-phone="true"] .exception-header {
   padding: calc(env(safe-area-inset-top) + var(--sp-xl)) calc(env(safe-area-inset-right) + var(--sp-xl))
     var(--sp-xl) calc(env(safe-area-inset-left) + var(--sp-xl));
+}
+
+// under the header and the login, which stay where they are, an opaque band
+// as high as the header: the messages scroll behind it, not through the
+// logo. Not sticky: in the flow, a header would push the messages down
+.exception-layout[data-phone="true"]::before {
+  content: "";
+  position: fixed;
+  inset-inline: 0;
+  inset-block-start: 0;
+  block-size: $phone-exception-header-block-size;
+  background-color: var(--color-background-secondary);
 }
 
 .exception-layout[data-phone="true"] .login-header {
