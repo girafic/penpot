@@ -10,6 +10,7 @@
   (:require
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.time :as ct]
    [app.common.uuid :as uuid]
@@ -585,9 +586,9 @@
         page {:objects page-objects
               :timelines {strip  {:board-id strip :tracks [{:id (uuid/custom 9 1)}]}
                           screen {:board-id screen :tracks [] :audio-clips []}}}]
-    (t/is (true? (dv/animated-board? page {} strip)) "its own timeline plays")
-    (t/is (false? (dv/animated-board? page {} screen)) "an empty timeline plays nothing")
-    (t/is (false? (dv/animated-board? page {} tall)) "no timeline")))
+    (t/is (true? (cltl/animated-board? page {} strip)) "its own timeline plays")
+    (t/is (false? (cltl/animated-board? page {} screen)) "an empty timeline plays nothing")
+    (t/is (false? (cltl/animated-board? page {} tall)) "no timeline")))
 
 ;; --- The color behind it
 

@@ -850,6 +850,17 @@
        :clj
        (make))))
 
+(defn animated-board?
+  "Whether the board `board-id` of `page` plays an animation: its own
+  timeline animates something or plays a sound (see
+  `cta/timeline-empty?`), or component copies in it play the animation
+  of their mains (see `copy-timelines`). `files` holds the files of the
+  components, by id. The view mode and the workspace mark such a board."
+  [page files board-id]
+  (let [own (dm/get-in page [:timelines board-id])]
+    (boolean (or (and (some? own) (not (cta/timeline-empty? own)))
+                 (seq (copy-timelines (:objects page) (:timelines page) files board-id))))))
+
 (defn guide-ids
   "The helper layers of the board `board-id` of `page`, as goal rings (see
   `cta/guide?`), which no export nor code shows: of its own timeline and

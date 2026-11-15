@@ -20,6 +20,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
@@ -431,7 +432,7 @@
         animated   (mf/with-memo [page files boards]
                      (into #{}
                            (comp (map :id)
-                                 (filter #(dv/animated-board? page files %)))
+                                 (filter #(cltl/animated-board? page files %)))
                            boards))
         bounds     (mf/with-memo [objects] (dvc/content-bounds objects))
         width      (:width size 0)

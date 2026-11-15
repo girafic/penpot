@@ -397,6 +397,24 @@
          (t/is (= [2000] (mapv :duration (vals (cltl/copy-timelines objects timelines slower board))))
                "and files where their main plays otherwise, as it plays now")))))
 
+(t/deftest which-boards-play-an-animation
+  (let [file  (component-file)
+        page  (thf/current-page file)
+        files {(:id file) file}
+        main  (thi/id :main)
+        board (thi/id :board-b)
+        clips (ctau/add-audio-clip (cta/make-timeline {:board-id board})
+                                   {:audio-id (uuid/next) :name "ding.wav"
+                                    :source-duration 1000 :duration 1000})]
+    (t/is (true? (cltl/animated-board? page files main)) "its own timeline")
+    (t/is (true? (cltl/animated-board? page files board)) "a copy of an animated main in it")
+    (t/is (false? (cltl/animated-board? page {} board)) "without the file of the component, none")
+    (t/is (false? (cltl/animated-board? (update-in page [:timelines main] assoc :tracks {}) files main))
+          "an empty timeline")
+    (t/is (false? (cltl/animated-board? page files (uuid/next))) "no timeline")
+    (t/is (true? (cltl/animated-board? (assoc-in page [:timelines board] clips) {} board))
+          "audio clips only")))
+
 (t/deftest a-copy-plays-on-the-clock-its-board-gives-it
   ;; as a precomposition: from 500 ms on, at twice its pace
   (let [{:keys [objects board copy copy-rect main-page]} (component-scene)

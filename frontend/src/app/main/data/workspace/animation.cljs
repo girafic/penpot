@@ -134,29 +134,14 @@
                              (dsh/lookup-libraries state) board-id))
       {})))
 
-(defn- plays-animation?
-  [objects timelines main-page board-id]
-  (let [timeline (get timelines board-id)]
-    (boolean (or (and (some? timeline) (not (cta/timeline-empty? timeline)))
-                 (seq (cltl/instance-timelines objects board-id timeline main-page))))))
-
 (defn animated-board-ids
   "Ids of the boards of `page` that play an animation: their own, or the
-  one of component copies in them (see `shown-timelines`); `files` holds
-  the files of the components, by id."
+  one of component copies in them (see `cltl/animated-board?`); `files`
+  holds the files of the components, by id."
   [page files]
-  (let [objects   (:objects page)
-        timelines (:timelines page)
-        main-page (cltl/main-page-of files)]
-    (into #{}
-          (filter (partial plays-animation? objects timelines main-page))
-          (ctst/get-root-frames-ids objects))))
-
-(defn animated-board?
-  "Whether the board `board-id` of `page` plays an animation (see
-  `animated-board-ids`)."
-  [page files board-id]
-  (plays-animation? (:objects page) (:timelines page) (cltl/main-page-of files) board-id))
+  (into #{}
+        (filter #(cltl/animated-board? page files %))
+        (ctst/get-root-frames-ids (:objects page))))
 
 (defn board-timeline
   "The timeline of `board` or, while the board has none, a new empty one

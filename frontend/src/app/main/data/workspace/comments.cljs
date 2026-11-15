@@ -14,6 +14,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.timelines :as cltl]
    [app.common.schema :as sm]
    [app.common.types.shape-tree :as ctst]
    [app.main.data.changes :as dwc]
@@ -112,7 +113,7 @@
           board-id (cfh/get-shape-id-root-frame objects frame-id)]
       (when (and (some? board-id)
                  (= board-id (dwa/active-board-id state))
-                 (dwa/animated-board? page (dsh/lookup-libraries state) board-id))
+                 (cltl/animated-board? page (dsh/lookup-libraries state) board-id))
         (dwa/playhead state)))))
 
 ;; Event responsible of the what should be executed when user clicked
