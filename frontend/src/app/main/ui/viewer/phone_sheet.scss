@@ -332,14 +332,15 @@ $screen-controls-block-size: $sz-40;
 }
 
 // how the sheet opens, each time the prototype shows: at the bottom, where
-// it comes from, legible over whatever the board shows there
+// it comes from, legible over whatever the board shows there, under any
+// sheet that opens (inspect too), as the controls on the screen
 .hint {
   @include use-typography("body-medium");
 
   position: fixed;
   inset-inline: 0;
   inset-block-end: calc(env(safe-area-inset-bottom) + var(--sp-xxl));
-  z-index: deprecated.$z-index-4;
+  z-index: deprecated.$z-index-3;
   inline-size: fit-content;
   max-inline-size: calc(100% - 2 * var(--sp-xxl));
   margin-inline: auto;
