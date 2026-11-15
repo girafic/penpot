@@ -445,17 +445,14 @@
 // team, as high as the header of the page
 $phone-dropdown-top: calc(var(--sp-s) + #{$sz-48} + var(--sp-xs));
 
-// the room the pages of a phone leave at their bottom for the bar Safari
-// floats there on iOS 26 (the default of `phone-safe-padding`)
-$phone-bottom-bar-room: px2rem(96);
-
 // as high as its teams: the floor of a computer left a phone with one team
 // a dropdown mostly empty. Its height is `auto` (what it holds), not
 // `fit-content`: the switch it hangs from is lower than where it starts,
 // and Safari on iOS takes a fit-content height from the room left there
 // (none), which gave the smallest the dropdown can be, its teams scrolled
 // away to nothing and its actions cut off. A long one ends above the bar
-// Safari floats over the bottom of the screen on iOS 26
+// Safari floats over the bottom of the screen on iOS 26, as the pages do
+// (`$phone-bottom-bar-room`)
 [data-phone="true"] .organization-team-dropdown {
   top: $phone-dropdown-top;
   block-size: auto;

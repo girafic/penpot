@@ -63,7 +63,8 @@
   grid-row: 1;
   grid-column: 1;
   min-inline-size: 0;
-  padding: 0 env(safe-area-inset-right) calc(env(safe-area-inset-bottom) + #{px2rem(96)}) env(safe-area-inset-left);
+  padding: 0 env(safe-area-inset-right) calc(env(safe-area-inset-bottom) + #{$phone-bottom-bar-room})
+    env(safe-area-inset-left);
 }
 
 // as high as what it holds, the page scrolling it
