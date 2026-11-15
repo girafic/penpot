@@ -1127,6 +1127,9 @@
                                    :docked docked
                                    :left (and (not docked) (= (:h-dir pos) :left))
                                    :top (and (not docked) (= (:v-dir pos) :top)))
+              ;; docked, the canvas of a phone gives its field the focus
+              ;; as the finger that began it lifts
+              :data-draft-field (when docked true)
               ;; a map literal: rumext passes only these to React as styles
               :style {:top (when-not docked (str pos-y "px"))
                       :left (when-not docked (str pos-x "px"))}

@@ -11,10 +11,13 @@
   `app.main.data.viewer.canvas`). A finger moves it, coasting on and
   giving as rubber past its edges as the screen of a board does (see
   `app.main.ui.viewer.drag-scroll`), two fingers zoom it about their
-  middle, a double tap zooms to a board and back, a tap alone does
-  nothing (the switch of the sheet goes to the prototype); a wheel moves
-  it and zooms it with ctrl, as a trackpad does. Its boards show as designed, their names over them:
-  their animations play in the prototype."
+  middle, a double tap zooms to a board and back; a wheel moves it and
+  zooms it with ctrl, as a trackpad does. Its boards show as designed,
+  their names over them: their animations play in the prototype (the
+  switch of the sheet goes there). Once the sheet shows the comments (see
+  `app.main.ui.viewer.canvas-comments`), a tap alone closes the thread
+  open, or the one begun, or gathers a group of bubbles spread out, and
+  a finger held on a board begins a comment there."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
@@ -23,6 +26,7 @@
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.uuid :as uuid]
+   [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.canvas :as dvc]
    [app.main.render-viewer-wasm :as rwv]
@@ -479,7 +483,7 @@
 
     (mf/set-ref-val! live-ref {:page page :bounds bounds :objects objects :render! render!
                                :on-rest on-rest
-                               :on-tap cvc/close-on-tap!
+                               :on-tap #(st/emit! (dcm/close-on-tap))
                                :on-hold on-hold
                                :on-held cvc/focus-draft!})
 

@@ -25,18 +25,6 @@
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
-(defn close-on-tap!
-  "What a tap on the canvas does to the comments: it collapses a group
-  spread out, or closes the thread open or begun."
-  []
-  (let [local (:comments-local @st/state)]
-    (cond
-      (some? (:expanded local))
-      (st/emit! (dcm/collapse-comment-group))
-
-      (or (some? (:open local)) (some? (:draft local)))
-      (st/emit! (dcm/close-thread)))))
-
 (defn start-draft!
   "Begin a comment at the `point` of the page `page-id` of the file
   `file-id`, held on its canvas of `objects`, about the top-level board
@@ -49,13 +37,19 @@
               (dcm/create-draft {:position point :page-id page-id :file-id file-id}))))
 
 (def ^:private draft-field
-  "[class*=floating-thread-draft-inner-wrapper] [contenteditable=true]")
+  "The field of a comment begun, docked (see
+  `cmt/comment-floating-thread-draft*`)."
+  "[data-draft-field] [contenteditable=true]")
 
 (defn focus-draft!
   "Give the field of a comment begun the focus, in the gesture of the
-  finger that lifts: only then does iOS open its keyboard."
+  finger that lifts: only then does iOS open its keyboard. A field that
+  has it already loses it first, as a focus it has changes nothing."
   []
-  (some-> (.querySelector js/document draft-field) (.focus)))
+  (when-let [^js field (.querySelector js/document draft-field)]
+    (when (identical? field (.-activeElement js/document))
+      (.blur field))
+    (.focus field)))
 
 (defn- anchored
   "The modifier that draws a bubble at `point` of the page in its anchor

@@ -299,3 +299,33 @@
 (t/deftest a-timestamp-in-a-comment-opens-the-prototype-at-it
   (t/is (= {:thread-id (uuid/custom 4 1) :time 2500} (tapped-time board-id)))
   (t/is (nil? (tapped-time uuid/zero)) "about no board: a timestamp to read, not to tap"))
+
+(t/deftest a-tap-on-the-canvas-closes-what-the-comments-opened
+  (let [tapped #(:comments-local (ptk/update (dcm/close-on-tap) {:comments-local %}))]
+    (t/is (= {:open 2} (tapped {:expanded #{1} :open 2})) "a group spread out gathers first")
+    (t/is (= {:mode :yours} (tapped {:open 1 :moment 2500 :options 3 :mode :yours}))
+          "the thread open closes, its moment too")
+    (t/is (= {} (tapped {:draft {:content "a"}})) "a comment begun goes")
+    (t/is (= {:mode :yours} (tapped {:mode :yours})) "nothing open: as it is")))
+
+(t/deftest the-field-of-a-comment-begun-takes-the-focus
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (with-redefs [refs/team    (l/atom {:members []})
+                    refs/profile (l/atom {:id me})]
+        (thd/render! root (mf/element cmt/comment-floating-thread-draft*
+                                      #js {:draft {:position (gpt/point 10 20) :content ""}
+                                           :zoom 1
+                                           :docked true
+                                           :onCancel (fn [])
+                                           :onSubmit (fn [_])}))
+        (let [field  (.querySelector document "[contenteditable=true]")
+              focus* (atom 0)]
+          ;; jsdom gives the focus to what a tab reaches only
+          (.setAttribute field "tabindex" "0")
+          (.addEventListener field "focus" #(swap! focus* inc))
+          (cvc/focus-draft!)
+          (t/is (identical? field (.-activeElement document)) "found by the data attribute of its wrapper")
+          (cvc/focus-draft!)
+          (t/is (= 2 @focus*) "focused again, which iOS sees")
+          (t/is (identical? field (.-activeElement document))))))))

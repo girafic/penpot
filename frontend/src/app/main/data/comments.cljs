@@ -581,6 +581,25 @@
   [can-edit? profile thread]
   (or (true? can-edit?) (= (:owner-id thread) (:id profile))))
 
+(defn close-on-tap
+  "What a tap on the canvas of a phone does to the comments: it collapses
+  a group spread out; else it closes the thread open, or the one begun,
+  as `close-thread` does; else nothing."
+  []
+  (ptk/reify ::close-on-tap
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [{:keys [expanded open draft]} (:comments-local state)]
+        (cond
+          (some? expanded)
+          (ptk/update (collapse-comment-group) state)
+
+          (or (some? open) (some? draft))
+          (ptk/update (close-thread) state)
+
+          :else
+          state)))))
+
 (defn toggle-thread-on-viewer
   "What a click on the bubble of `thread` in the view mode does, the
   thread of `open-id` open: it closes that thread, else opens this one."
