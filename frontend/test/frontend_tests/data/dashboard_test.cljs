@@ -203,3 +203,15 @@
     (with-redefs [touch/phone? (constantly true)]
       (t/is (nil? (dd/open-created-file file))
             "a phone only shows the file among the others"))))
+
+(t/deftest ^:async a-new-file-opens-at-its-first-page
+  (let [file-id (uuid/next)
+        page-id (uuid/next)
+        event   (with-redefs [touch/phone? (constantly false)]
+                  (dd/open-created-file {:id file-id :data {:pages [page-id]}}))
+        navs    (atom [])]
+    (await (async/observe (ptk/watch event {:current-team-id (uuid/next)} (rx/subject))
+                          :on-next #(swap! navs conj %)))
+    (t/is (= [:app.main.router/navigate] (map ptk/type @navs)))
+    (t/is (= file-id (-> @navs first deref :params :file-id)))
+    (t/is (= page-id (-> @navs first deref :params :page-id)) "its first page")))

@@ -98,6 +98,8 @@
 
   (let [is-lib-page?     (= :libraries origin)
         is-search-page?  (= :search origin)
+        ;; what one does to a file of one's own, not from a search
+        own-actions?     (and (not is-search-page?) can-edit)
 
         file             (first files)
         file-count       (count files)
@@ -298,25 +300,24 @@
          [:> menu-item* {:id "file-open-new-tab" :on-action on-new-tab}
           (tr "dashboard.open-in-new-tab")])
 
-       (when (and (not is-search-page?) can-edit)
+       (when own-actions?
          [:> menu-item* {:id "file-rename" :on-action on-edit}
           (tr "labels.rename")])
 
-       (when (and (not is-search-page?) can-edit)
+       (when own-actions?
          [:> menu-item* {:id "file-duplicate" :on-action on-duplicate}
           (tr "dashboard.duplicate")])
 
-       (when (and (not is-lib-page?)
-                  (not is-search-page?)
-                  (or (seq current-projects) (seq other-teams))
-                  can-edit)
+       (when (and own-actions?
+                  (not is-lib-page?)
+                  (or (seq current-projects) (seq other-teams)))
          [:> sub-menu* {:id "file-move-to" :trigger (tr "dashboard.move-to") :variant "drilldown"}
           [:> move-to-items* {:current-projects current-projects
                               :other-teams other-teams
                               :current-team-id current-team-id
                               :on-move on-move}]])
 
-       (when (and (not is-search-page?) can-edit)
+       (when own-actions?
          ;; Same id in both branches: :is-shared can flip while this menu
          ;; instance stays mounted (the on-add-shared/on-del-shared action
          ;; itself changes it), and react-stately's Collection requires an
@@ -328,14 +329,14 @@
            [:> menu-item* {:id "file-shared-toggle" :on-action on-add-shared}
             (tr "dashboard.add-shared")]))
 
-       ;; on a phone, nothing above it when the file is only to read
-       (when (or (not phone?) (and (not is-search-page?) can-edit))
+       ;; on a phone, nothing above it when none of those shows
+       (when (or (not phone?) own-actions?)
          [:> menu-separator*])
 
        [:> menu-item* {:id "download-binary-file" :on-action on-export-binary-files}
         (tr "dashboard.download-binary-file")]
 
-       (when (and (not is-lib-page?) (not is-search-page?) can-edit)
+       (when (and own-actions? (not is-lib-page?))
          [:*
           [:> menu-separator*]
           [:> menu-item* {:id "file-delete" :on-action on-delete}

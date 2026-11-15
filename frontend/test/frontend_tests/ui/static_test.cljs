@@ -6,13 +6,18 @@
 
 (ns frontend-tests.ui.static-test
   (:require
+   [app.common.uuid :as uuid]
+   [app.main.refs :as refs]
+   [app.main.ui :as ui]
    [app.main.ui.context :as ctx]
    [app.main.ui.static :as static]
    [app.util.i18n :refer [tr]]
+   [app.util.theme :as theme]
    [app.util.touch :as touch]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
    [frontend-tests.helpers.mock :as mock]
+   [okulary.core :as l]
    [rumext.v2 :as mf]))
 
 (t/deftest screen-kind-classifies-known-screens
@@ -165,3 +170,39 @@
           "a phone keeps the workspace a desktop page")
     (t/is (= "false" (await (rendered page :auth-verify-token false phone)))
           "a desktop")))
+
+;; --- The viewport tag, set around the page and the exception page
+
+(defn- ^:async viewport-of-exception
+  "The contents the viewport tag gets as Penpot shows an exception page in
+  place of the page of the route named `screen` on a phone, before that
+  page ever showed."
+  [screen]
+  (let [contents (atom [])]
+    (await
+     (mock/with-mocks*
+       {refs/route           (l/atom {:data {:name screen}})
+        refs/exception       (l/atom {:type :not-found})
+        refs/profile         (l/atom {:id (uuid/custom 1 1)})
+        touch/phone?         (constantly true)
+        touch/coarse?        (constantly true)
+        ;; jsdom has no `matchMedia`
+        theme/use-initialize (fn [_])
+        touch/set-viewport!  (fn [content] (swap! contents conj content))}
+       (await
+        (thd/with-dom
+          (fn [{:keys [root window]}]
+            ;; React takes the DOM of jsdom for an old IE's (see `rendered`)
+            (let [proto (.. window -HTMLElement -prototype)]
+              (set! (.-attachEvent proto) (fn []))
+              (set! (.-detachEvent proto) (fn [])))
+            (thd/render! root (mf/element ui/app #js {}))
+            (thd/settle))))))
+    @contents))
+
+(t/deftest ^:async an-exception-page-of-a-phone-has-its-viewport
+  (t/is (= ["width=device-width, initial-scale=1, viewport-fit=cover"]
+           (await (viewport-of-exception :dashboard-recent)))
+        "a page a phone lays out for itself: as wide as the phone")
+  (t/is (= [nil] (await (viewport-of-exception :workspace)))
+        "the workspace: the width of a desktop page"))

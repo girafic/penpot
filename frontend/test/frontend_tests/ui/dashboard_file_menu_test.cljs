@@ -27,9 +27,10 @@
 
 (defn- ^:async open-menu
   "The rows of the open menu of `file` on a phone (`phone?`) or a
-  desktop, for a member who may edit it (`can-edit`) or only read it: the
-  text of each item, a separator as `:separator`."
-  [phone? can-edit]
+  desktop, for a member who may edit it (`can-edit`) or only read it,
+  opened from `origin` (the files of a project by default): the text of
+  each item, a separator as `:separator`."
+  [phone? can-edit & [origin]]
   (let [result (atom nil)]
     (await
      (mock/with-mocks*
@@ -46,7 +47,7 @@
                                           :canEdit can-edit
                                           :navigate true
                                           :onEdit (fn [])
-                                          :origin :files
+                                          :origin (or origin :files)
                                           :canRestore false
                                           :trigger (mf/html
                                                     [:> icon-button* {:icon i/menu
@@ -71,6 +72,11 @@
           "no tabs on a phone")
     (t/is (= (tr "labels.rename") (first rows))
           "the file's own actions come first")))
+
+(t/deftest ^:async a-phone-searching-starts-with-an-item
+  (let [rows (await (open-menu true true :search))]
+    (t/is (= [(tr "dashboard.download-binary-file")] rows)
+          "from a search, none of the file's own actions: no separator above")))
 
 (t/deftest ^:async a-phone-reading-a-file-starts-with-an-item
   (let [rows (await (open-menu true false))]
