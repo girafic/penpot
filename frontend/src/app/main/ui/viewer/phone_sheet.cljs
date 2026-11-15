@@ -429,12 +429,12 @@
   that it holds as the phone turns, the box whole on the screen."
   [rect dx dy screen]
   (let [{:keys [left top width height]} rect
-        sw   (:width screen)
-        sh   (:height screen)
+        sw     (:width screen)
+        sh     (:height screen)
         half-w (/ width 2)
         half-h (/ height 2)
-        cx   (mth/clamp (+ left half-w dx) (+ half-w screen-gap-px) (- sw half-w screen-gap-px))
-        cy   (mth/clamp (+ top half-h dy) (+ half-h screen-gap-px) (- sh half-h screen-gap-px))]
+        cx     (mth/clamp (+ left half-w dx) (+ half-w screen-gap-px) (- sw half-w screen-gap-px))
+        cy     (mth/clamp (+ top half-h dy) (+ half-h screen-gap-px) (- sh half-h screen-gap-px))]
     {:x (/ cx (max 1 sw)) :y (/ cy (max 1 sh))}))
 
 (defn- place-style
@@ -455,15 +455,12 @@
         node-ref (mf/use-ref nil)
         ;; the finger down: where, the box then, whether it drags
         drag-ref (mf/use-ref nil)
-        ;; a drag let go: the click it ends in taps nothing
-        dragged-ref (mf/use-ref false)
 
         on-pointer-down
         (mf/use-fn
          (fn [^js event]
            (let [^js node (mf/ref-val node-ref)
                  rect     (.getBoundingClientRect node)]
-             (mf/set-ref-val! dragged-ref false)
              (mf/set-ref-val! drag-ref {:id (.-pointerId event)
                                         :x0 (.-clientX event)
                                         :y0 (.-clientY event)
@@ -497,28 +494,20 @@
              (when (= id (.-pointerId event))
                (mf/set-ref-val! drag-ref nil)
                (when (and dragging (some? to))
-                 (mf/set-ref-val! dragged-ref true)
-                 (reset! place* to))))))
-
-        on-click-capture
-        (mf/use-fn
-         (fn [^js event]
-           (when (mf/ref-val dragged-ref)
-             (mf/set-ref-val! dragged-ref false)
-             (dom/stop-propagation event)
-             (dom/prevent-default event))))]
+                 ;; the click it may end in taps nothing
+                 (dds/swallow-click!)
+                 (reset! place* to))))))]
 
     [:div {:ref node-ref
            :class (stl/css :screen-controls)
-           :role "toolbar"
+           :role "group"
            :aria-label (tr "viewer.phone.controls")
            :data-placed (some? place)
            :style (when (some? place) (place-style place))
            :on-pointer-down on-pointer-down
            :on-pointer-move on-pointer-move
            :on-pointer-up on-pointer-up
-           :on-pointer-cancel on-pointer-up
-           :on-click-capture on-click-capture}
+           :on-pointer-cancel on-pointer-up}
      [:span {:class (stl/css :counter)} (dm/str (inc index) " / " total)]
      [:> board-nav* {:index index :total total}]
      (when (some? timeline)

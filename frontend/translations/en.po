@@ -6432,12 +6432,12 @@ msgid "viewer.phone.canvas"
 msgstr "Canvas"
 
 #: src/app/main/ui/viewer/phone_sheet.cljs
-msgid "viewer.phone.controls"
-msgstr "Controls of the prototype"
-
-#: src/app/main/ui/viewer/phone_sheet.cljs
 msgid "viewer.phone.comment-hint"
 msgstr "Hold a finger on a board to comment."
+
+#: src/app/main/ui/viewer/phone_sheet.cljs
+msgid "viewer.phone.controls"
+msgstr "Controls of the prototype"
 
 #: src/app/main/ui/viewer/phone_sheet.cljs
 msgid "viewer.phone.hold-hint"
@@ -6452,12 +6452,12 @@ msgid "viewer.phone.prototype"
 msgstr "Prototype"
 
 #: src/app/main/ui/viewer/phone_sheet.cljs
-msgid "viewer.phone.show-controls"
-msgstr "Show the controls on the screen"
-
-#: src/app/main/ui/viewer/phone_sheet.cljs
 msgid "viewer.phone.show-comments"
 msgstr "Show comments (%s)"
+
+#: src/app/main/ui/viewer/phone_sheet.cljs
+msgid "viewer.phone.show-controls"
+msgstr "Show the controls on the screen"
 
 #: src/app/main/ui/viewer/phone_sheet.cljs
 msgid "viewer.phone.whole-page"

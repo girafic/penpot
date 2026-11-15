@@ -491,11 +491,11 @@
           (thd/render! root (mf/element phone-sheet/screen-controls*
                                         #js {:index index :total total
                                              :timeline (when animated? (mf/html [:p "play"]))}))
-          (let [buttons (vec (.querySelectorAll document "[role=toolbar] button"))]
+          (let [buttons (vec (.querySelectorAll document "[role=group] button"))]
             (some->> buttons (filter #(= pick (labelled %))) (first) (thd/click! window))
-            {:counter  (some-> (.querySelector document "[role=toolbar] [class*=counter]") .-textContent)
+            {:counter  (some-> (.querySelector document "[role=group] [class*=counter]") .-textContent)
              :disabled (into #{} (comp (filter #(.-disabled %)) (map labelled)) buttons)
-             :timeline (some? (.querySelector document "[role=toolbar] p"))
+             :timeline (some? (.querySelector document "[role=group] p"))
              :emitted  (mapv ptk/type @emitted)}))))))
 
 (t/deftest the-controls-on-the-screen-go-from-board-to-board
@@ -531,8 +531,8 @@
                                                           #js {:bubbles true :clientX 100 :clientY y}))))]
         (with-redefs [st/emit! (mock/stub (fn [& events] (swap! emitted into events)))]
           (thd/render! root (mf/element phone-sheet/screen-controls* #js {:index 0 :total 3}))
-          (let [bar  (.querySelector document "[role=toolbar]")
-                next (last (.querySelectorAll document "[role=toolbar] button"))]
+          (let [bar  (.querySelector document "[role=group]")
+                next (last (.querySelectorAll document "[role=group] button"))]
             ;; jsdom captures no pointer
             (set! (.-setPointerCapture bar) (fn [_]))
             (fire! next "pointerdown" 700)
@@ -550,3 +550,40 @@
         "a tap trembling a little: the next board")
   (t/is (= {:emitted [] :placed "true" :stays true} (pressed -100))
         "dragged: elsewhere, where they stay, and no board"))
+
+(defn- emit-into
+  "A stand-in for `st/emit!` that collects what it emits in the atom
+  `out`, at each arity the code calls it with."
+  [out]
+  (fn
+    ([] nil)
+    ([event] (swap! out conj event) nil)
+    ([event & events] (swap! out into (cons event events)) nil)))
+
+(t/deftest ^:async a-click-after-a-drag-cancelled-taps
+  (swap! storage/user dissoc ::phone-sheet/controls-place)
+  (let [emitted (atom [])]
+    (await
+     (mock/with-mocks*
+       {st/emit! (emit-into emitted)}
+       (await
+        (thd/with-dom
+          (fn [{:keys [root document window]}]
+            (let [fire! (fn [node type y]
+                          (thd/act #(.dispatchEvent node (new (.-MouseEvent window) type
+                                                              #js {:bubbles true :clientX 100 :clientY y}))))]
+              (thd/render! root (mf/element phone-sheet/screen-controls* #js {:index 0 :total 3}))
+              (let [bar  (.querySelector document "[role=group]")
+                    next (last (.querySelectorAll document "[role=group] button"))]
+                ;; jsdom captures no pointer
+                (set! (.-setPointerCapture bar) (fn [_]))
+                ;; a drag the browser takes over: no click follows
+                (fire! next "pointerdown" 700)
+                (fire! next "pointermove" 600)
+                (fire! next "pointercancel" 600)
+                ;; later, a click with no finger down, as a key gives it
+                (-> (thd/settle)
+                    (.then #(thd/click! window next))))))))))
+    (swap! storage/user dissoc ::phone-sheet/controls-place)
+    (t/is (= [::dv/select-next-frame] (mapv ptk/type @emitted))
+          "the next board: only the click of the drag itself taps nothing")))

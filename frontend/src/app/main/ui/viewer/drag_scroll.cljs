@@ -177,13 +177,16 @@
 (defn swallow-click!
   "Keep the click that follows a drag from anything: it was no tap."
   []
-  (letfn [(swallow [event]
-            (.stopPropagation event)
-            (.preventDefault event)
-            (.removeEventListener js/window "click" swallow true))]
-    (.addEventListener js/window "click" swallow true)
-    ;; the click comes in the same task as the release, or not at all
-    (js/setTimeout #(.removeEventListener js/window "click" swallow true) 0)))
+  ;; the window of now: a test may take the global one away before the
+  ;; timeout runs
+  (let [^js window js/window]
+    (letfn [(swallow [event]
+              (.stopPropagation event)
+              (.preventDefault event)
+              (.removeEventListener window "click" swallow true))]
+      (.addEventListener window "click" swallow true)
+      ;; the click comes in the same task as the release, or not at all
+      (js/setTimeout #(.removeEventListener window "click" swallow true) 0))))
 
 (defn- set-offset!
   "Moves what scrolls in `section` `offset` px down past an end (see the
