@@ -18,6 +18,7 @@
    [app.util.i18n :refer [tr]]
    [app.util.storage :as storage]
    [cljs.test :as t :include-macros true]
+   [cuerdas.core :as str]
    [frontend-tests.helpers.dom :as thd]
    [frontend-tests.helpers.mock :as mock]
    [okulary.core :as l]
@@ -607,6 +608,43 @@
     (t/is (= (/ (- 1024 120 8) 1024) (:wider result)) "wider: left, whole on the screen")
     (t/is (= 0.9 (:narrower result)) "narrower again: back where they were dropped")
     (t/is (= {:x 0.9 :y 0.5} (:stored result)) "the place dropped stays as it was")))
+
+(defn- kept-x
+  "Where the controls dropped at the `x` part of the screen show
+  (`--controls-x`), 160 px wide on the 1024 px screen of jsdom, as the
+  probe of the room at the edges of the screen reads `padding` (its
+  paddings as CSS gives them, `{:left \"44px\"}`)."
+  [x padding]
+  (swap! storage/user assoc ::phone-sheet/controls-place {:x x :y 0.5})
+  (let [result
+        (thd/with-dom
+          (fn [{:keys [root document window]}]
+            (let [computed (.-getComputedStyle window)]
+              ;; jsdom resolves no env(): the probe gets the paddings given
+              (set! (.-getComputedStyle window)
+                    (fn [node & more]
+                      (if (re-find #"safe-area-probe" (str (.-className node)))
+                        (clj->js (merge {"paddingTop" "0px" "paddingRight" "0px"
+                                         "paddingBottom" "0px" "paddingLeft" "0px"}
+                                        (update-keys padding #(str "padding" (str/capital (name %))))))
+                        (.apply computed window (into-array (cons node more))))))
+              (with-redefs [st/emit! (mock/emit-into (atom []))]
+                (thd/render! root (mf/element phone-sheet/screen-controls* #js {:index 0 :total 3}))
+                (let [bar (.querySelector document "[role=group]")]
+                  (set! (.-getBoundingClientRect bar)
+                        (fn [] #js {:left 0 :top 0 :width 160 :height 40}))
+                  (thd/act #(.dispatchEvent window (new (.-Event window) "resize")))
+                  (js/parseFloat (.getPropertyValue (.-style bar) "--controls-x")))))))]
+    (swap! storage/user dissoc ::phone-sheet/controls-place)
+    result))
+
+(t/deftest the-controls-on-the-screen-keep-clear-of-the-room-the-screen-keeps
+  (t/is (= (/ (+ 8 44 80) 1024) (kept-x 0 {:left "44px"}))
+        "at the left edge, clear of the sensor housing on the left")
+  (t/is (= (/ (- 1024 8 44 80) 1024) (kept-x 1 {:right "44px"}))
+        "at the right edge, clear of it on the right")
+  (t/is (= (/ (+ 8 80) 1024) (kept-x 0 {:left "auto"}))
+        "a padding that reads as no length: none"))
 
 (defn- pressed
   "What the controls on the screen emit as a finger presses their button
