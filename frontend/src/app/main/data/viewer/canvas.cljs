@@ -18,10 +18,10 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
-   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.uuid :as uuid]
+   [app.main.data.comments :as dcm]
    [app.main.router :as rt]))
 
 (defn- param
@@ -254,48 +254,15 @@
        (filter cfh/frame-shape?)
        (d/seek #(gsh/has-point? % point))))
 
-(defn- about-a-board?
-  "Whether a comment thread of `frame-id` is about a board: nil and the
-  root frame (`uuid/zero`) mean about none."
-  [frame-id]
-  (and (some? frame-id) (not= uuid/zero frame-id)))
-
-(defn thread-board
-  "The board of `objects` a comment thread of `frame-id` is about, or nil:
-  about none (see `about-a-board?`), or about one not there."
-  [objects frame-id]
-  (when (about-a-board? frame-id)
-    (get objects frame-id)))
-
-(defn clamp-to-board
-  "`position` of the page within `board`, as the prototype keeps a bubble
-  dropped: out of it, the prototype would show it no more. About no
-  board (nil), where it is."
-  [board position]
-  (if-let [{:keys [x1 y1 x2 y2]} (some-> board :points grc/points->rect)]
-    (gpt/point (mth/clamp (:x position) x1 x2)
-               (mth/clamp (:y position) y1 y2))
-    position))
-
-(defn with-moved-positions
-  "The comment `threads` at their stored `positions` (`{id {:position
-  :frame-id}}`, where the view mode keeps those moved)."
-  [threads positions]
-  (map (fn [{:keys [id] :as thread}]
-         (if-let [{:keys [position frame-id]} (get positions id)]
-           (assoc thread :position position :frame-id frame-id)
-           thread))
-       threads))
-
 (defn canvas-threads
   "The comment `threads` the canvas of `objects` shows: at their stored
-  `positions` (see `with-moved-positions`), those about a board it draws
-  or about none."
+  `positions` (see `dcm/with-moved-positions`), those about a board it
+  draws or about none."
   [threads positions objects]
   (into []
         (filter (fn [{:keys [frame-id]}]
-                  (or (not (about-a-board? frame-id)) (contains? objects frame-id))))
-        (with-moved-positions threads positions)))
+                  (or (not (dcm/about-a-board? frame-id)) (contains? objects frame-id))))
+        (dcm/with-moved-positions threads positions)))
 
 (def ^:private bubble-room
   "How much of a screen, from its top, shows a bubble beside an open

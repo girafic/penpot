@@ -215,7 +215,7 @@
             (when-let [from (get-view)]
               (let [{:keys [objects bounds]} (mf/ref-val live-ref)
                     screen (get-screen)
-                    board  (dvc/thread-board objects (:board target))
+                    board  (dcm/thread-board objects (:board target))
                     to     (cond
                              (= :page target)
                              (dvc/initial-view bounds screen)

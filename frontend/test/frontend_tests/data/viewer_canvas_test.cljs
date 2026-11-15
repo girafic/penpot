@@ -483,16 +483,16 @@
 (t/deftest the-board-a-thread-is-about
   (let [objects (dvc/canvas-objects page-objects)
         screen  (:screen ids)]
-    (t/is (= screen (:id (dvc/thread-board objects screen))))
-    (t/is (nil? (dvc/thread-board objects uuid/zero)) "the root frame is no board")
-    (t/is (nil? (dvc/thread-board objects nil)))
-    (t/is (nil? (dvc/thread-board objects (:hidden ids))) "a board the canvas does not draw")))
+    (t/is (= screen (:id (dcm/thread-board objects screen))))
+    (t/is (nil? (dcm/thread-board objects uuid/zero)) "the root frame is no board")
+    (t/is (nil? (dcm/thread-board objects nil)))
+    (t/is (nil? (dcm/thread-board objects (:hidden ids))) "a board the canvas does not draw")))
 
 (t/deftest a-bubble-drops-within-its-board
   (let [board (get page-objects (:screen ids))]
-    (t/is (= (gpt/point 400 1200) (dvc/clamp-to-board board (gpt/point 900 -50))) "at its edges")
-    (t/is (= (gpt/point 30 1300) (dvc/clamp-to-board board (gpt/point 30 1300))) "in it, where it is")
-    (t/is (= (gpt/point 900 -50) (dvc/clamp-to-board nil (gpt/point 900 -50)))
+    (t/is (= (gpt/point 400 1200) (dcm/clamp-to-board board (gpt/point 900 -50))) "at its edges")
+    (t/is (= (gpt/point 30 1300) (dcm/clamp-to-board board (gpt/point 30 1300))) "in it, where it is")
+    (t/is (= (gpt/point 900 -50) (dcm/clamp-to-board nil (gpt/point 900 -50)))
           "about no board, where it is")))
 
 (t/deftest the-canvas-goes-to-a-bubble-within-its-zooms
@@ -505,7 +505,7 @@
       (t/is (= dvc/max-zoom (:zoom view)) "a board of 40 px: as close as the canvas goes")
       (t/is (close-point? (gpt/point 187.5 203) (screen-point view 200 1500))
             "in the middle, a quarter down"))
-    (let [view (dvc/bubble-view start bounds phone-screen point (dvc/thread-board objects uuid/zero))]
+    (let [view (dvc/bubble-view start bounds phone-screen point (dcm/thread-board objects uuid/zero))]
       (t/is (= (:zoom start) (:zoom view)) "about no board: the zoom it has")
       (t/is (close-point? (gpt/point 187.5 203) (screen-point view 200 1500))
             "in the middle, a quarter down"))))

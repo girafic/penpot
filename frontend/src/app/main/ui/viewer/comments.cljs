@@ -15,7 +15,6 @@
    [app.common.geom.shapes :as gsh]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
-   [app.main.data.viewer.canvas :as dvc]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -179,7 +178,7 @@
                            (gmt/translate-matrix)))
 
         threads      (mf/with-memo [threads-map positions frame local profile]
-                       (->> (dvc/with-moved-positions (vals threads-map) positions)
+                       (->> (dcm/with-moved-positions (vals threads-map) positions)
                             (filter #(= (:frame-id %) (:id frame)))
                             (dcm/apply-filters local profile)
                             (filter (fn [{:keys [position]}]
@@ -198,7 +197,7 @@
          (mf/deps frame modifier2)
          (fn [thread [x y]]
            (let [position (->> (gpt/transform (gpt/point x y) modifier2)
-                               (dvc/clamp-to-board frame))]
+                               (dcm/clamp-to-board frame))]
              (st/emit! (dcm/update-comment-thread-position-on-viewer thread position)))))
 
         movable?     (partial dcm/thread-movable? can-edit? profile)

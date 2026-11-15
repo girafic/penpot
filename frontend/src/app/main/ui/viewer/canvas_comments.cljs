@@ -90,8 +90,8 @@
         (mf/use-fn
          (mf/deps anchor objects)
          (fn [thread [x y]]
-           (let [position (-> (dvc/thread-board objects (:frame-id thread))
-                              (dvc/clamp-to-board (gpt/add anchor (gpt/point x y))))]
+           (let [position (-> (dcm/thread-board objects (:frame-id thread))
+                              (dcm/clamp-to-board (gpt/add anchor (gpt/point x y))))]
              (st/emit! (dcm/update-comment-thread-position-on-viewer thread position)))))]
     [:> cmt/comment-floating-bubble*
      {:thread thread
@@ -130,7 +130,6 @@
         expanded    (:expanded local)
         draft       (:draft local)
 
-
         on-draft-cancel
         (mf/use-fn #(st/emit! (dcm/close-thread)))
 
@@ -148,6 +147,7 @@
                             (assoc :frame-id (:id board))))
                        (dcm/close-thread))
              (st/emit! (dcm/close-thread)))))
+
         ;; open, it stays so as the filters change
         open-thread (some #(when (= open-id (:id %)) %) all)
 
