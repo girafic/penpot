@@ -18,6 +18,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.uuid :as uuid]
@@ -253,19 +254,48 @@
        (filter cfh/frame-shape?)
        (d/seek #(gsh/has-point? % point))))
 
+(defn- about-a-board?
+  "Whether a comment thread of `frame-id` is about a board: nil and the
+  root frame (`uuid/zero`) mean about none."
+  [frame-id]
+  (and (some? frame-id) (not= uuid/zero frame-id)))
+
+(defn thread-board
+  "The board of `objects` a comment thread of `frame-id` is about, or nil:
+  about none (see `about-a-board?`), or about one not there."
+  [objects frame-id]
+  (when (about-a-board? frame-id)
+    (get objects frame-id)))
+
+(defn clamp-to-board
+  "`position` of the page within `board`, as the prototype keeps a bubble
+  dropped: out of it, the prototype would show it no more. About no
+  board (nil), where it is."
+  [board position]
+  (if-let [{:keys [x1 y1 x2 y2]} (some-> board :points grc/points->rect)]
+    (gpt/point (mth/clamp (:x position) x1 x2)
+               (mth/clamp (:y position) y1 y2))
+    position))
+
+(defn with-moved-positions
+  "The comment `threads` at their stored `positions` (`{id {:position
+  :frame-id}}`, where the view mode keeps those moved)."
+  [threads positions]
+  (map (fn [{:keys [id] :as thread}]
+         (if-let [{:keys [position frame-id]} (get positions id)]
+           (assoc thread :position position :frame-id frame-id)
+           thread))
+       threads))
+
 (defn canvas-threads
   "The comment `threads` the canvas of `objects` shows: at their stored
-  `positions` (`{id {:position :frame-id}}`, where the view mode keeps
-  those moved), those about a board it draws or about none."
+  `positions` (see `with-moved-positions`), those about a board it draws
+  or about none."
   [threads positions objects]
   (into []
-        (comp (map (fn [{:keys [id] :as thread}]
-                     (if-let [{:keys [position frame-id]} (get positions id)]
-                       (assoc thread :position position :frame-id frame-id)
-                       thread)))
-              (filter (fn [{:keys [frame-id]}]
-                        (or (nil? frame-id) (= uuid/zero frame-id) (contains? objects frame-id)))))
-        threads))
+        (filter (fn [{:keys [frame-id]}]
+                  (or (not (about-a-board? frame-id)) (contains? objects frame-id))))
+        (with-moved-positions threads positions)))
 
 (def ^:private bubble-room
   "How much of a screen, from its top, shows a bubble beside an open
@@ -286,11 +316,13 @@
   "The view of the canvas of `bounds` on a `screen` that shows the bubble
   at the `point` of the page above a thread docked at the bottom: in the
   middle, a quarter down, at least as close as its `board` (or nil) shows
-  as wide as the screen."
+  as wide as the screen, within the zooms of the canvas."
   [view bounds screen point board]
-  (let [zoom (cond-> (:zoom view)
-               (some? board)
-               (max (/ (:width screen) (max 1 (dm/get-in board [:selrect :width])))))]
+  (let [[lo hi] (zoom-range bounds screen)
+        zoom    (-> (cond-> (:zoom view)
+                      (some? board)
+                      (max (/ (:width screen) (max 1 (dm/get-in board [:selrect :width])))))
+                    (mth/clamp lo hi))]
     (clamp-view {:zoom zoom
                  :x    (- (:x point) (/ (:width screen) zoom 2))
                  :y    (- (:y point) (/ (:height screen) zoom 4))}

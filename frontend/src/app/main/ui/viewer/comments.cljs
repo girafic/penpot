@@ -13,10 +13,10 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
-   [app.common.math :as mth]
    [app.main.data.comments :as dcm]
    [app.main.data.event :as ev]
    [app.main.data.viewer :as dv]
+   [app.main.data.viewer.canvas :as dvc]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -135,14 +135,6 @@
           [:> icon* {:icon-id i/tick :size "s" :class (stl/css :icon)}])]]]]))
 
 
-(defn- update-thread-position
-  [positions {:keys [id] :as thread}]
-  (if-let [data (get positions id)]
-    (-> thread
-        (assoc :position (:position data))
-        (assoc :frame-id (:frame-id data)))
-    thread))
-
 ;; Only the size: the rest of the local state of the view mode changes at
 ;; each frame of an animation playing.
 (def ^:private ref:viewport-size
@@ -192,8 +184,7 @@
                            (gmt/translate-matrix)))
 
         threads      (mf/with-memo [threads-map positions frame local profile]
-                       (->> (vals threads-map)
-                            (map (partial update-thread-position positions))
+                       (->> (dvc/with-moved-positions (vals threads-map) positions)
                             (filter #(= (:frame-id %) (:id frame)))
                             (dcm/apply-filters local profile)
                             (filter (fn [{:keys [position]}]
@@ -214,10 +205,8 @@
         (mf/use-fn
          (mf/deps frame modifier2)
          (fn [thread [x y]]
-           (let [{:keys [x1 y1 x2 y2]} (-> frame :points grc/points->rect)
-                 position (gpt/transform (gpt/point x y) modifier2)
-                 position (gpt/point (mth/clamp (:x position) x1 x2)
-                                     (mth/clamp (:y position) y1 y2))]
+           (let [position (->> (gpt/transform (gpt/point x y) modifier2)
+                               (dvc/clamp-to-board frame))]
              (st/emit! (dcm/update-comment-thread-position-on-viewer thread position)))))
 
         ;; one's own threads, and all those of a file one edits

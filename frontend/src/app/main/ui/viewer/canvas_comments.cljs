@@ -15,8 +15,6 @@
    [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
-   [app.common.geom.rect :as grc]
-   [app.common.math :as mth]
    [app.main.data.comments :as dcm]
    [app.main.data.event :as ev]
    [app.main.data.viewer :as dv]
@@ -74,17 +72,6 @@
 (defn- anchor-style
   [point]
   #js {"--anchor-x" (:x point) "--anchor-y" (:y point)})
-
-(defn- within-board
-  "`position` of the page within the board of `objects` the `thread` is
-  about, as the prototype keeps a bubble dropped: out of it, the
-  prototype would show it no more."
-  [objects {:keys [frame-id]} position]
-  (if-let [board (get objects frame-id)]
-    (let [{:keys [x1 y1 x2 y2]} (-> board :points grc/points->rect)]
-      (gpt/point (mth/clamp (:x position) x1 x2)
-                 (mth/clamp (:y position) y1 y2)))
-    position))
 
 (mf/defc canvas-comments*
   "The comments of `page` of `file` on its canvas drawn of `objects` (see
@@ -159,7 +146,8 @@
         on-move-from
         (fn [anchor]
           (fn [thread [x y]]
-            (let [position (within-board objects thread (gpt/add anchor (gpt/point x y)))]
+            (let [position (-> (dvc/thread-board objects (:frame-id thread))
+                               (dvc/clamp-to-board (gpt/add anchor (gpt/point x y))))]
               (st/emit! (dcm/update-comment-thread-position-on-viewer thread position)))))
 
         bubble

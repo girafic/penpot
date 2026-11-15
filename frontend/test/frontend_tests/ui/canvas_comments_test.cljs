@@ -109,9 +109,9 @@
   (t/is (false? (focused-on-open? 10 20)) "where it shows, it stays"))
 
 (defn- dropped
-  "Where one's own bubble at 10 20 dropped after a drag of `dx dy` px of
-  the screen at zoom 2, as stored."
-  [dx dy]
+  "Where one's own bubble at 10 20 (of `attrs`) dropped after a drag of
+  `dx dy` px of the screen at zoom 2, as stored."
+  [dx dy & {:as attrs}]
   (let [drag! (fn [_ window _]
                 (let [node  (.querySelector (.-document window) "[class*=floating-preview-avatar]")
                       fire! (fn [type x y]
@@ -122,7 +122,7 @@
                   (fire! "pointerdown" 100 100)
                   (fire! "pointermove" (+ 100 dx) (+ 100 dy))
                   (fire! "pointerup" (+ 100 dx) (+ 100 dy))))
-        moved (->> (:emitted (rendered [(thread 1 10 20)] {} 2 drag!))
+        moved (->> (:emitted (rendered [(thread 1 10 20 attrs)] {} 2 drag!))
                    (filter #(= ::dcm/update-comment-thread-position-on-viewer (ptk/type %)))
                    (first))]
     (some-> moved (ptk/update {:comment-threads {(uuid/custom 4 1) {}}})
@@ -130,4 +130,6 @@
 
 (t/deftest ones-own-bubble-drops-within-its-board
   (t/is (= (gpt/point 25 40) (dropped 30 40)) "where it went, 30 40 px at zoom 2")
-  (t/is (= (gpt/point 100 40) (dropped 400 40)) "out of its board, at its edge"))
+  (t/is (= (gpt/point 100 40) (dropped 400 40)) "out of its board, at its edge")
+  (t/is (= (gpt/point 210 40) (dropped 400 40 :frame-id uuid/zero))
+        "about no board, where it went"))

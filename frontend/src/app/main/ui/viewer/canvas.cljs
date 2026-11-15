@@ -210,15 +210,16 @@
             (when-let [from (get-view)]
               (let [{:keys [objects bounds]} (mf/ref-val live-ref)
                     screen (get-screen)
+                    board  (dvc/thread-board objects (:board target))
                     to     (cond
                              (= :page target)
                              (dvc/initial-view bounds screen)
 
                              (some? (:point target))
-                             (dvc/bubble-view from bounds screen (:point target) (get objects (:board target)))
+                             (dvc/bubble-view from bounds screen (:point target) board)
 
                              :else
-                             (some-> (get objects (:board target)) (dvc/board-view bounds screen)))]
+                             (some-> board (dvc/board-view bounds screen)))]
                 (when (some? to)
                   (stop-anim!)
                   (vswap! state assoc :anim {:kind :tween :from from :to to :t0 (js/performance.now)})
