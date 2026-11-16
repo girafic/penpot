@@ -350,28 +350,38 @@
   next to nothing of its name (its icon goes below 15 px too)."
   15)
 
+(defn title-view
+  "Where the boards draw their titles for the view `vbox`: the view and
+  half of it round it, so that a pan brings titles in before they show;
+  nil without a view (everywhere)."
+  [vbox]
+  (when-let [{:keys [x y width height]} vbox]
+    (grc/make-rect (- x (/ width 2)) (- y (/ height 2)) (* 2 width) (* 2 height))))
+
 (defn title-shown?
-  "Whether the title of the board `frame` draws at `zoom` in the view
-  `vbox` (none: everywhere): not for a board beyond half the view round
-  it, nor for one narrower on the screen than a title can show, so that a
-  page of thousands of boards does not draw them all again at each step
-  of a zoom. The board `selected` always shows it."
-  [frame vbox zoom selected?]
+  "Whether the title of the board `frame` draws at `zoom` in the `view`
+  of `title-view` (none: everywhere): not for a board out of it, nor for
+  one narrower on the screen than a title can show, so that a page of
+  thousands of boards does not draw them all again at each step of a
+  zoom. A board is where its corners are drawn: the title hangs at one of
+  them, which a turned board has out of its unturned `:selrect`. The
+  board `selected` always shows it."
+  [frame view zoom selected?]
   (boolean
    (or selected?
        (and (>= (* zoom (if (vwu/title-transform-use-width? frame) (:width frame) (:height frame)))
                 min-title-px)
-            (or (nil? vbox)
-                (let [{:keys [x y width height]} vbox]
-                  (grc/overlaps-rects? (grc/make-rect (- x (/ width 2)) (- y (/ height 2))
-                                                      (* 2 width) (* 2 height))
-                                       (:selrect frame))))))))
+            (or (nil? view)
+                (grc/overlaps-rects? view (or (grc/points->rect (:points frame))
+                                              (:selrect frame))))))))
 
 (mf/defc frame-titles*
   {::mf/wrap [mf/memo]}
   [{:keys [objects base-objects zoom vbox selected focus is-show-artboard-names
            on-frame-enter on-frame-leave on-frame-select]}]
   (let [selected       (or selected #{})
+        ;; once a render, not once a board
+        view           (mf/with-memo [vbox] (title-view vbox))
         frame-ids      (mf/with-memo [base-objects]
                          (vec (ctt/get-frames-ids base-objects {:skip-copies? true :ignore-index? true})))
         shapes         (into [] (keep (d/getf objects)) frame-ids)
@@ -423,7 +433,7 @@
               (not= id uuid/zero)
               (or (dbg/enabled? :shape-titles) (= parent-id uuid/zero))
               (or (empty? focus) (contains? focus id))
-              (title-shown? shape vbox zoom (contains? selected id)))
+              (title-shown? shape view zoom (contains? selected id)))
          [:> frame-title* {:key (dm/str "frame-title-" id)
                            :frame shape
                            :zoom zoom
