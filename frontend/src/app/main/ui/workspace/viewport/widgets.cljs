@@ -10,6 +10,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
    [app.common.types.shape-tree :as ctt]
@@ -344,9 +345,31 @@
           (when (contains? animated id)
             id)))))
 
+(def ^:private min-title-px
+  "A board narrower than this on the screen draws no title: it would show
+  next to nothing of its name (its icon goes below 15 px too)."
+  15)
+
+(defn title-shown?
+  "Whether the title of the board `frame` draws at `zoom` in the view
+  `vbox` (none: everywhere): not for a board beyond half the view round
+  it, nor for one narrower on the screen than a title can show, so that a
+  page of thousands of boards does not draw them all again at each step
+  of a zoom. The board `selected` always shows it."
+  [frame vbox zoom selected?]
+  (boolean
+   (or selected?
+       (and (>= (* zoom (if (vwu/title-transform-use-width? frame) (:width frame) (:height frame)))
+                min-title-px)
+            (or (nil? vbox)
+                (let [{:keys [x y width height]} vbox]
+                  (grc/overlaps-rects? (grc/make-rect (- x (/ width 2)) (- y (/ height 2))
+                                                      (* 2 width) (* 2 height))
+                                       (:selrect frame))))))))
+
 (mf/defc frame-titles*
   {::mf/wrap [mf/memo]}
-  [{:keys [objects base-objects zoom selected focus is-show-artboard-names
+  [{:keys [objects base-objects zoom vbox selected focus is-show-artboard-names
            on-frame-enter on-frame-leave on-frame-select]}]
   (let [selected       (or selected #{})
         frame-ids      (mf/with-memo [base-objects]
@@ -399,7 +422,8 @@
        (when (and
               (not= id uuid/zero)
               (or (dbg/enabled? :shape-titles) (= parent-id uuid/zero))
-              (or (empty? focus) (contains? focus id)))
+              (or (empty? focus) (contains? focus id))
+              (title-shown? shape vbox zoom (contains? selected id)))
          [:> frame-title* {:key (dm/str "frame-title-" id)
                            :frame shape
                            :zoom zoom

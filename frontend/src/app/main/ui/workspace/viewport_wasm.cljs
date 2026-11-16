@@ -948,6 +948,7 @@
            :base-objects base-objects
            :selected selected
            :zoom zoom
+           :vbox vbox
            :is-show-artboard-names show-artboard-names?
            :on-frame-enter on-frame-enter
            :on-frame-leave on-frame-leave
