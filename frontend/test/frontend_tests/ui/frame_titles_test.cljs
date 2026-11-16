@@ -14,7 +14,9 @@
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
    [app.main.ui.workspace.viewport.widgets :as widgets]
-   [cljs.test :as t :include-macros true]))
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.dom :as thd]
+   [rumext.v2 :as mf]))
 
 (defn- board
   [x y width height & {:as attrs}]
@@ -66,3 +68,65 @@
 (t/deftest the-board-selected-always-draws-its-title
   (t/is (widgets/title-shown? (board 100 100 400 300) view 0.01 true))
   (t/is (widgets/title-shown? (board 5000 5000 400 300) view 1 true)))
+
+;; --- The hover of a title that goes under the pointer
+
+(mf/defc hover-probe*
+  "A title as far as the pointer goes: a click on its first button
+  enters it, on its second leaves it."
+  {::mf/private true}
+  [{:keys [id on-enter on-leave]}]
+  (let [[enter leave] (widgets/use-title-hover id on-enter on-leave)]
+    [:div
+     [:button {:id "enter" :on-click enter}]
+     [:button {:id "leave" :on-click leave}]]))
+
+(mf/defc probes*
+  {::mf/private true}
+  [{:keys [shown on-enter on-leave]}]
+  (when shown
+    [:> hover-probe* {:id "board" :on-enter on-enter :on-leave on-leave}]))
+
+(defn- with-probe
+  "Call `f` with fns that render the probe shown or not, click its
+  buttons and give the calls the callbacks got so far."
+  [f]
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [calls    (atom [])
+            on-enter (fn [id] (swap! calls conj [:enter id]))
+            on-leave (fn [id] (swap! calls conj [:leave id]))
+            show!    (fn [shown]
+                       (thd/render! root (mf/element probes* #js {:shown shown
+                                                                  :onEnter on-enter
+                                                                  :onLeave on-leave})))
+            click!   (fn [id] (thd/click! window (.getElementById document id)))]
+        (f {:show! show! :click! click! :calls #(deref calls)})))))
+
+(t/deftest a-title-gone-under-the-pointer-leaves-its-hover
+  (with-probe
+    (fn [{:keys [show! click! calls]}]
+      (show! true)
+      (click! "enter")
+      (t/is (= [[:enter "board"]] (calls)))
+      (show! true)
+      (t/is (= [[:enter "board"]] (calls)) "a render tells nothing")
+      (show! false)
+      (t/is (= [[:enter "board"] [:leave "board"]] (calls))
+            "zoomed out until it is too narrow: it goes, and the board's hover with it"))))
+
+(t/deftest a-title-the-pointer-left-tells-nothing-as-it-goes
+  (with-probe
+    (fn [{:keys [show! click! calls]}]
+      (show! true)
+      (click! "enter")
+      (click! "leave")
+      (show! false)
+      (t/is (= [[:enter "board"] [:leave "board"]] (calls)) "one leave, not two"))))
+
+(t/deftest a-title-never-hovered-tells-nothing-as-it-goes
+  (with-probe
+    (fn [{:keys [show! calls]}]
+      (show! true)
+      (show! false)
+      (t/is (= [] (calls))))))

@@ -126,6 +126,38 @@
               :stroke-width (/ 1 zoom)}}]))
 
 
+(defn use-title-hover
+  "The handlers of the pointer entering and leaving the title of the board
+  `frame-id`, which tell `on-frame-enter` and `on-frame-leave` its id. A
+  title that goes while the pointer is on it (zoomed out until it is too
+  narrow to draw, a small board deselected) gets no pointer-leave from
+  the browser: it tells `on-frame-leave` as it goes, else the board kept
+  its hover outline."
+  [frame-id on-frame-enter on-frame-leave]
+  (let [hovered-ref (mf/use-ref false)
+
+        on-enter
+        (mf/use-fn
+         (mf/deps frame-id on-frame-enter)
+         (fn [_]
+           (mf/set-ref-val! hovered-ref true)
+           (on-frame-enter frame-id)))
+
+        on-leave
+        (mf/use-fn
+         (mf/deps frame-id on-frame-leave)
+         (fn [_]
+           (mf/set-ref-val! hovered-ref false)
+           (on-frame-leave frame-id)))]
+
+    (mf/with-effect [frame-id on-frame-leave]
+      (fn []
+        (when (mf/ref-val hovered-ref)
+          (mf/set-ref-val! hovered-ref false)
+          (on-frame-leave frame-id))))
+
+    [on-enter on-leave]))
+
 (mf/defc frame-title*
   {::mf/wrap [mf/memo
               #(mf/deferred % ts/raf)]
@@ -166,17 +198,8 @@
              (when-not workspace-read-only?
                (st/emit! (dw/show-shape-context-menu {:position position :shape frame}))))))
 
-        on-pointer-enter
-        (mf/use-fn
-         (mf/deps (:id frame) on-frame-enter)
-         (fn [_]
-           (on-frame-enter (:id frame))))
-
-        on-pointer-leave
-        (mf/use-fn
-         (mf/deps (:id frame) on-frame-leave)
-         (fn [_]
-           (on-frame-leave (:id frame))))
+        [on-pointer-enter on-pointer-leave]
+        (use-title-hover (:id frame) on-frame-enter on-frame-leave)
 
         main-instance?   (ctk/main-instance? frame)
         is-variant?      (:is-variant-container frame)
@@ -223,23 +246,24 @@
                (reset! edition* true)
                (st/emit! (dw/start-rename-shape frame-id))))))
 
+        ;; a rename that ends leaves the title as the pointer does
         accept-edit
         (mf/use-fn
-         (mf/deps frame-id)
+         (mf/deps frame-id on-pointer-leave)
          (fn []
            (let [name-input     (mf/ref-val ref)
                  name           (str/trim (dom/get-value name-input))]
              (reset! edition* false)
              (st/emit! (dw/rename-shape-or-variant frame-id name))
-             (on-frame-leave frame-id))))
+             (on-pointer-leave nil))))
 
         cancel-edit
         (mf/use-fn
-         (mf/deps frame-id)
+         (mf/deps frame-id on-pointer-leave)
          (fn []
            (reset! edition* false)
            (st/emit! (dw/end-rename-shape frame-id nil))
-           (on-frame-leave frame-id)))
+           (on-pointer-leave nil)))
 
         on-key-down
         (mf/use-fn
