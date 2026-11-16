@@ -406,8 +406,8 @@
         value (some (fn [[value n]] (when (pos? n) value))
                     (get @root-attributes attr))]
     (if (some? value)
-      (.setAttribute root attr value)
-      (.removeAttribute root attr))))
+      (dom/set-attribute! root attr value)
+      (dom/remove-attribute! root attr))))
 
 (defn use-root-attribute
   "While the component shows, the root element of the document holds the

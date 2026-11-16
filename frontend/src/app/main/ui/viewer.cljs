@@ -703,6 +703,9 @@
           (let [[sw sh] stage-size]
             (when (and (some? device) (pos? sw) (pos? sh))
               (dvd/layout device sw sh dvd/stage-padding nil true))))
+        ;; the device alone in the preview of the workspace: the page,
+        ;; the layout and the background show round it as one
+        device-only? (and (true? preview) (some? device-layout))
         ;; whether a device showed the board last, to fit it again once
         ;; the device goes
         framed-ref (mf/use-ref false)
@@ -1289,7 +1292,7 @@
 
     ;; what the page as a whole shows by (see `viewer.scss`)
     (hooks/use-root-attribute "data-page-phone" (when phone? "true"))
-    (hooks/use-root-attribute "data-page-device-only" (when (and (true? preview) (some? device-layout)) "true"))
+    (hooks/use-root-attribute "data-page-device-only" (when device-only? "true"))
 
     [:div#viewer-layout
      {:class (stl/css-case
@@ -1302,12 +1305,12 @@
       :data-phone phone?
       ;; the device alone, on the workspace (see `.window.framed` of
       ;; the preview)
-      :data-device-only (and (true? preview) (some? device-layout))}
+      :data-device-only device-only?}
 
 
      [:div {:ref content-ref
             :class (stl/css :viewer-content)
-            :style (vbg/background-style (vbg/background base-page (and (true? preview) (some? device-layout)))
+            :style (vbg/background-style (vbg/background base-page device-only?)
                                          (first content-size)
                                          (second content-size))}
 

@@ -9,6 +9,7 @@
   they show, which CSS styles the whole page by instead of a `:has()` on
   `html` or `body` (each change of the DOM restyled all of it)."
   (:require
+   [app.main.ui.dashboard.phone-drawer :refer [drawer-toggle*]]
    [app.main.ui.hooks :as hooks]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.dom :as thd]
@@ -58,3 +59,30 @@
       (t/is (= "true" (attr document)) "turned to a phone layout")
       (thd/render! root (mf/element page* #js {:attr "data-page-phone" :value nil}))
       (t/is (nil? (attr document)) "and back"))))
+
+(t/deftest a-page-changes-its-value-as-it-shows
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (thd/render! root (mf/element page* #js {:attr "data-page-phone" :value "a"}))
+      (t/is (= "a" (attr document)))
+      (thd/render! root (mf/element page* #js {:attr "data-page-phone" :value "b"}))
+      (t/is (= "b" (attr document)) "the new value, the old one no longer counted")
+      (thd/render! root (mf/element pages* #js {}))
+      (t/is (nil? (attr document))))))
+
+(defn- drawer
+  [document]
+  (.getAttribute (.-documentElement document) "data-page-drawer"))
+
+(t/deftest the-page-behind-an-open-drawer-scrolls-not
+  (thd/with-dom
+    (fn [{:keys [root document]}]
+      (let [render! #(thd/render! root (mf/element drawer-toggle* #js {:isOpen %
+                                                                       :onOpen (fn [])
+                                                                       :onClose (fn [])}))]
+        (render! false)
+        (t/is (nil? (drawer document)) "closed")
+        (render! true)
+        (t/is (= "open" (drawer document)) "open: the root stops the page (see `phone_drawer.scss`)")
+        (render! false)
+        (t/is (nil? (drawer document)) "closed again")))))

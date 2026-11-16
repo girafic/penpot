@@ -42,6 +42,10 @@
   min-block-size: 100lvh;
 }
 
+// both attributes, though the second never comes without the first: they
+// weigh as `body:has(.dashboard[data-phone="true"])` did (0,2,1) and win
+// over `[data-page-phone="true"] body` of viewer.scss (0,1,1); one alone
+// would tie with it and leave the winner to the order of the stylesheets
 :global([data-page-phone="true"][data-page-scroll="true"] body),
 :global([data-page-phone="true"][data-page-scroll="true"] #app) {
   block-size: auto;

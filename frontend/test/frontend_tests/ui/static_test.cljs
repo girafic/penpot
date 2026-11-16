@@ -100,6 +100,13 @@
   [document selector]
   (some-> (.querySelector document selector) (.getAttribute "data-phone")))
 
+(defn- root-phone
+  "The `data-page-phone` of the root, which the CSS styles the page as a
+  whole by (`hooks/use-root-attribute`): there while a page of a phone
+  shows, else none."
+  [document]
+  (.getAttribute (.-documentElement document) "data-page-phone"))
+
 (defn- close-button?
   [document]
   (some? (.querySelector document (str "[aria-label=\"" (tr "labels.close") "\"]"))))
@@ -107,68 +114,70 @@
 (defn- login
   [document]
   {:phone (phone-attr document "#root > [data-phone]")
+   :root  (root-phone document)
    :close (close-button? document)})
 
 (t/deftest ^:async link-login-on-a-phone
   (let [login-modal (mf/element @#'static/login-modal* #js {})]
-    (t/is (= {:phone "true" :close false}
+    (t/is (= {:phone "true" :root "true" :close false}
              (await (rendered login-modal :viewer true login)))
           "a view mode link of a phone: the login is its page, nothing to close")
-    (t/is (= {:phone "false" :close true}
+    (t/is (= {:phone "false" :root nil :close true}
              (await (rendered login-modal :workspace true login)))
           "a workspace link of a phone: a desktop page, the card of a desktop")
-    (t/is (= {:phone "false" :close true}
+    (t/is (= {:phone "false" :root nil :close true}
              (await (rendered login-modal :viewer false login)))
           "a view mode link of a desktop")))
 
 
 (defn- overlay-phone
   [document]
-  (phone-attr document "#root > [data-phone]"))
+  [(phone-attr document "#root > [data-phone]") (root-phone document)])
 
 (t/deftest ^:async request-dialog-on-a-phone
   (let [dialog (mf/element static/request-dialog* #js {:title "No access"
                                                        :buttonText "Ask"
                                                        :cancelText "Back"
                                                        :onClose (fn [])})]
-    (t/is (= "true" (await (rendered dialog :viewer true overlay-phone)))
+    (t/is (= ["true" "true"] (await (rendered dialog :viewer true overlay-phone)))
           "a view mode link of a phone: a sheet from the bottom")
-    (t/is (= "true" (await (rendered dialog :dashboard-recent true overlay-phone)))
+    (t/is (= ["true" "true"] (await (rendered dialog :dashboard-recent true overlay-phone)))
           "a dashboard link of a phone")
-    (t/is (= "false" (await (rendered dialog :workspace true overlay-phone)))
+    (t/is (= ["false" nil] (await (rendered dialog :workspace true overlay-phone)))
           "a workspace link of a phone: the dialog of a desktop")
-    (t/is (= "false" (await (rendered dialog :viewer false overlay-phone)))
+    (t/is (= ["false" nil] (await (rendered dialog :viewer false overlay-phone)))
           "a desktop")))
 
 (defn- drawn
-  "How many elements the context draws: the desktop page it fakes and
-  what it wraps, or what it wraps alone."
+  "How many elements the context draws (the desktop page it fakes and
+  what it wraps, or what it wraps alone), and the root's mark of a page
+  of a phone."
   [document]
-  (.. (.querySelector document "#root") -children -length))
+  [(.. (.querySelector document "#root") -children -length) (root-phone document)])
 
 (t/deftest ^:async context-on-a-phone
   (let [context (fn [props]
                   (mf/element static/context-wrapper*
                               (js/Object.assign #js {:children (mf/html [:p "dialog"])} props)))]
-    (t/is (= 1 (await (rendered (context #js {:isViewer true}) :viewer true drawn)))
+    (t/is (= [1 "true"] (await (rendered (context #js {:isViewer true}) :viewer true drawn)))
           "a phone's view mode has no bars to fake")
-    (t/is (= 1 (await (rendered (context #js {:isDashboard true}) :dashboard-recent true drawn)))
+    (t/is (= [1 "true"] (await (rendered (context #js {:isDashboard true}) :dashboard-recent true drawn)))
           "nor its dashboard a sidebar")
-    (t/is (= 2 (await (rendered (context #js {:isWorkspace true}) :workspace true drawn)))
+    (t/is (= [2 nil] (await (rendered (context #js {:isWorkspace true}) :workspace true drawn)))
           "a phone keeps the workspace a desktop page")
-    (t/is (= 2 (await (rendered (context #js {:isWorkspace true}) :workspace false drawn)))
+    (t/is (= [2 nil] (await (rendered (context #js {:isWorkspace true}) :workspace false drawn)))
           "a desktop")))
 
 (t/deftest ^:async error-page-on-a-phone
   (let [page  (mf/element static/error-container* #js {:children (mf/html [:p "invite invalid"])})
-        phone #(phone-attr % "#root > section[data-phone]")]
-    (t/is (= "true" (await (rendered page :auth-verify-token true phone)))
+        phone #(vector (phone-attr % "#root > section[data-phone]") (root-phone %))]
+    (t/is (= ["true" "true"] (await (rendered page :auth-verify-token true phone)))
           "an invitation no longer valid, on a phone: its header clear of the notch")
-    (t/is (= "true" (await (rendered page :dashboard-recent true phone)))
+    (t/is (= ["true" "true"] (await (rendered page :dashboard-recent true phone)))
           "a dashboard that does not exist")
-    (t/is (= "false" (await (rendered page :workspace true phone)))
+    (t/is (= ["false" nil] (await (rendered page :workspace true phone)))
           "a phone keeps the workspace a desktop page")
-    (t/is (= "false" (await (rendered page :auth-verify-token false phone)))
+    (t/is (= ["false" nil] (await (rendered page :auth-verify-token false phone)))
           "a desktop")))
 
 ;; --- The viewport tag, set around the page and the exception page
