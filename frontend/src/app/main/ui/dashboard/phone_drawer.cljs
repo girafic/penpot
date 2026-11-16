@@ -13,6 +13,7 @@
   (:require
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.hooks :as hooks]
    [app.util.i18n :refer [tr]]
    [rumext.v2 :as mf]))
 
@@ -20,6 +21,8 @@
   "The button that opens the drawer, and while it is open the backdrop
   behind it, which closes it."
   [{:keys [is-open on-open on-close]}]
+  ;; the page behind it scrolls not (see `phone_drawer.scss`)
+  (hooks/use-root-attribute "data-page-drawer" (when is-open "open"))
   [:*
    ;; at the top of the page as its header, not of the screen: the
    ;; rubber of the page at its ends takes it along with the header

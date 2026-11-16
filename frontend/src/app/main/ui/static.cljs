@@ -30,6 +30,7 @@
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.ds.foundations.assets.raw-svg :refer [raw-svg*]]
    [app.main.ui.ds.product.loader :refer [loader*]]
+   [app.main.ui.hooks :as hooks]
    [app.main.ui.viewer.header :as viewer.header]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -48,9 +49,11 @@
   route it keeps at its own width (`touch/phone-layout?`); a workspace
   link stays a desktop page there."
   []
-  (let [screen (dm/get-in (mf/use-ctx ctx/current-route) [:data :name])]
-    (mf/with-memo [screen]
-      (touch/phone-layout? screen (touch/phone?)))))
+  (let [screen (dm/get-in (mf/use-ctx ctx/current-route) [:data :name])
+        phone? (mf/with-memo [screen]
+                 (touch/phone-layout? screen (touch/phone?)))]
+    (hooks/use-root-attribute "data-page-phone" (when phone? "true"))
+    phone?))
 
 (mf/defc error-container*
   [{:keys [children]}]

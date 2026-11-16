@@ -37,7 +37,7 @@
 
 // the page behind an open drawer scrolls not (the page of a phone
 // scrolls as a website does, see dashboard.scss)
-:global(html):has(.drawer-backdrop) {
+:global(html[data-page-drawer="open"]) {
   overflow: hidden;
 }
 

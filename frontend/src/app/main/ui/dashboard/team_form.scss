@@ -47,7 +47,7 @@
 }
 
 // on a phone as wide as its dialog, which fits its screen (`modal.scss`)
-:global(body:has([data-phone="true"])) .team-form {
+:global([data-page-phone="true"] body) .team-form {
   min-inline-size: 0;
 }
 

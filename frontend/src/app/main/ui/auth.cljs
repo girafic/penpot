@@ -16,6 +16,7 @@
    [app.main.ui.auth.register :refer [register-page* register-success-page* register-validate-page* terms-service-privacy-policy*]]
    [app.main.ui.ds.foundations.assets.raw-svg :refer [raw-svg*] :as raw-svg]
    [app.main.ui.ds.foundations.typography.heading :refer [heading*]]
+   [app.main.ui.hooks :as hooks]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.touch :as touch]
@@ -40,6 +41,8 @@
         ;; a phone lays the page out for itself (see `auth.scss`)
         phone?
         (mf/with-memo [] (touch/phone?))]
+
+    (hooks/use-root-attribute "data-page-phone" (when phone? "true"))
 
     (mf/with-effect []
       (dom/set-html-title (tr "title.default")))

@@ -112,7 +112,7 @@
 
 // a phone shows the questions over all of its screen, as wide as it,
 // what they show wrapping (see `[data-phone]` in `dashboard.scss`)
-:global(body:has([data-phone="true"])) .modal-container {
+:global([data-page-phone="true"] body) .modal-container {
   @include phone-safe-padding(var(--sp-xxl), var(--sp-xl));
 
   inline-size: 100vw;
@@ -124,23 +124,23 @@
   border-radius: 0;
 }
 
-:global(body:has([data-phone="true"])) .step {
+:global([data-page-phone="true"] body) .step {
   inline-size: 100%;
   max-inline-size: none;
 }
 
-:global(body:has([data-phone="true"])) .modal-question {
+:global([data-page-phone="true"] body) .modal-question {
   grid-template-rows: auto;
 }
 
-:global(body:has([data-phone="true"])) .radio-image {
+:global([data-page-phone="true"] body) .radio-image {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--sp-l) var(--sp-m);
 }
 
 // where to start, six pictures of 132px each: two in a row on a phone (three
 // are wider than its screen and push the step past it, its title too)
-:global(body:has([data-phone="true"])) .start-options {
+:global([data-page-phone="true"] body) .start-options {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-m);
 }

@@ -47,15 +47,15 @@
   min-block-size: 100lvh;
 }
 
-:global(body):has(.dashboard[data-phone="true"]),
-:global(#app):has(.dashboard[data-phone="true"]) {
+:global([data-page-phone="true"][data-page-scroll="true"] body),
+:global([data-page-phone="true"][data-page-scroll="true"] #app) {
   block-size: auto;
   overflow: visible;
 }
 
 // and gives as rubber at its ends, as the dashboard does
-:global(html):has(.dashboard[data-phone="true"]),
-:global(body):has(.dashboard[data-phone="true"]) {
+:global(html[data-page-phone="true"][data-page-scroll="true"]),
+:global([data-page-phone="true"][data-page-scroll="true"] body) {
   overscroll-behavior: auto;
 }
 

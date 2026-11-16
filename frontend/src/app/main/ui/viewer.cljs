@@ -1287,6 +1287,10 @@
              fonts (into #{} (keep :font-id) text-nodes)]
          (run! fonts/ensure-loaded! fonts))))
 
+    ;; what the page as a whole shows by (see `viewer.scss`)
+    (hooks/use-root-attribute "data-page-phone" (when phone? "true"))
+    (hooks/use-root-attribute "data-page-device-only" (when (and (true? preview) (some? device-layout)) "true"))
+
     [:div#viewer-layout
      {:class (stl/css-case
               :force-visible (:show-thumbnails local)

@@ -16,6 +16,7 @@
    [app.main.store :as st]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
+   [app.util.globals :as globals]
    [app.util.keyboard :as kbd]
    [app.util.storage :as storage]
    [app.util.timers :as ts]
@@ -393,6 +394,37 @@
     (mf/with-effect [v]
       (mf/set-ref-val! ref v))
     ref))
+
+(defonce ^:private root-attributes
+  ;; how many shown components ask for each value of each attribute
+  ;; of the root element (see `use-root-attribute`)
+  (volatile! {}))
+
+(defn- sync-root-attribute!
+  [attr]
+  (let [root  (.-documentElement ^js globals/document)
+        value (some (fn [[value n]] (when (pos? n) value))
+                    (get @root-attributes attr))]
+    (if (some? value)
+      (.setAttribute root attr value)
+      (.removeAttribute root attr))))
+
+(defn use-root-attribute
+  "While the component shows, the root element of the document holds the
+  attribute `attr` with `value` (a string; nothing for nil), so that CSS
+  can style the whole page by it (`[data-page-phone=\"true\"] body`). Unlike
+  `:has()` on `html` or `body`, which makes the browser style the whole
+  document anew as its DOM changes (each frame of a pan on a big file),
+  an attribute of the root costs nothing then. The components asking for
+  an attribute count: it stays while one of them shows."
+  [attr value]
+  (mf/with-layout-effect [attr value]
+    (when (some? value)
+      (vswap! root-attributes update-in [attr value] (fnil inc 0))
+      (sync-root-attribute! attr)
+      (fn []
+        (vswap! root-attributes update-in [attr value] dec)
+        (sync-root-attribute! attr)))))
 
 ;; FIXME: replace with rumext
 (defn use-equal-memo

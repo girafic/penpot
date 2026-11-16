@@ -355,8 +355,8 @@
 
 // a device alone in the preview: the workspace shows round it, under the
 // shadow it casts
-:global(body:has([data-device-only="true"])),
-:global(#app:has([data-device-only="true"])),
+:global([data-page-device-only="true"] body),
+:global([data-page-device-only="true"] #app),
 [data-device-only="true"] .viewer-content {
   background-color: transparent;
 }
@@ -408,13 +408,13 @@
   page itself never bounces nor reloads by a pull, and is as high as what
   the browser shows (`100vh` there is as high as without its bars: the
   page scrolled, the board, its fixed layers and all) */
-:global(html:has([data-phone="true"])),
-:global(body:has([data-phone="true"])) {
+:global(html[data-page-phone="true"]),
+:global([data-page-phone="true"] body) {
   overscroll-behavior: none;
 }
 
-:global(body:has([data-phone="true"])),
-:global(#app:has([data-phone="true"])) {
+:global([data-page-phone="true"] body),
+:global([data-page-phone="true"] #app) {
   block-size: 100dvh;
 }
 

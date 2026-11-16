@@ -36,14 +36,14 @@
 // second one above its options, which it dims: down on the bottom edge, as
 // the options once grown (see `phone-sheet/sheet*`), which floated, showed
 // a strip of them below it
-:global(body:has([data-phone="true"])) .share-modal {
+:global([data-page-phone="true"] body) .share-modal {
   position: fixed;
   inset: auto 0 0;
   margin: 0;
 }
 
 // the whole screen: not as narrow as a dialog of a phone (see `modal.scss`)
-:global(body:has([data-phone="true"])) .phone-backdrop {
+:global([data-page-phone="true"] body) .phone-backdrop {
   display: block;
   position: fixed;
   inset: 0;
@@ -58,7 +58,7 @@
   }
 }
 
-:global(body:has([data-phone="true"])) .share-link-dialog {
+:global([data-page-phone="true"] body) .share-link-dialog {
   min-inline-size: 0;
   max-inline-size: none;
   max-block-size: 85dvh;

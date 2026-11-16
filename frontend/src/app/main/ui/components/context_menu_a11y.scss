@@ -179,7 +179,7 @@
 // on the pages a phone lays out for itself (the dashboard, the settings)
 // its entries are as large as the text of a phone and as high as a
 // finger needs, as the other menus there (see `common/base.scss`)
-:global(:root:has([data-phone="true"])) .context-menu-items .context-menu-action {
+:global(:root[data-page-phone="true"]) .context-menu-items .context-menu-action {
   font-size: 1rem;
   block-size: auto;
   min-block-size: 2.5rem;

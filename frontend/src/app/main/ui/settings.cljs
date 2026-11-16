@@ -53,6 +53,10 @@
 
     (hooks/use-shortcuts ::dashboard sc/shortcuts :dashboard)
 
+    ;; the page of a phone scrolls as a website does (see `settings.scss`)
+    (hooks/use-root-attribute "data-page-phone" (when phone? "true"))
+    (hooks/use-root-attribute "data-page-scroll" (when phone? "true"))
+
     ;; a page chosen in the drawer closes it
     (mf/with-effect [section]
       (reset! drawer* false))

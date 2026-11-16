@@ -138,11 +138,11 @@
 }
 
 // a phone: the three steps in the width of its screen, their lines short
-:global(body:has([data-phone="true"])) .import-step {
+:global([data-page-phone="true"] body) .import-step {
   gap: var(--sp-xs);
 }
 
-:global(body:has([data-phone="true"])) .step-line {
+:global([data-page-phone="true"] body) .step-line {
   min-inline-size: var(--sp-s);
   margin-inline: var(--sp-xs);
 }

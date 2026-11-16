@@ -13,7 +13,7 @@
 
 // on a phone the icons are a quarter larger, a finger's size, the type
 // as it is
-:global(body:has([data-phone="true"])) .icon {
+:global([data-page-phone="true"] body) .icon {
   &[width="16"] {
     inline-size: px2rem(20);
     block-size: px2rem(20);

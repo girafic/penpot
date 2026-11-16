@@ -43,7 +43,7 @@
 
 // on a phone as wide as the screen, the picture a band above the text,
 // scrolling when it is taller than the screen
-:global(body:has([data-phone="true"])) {
+:global([data-page-phone="true"] body) {
   // the dialogs' own limit (modal.scss) would narrow it to the left
   .modal-overlay {
     flex-direction: column;

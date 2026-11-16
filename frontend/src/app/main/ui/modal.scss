@@ -17,10 +17,13 @@
 // On a phone (its dashboard, settings or view mode) no dialog is wider than
 // its screen, 8px from its edges, whatever its width or minimum on a
 // computer: a dialog centers in an overlay, the child of the wrapper. Kept
-// below the rules of a dialog of its own for a phone (`body:has(...) .x`),
-// which win by the specificity of `body`.
+// below the rules of a dialog of its own for a phone
+// (`[data-page-phone="true"] body .x`), which win by the specificity of
+// `body`. The root holds `data-page-phone` (`hooks/use-root-attribute`):
+// a `:has()` on the whole page made the browser style it all anew as its
+// DOM changed.
 /* stylelint-disable-next-line selector-max-compound-selectors */
-:global(:has([data-phone="true"])) .modal-wrapper > * > * {
+:global([data-page-phone="true"]) .modal-wrapper > * > * {
   min-inline-size: 0;
   max-inline-size: calc(100vw - var(--sp-l));
 }

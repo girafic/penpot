@@ -202,6 +202,7 @@
    [frontend-tests.ui.organization-team-switch-test]
    [frontend-tests.ui.phone-sheet-test]
    [frontend-tests.ui.prototype-preview-test]
+   [frontend-tests.ui.root-attribute-test]
    [frontend-tests.ui.routes-test]
    [frontend-tests.ui.settings-password-schema-test]
    [frontend-tests.ui.settings-shortcuts-test]
@@ -463,6 +464,7 @@
    'frontend-tests.ui.organization-team-switch-test
    'frontend-tests.ui.mcp-authorize-test
    'frontend-tests.ui.prototype-preview-test
+   'frontend-tests.ui.root-attribute-test
    'frontend-tests.ui.routes-test
    'frontend-tests.render-dimensions-test
    'frontend-tests.text-editor-paste-guard-test

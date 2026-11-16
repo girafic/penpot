@@ -142,7 +142,7 @@
 
 // a phone shows the team step over all of its screen, as wide as it, what
 // a team is above the form to make one (see `questions.scss`)
-:global(body:has([data-phone="true"])) .modal-container {
+:global([data-page-phone="true"] body) .modal-container {
   @include phone-safe-padding(var(--sp-xxl), var(--sp-xl));
 
   inline-size: 100vw;
@@ -152,21 +152,21 @@
   border-radius: 0;
 }
 
-:global(body:has([data-phone="true"])) .modal-sections {
+:global([data-page-phone="true"] body) .modal-sections {
   grid-template-columns: minmax(0, 1fr);
   block-size: auto;
 }
 
-:global(body:has([data-phone="true"])) .modal-info {
+:global([data-page-phone="true"] body) .modal-info {
   padding: 0;
 }
 
-:global(body:has([data-phone="true"])) .modal-info-image {
+:global([data-page-phone="true"] body) .modal-info-image {
   max-block-size: px2rem(160);
   align-self: center;
 }
 
-:global(body:has([data-phone="true"])) .modal-separator-line {
+:global([data-page-phone="true"] body) .modal-separator-line {
   inline-size: 100%;
   block-size: $sz-1;
 }

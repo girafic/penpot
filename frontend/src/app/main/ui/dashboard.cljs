@@ -381,6 +381,10 @@
     (use-nitrate-entry-popup (:onboarding-viewed props) (:nitrate-onboarding-viewed props))
     (use-pending-action pending-action-id)
 
+    ;; the page of a phone scrolls as a website does (see `dashboard.scss`)
+    (hooks/use-root-attribute "data-page-phone" (when phone? "true"))
+    (hooks/use-root-attribute "data-page-scroll" (when phone? "true"))
+
     [:& (mf/provider ctx/current-project-id) {:value project-id}
      [:> modal-container*]
      ;; NOTE: dashboard events and other related functions assumes
